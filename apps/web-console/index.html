@@ -132,18 +132,21 @@
             </div>
           </div>
 
-          <!-- Quick Action Callout if 0 nodes -->
-          <div id="overview-onboarding-callout" class="card callout-card hidden">
+          <!-- First-Run Experience Callout for Clean Install -->
+          <div id="overview-onboarding-callout" class="card callout-card hidden" style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.12) 0%, rgba(15, 23, 42, 0.9) 100%); border: 1px solid rgba(6, 182, 212, 0.35);">
             <div class="callout-content">
-              <div class="callout-icon">🚀</div>
+              <div class="callout-icon" style="font-size: 2.2rem;">⚡</div>
               <div>
-                <h3>No compute devices currently connected</h3>
-                <p>Voluntarily enroll your Android smartphone or spin up a local test cluster to provide compute capacity for edge workloads.</p>
+                <h3 style="font-size: 1.25rem; font-weight: 700; color: #f8fafc; margin-bottom: 0.25rem;">Welcome to SPaaS</h3>
+                <p style="color: #94a3b8; font-size: 0.95rem; margin-bottom: 0.25rem;">Turn spare devices into secure, voluntary compute workers with WASM sandboxing and cryptographic verification.</p>
+                <p class="text-muted" style="font-size: 0.85rem;">No compute devices are currently registered. Choose an option below to guide your first successful computation:</p>
               </div>
             </div>
-            <div class="callout-actions">
-              <button id="btn-callout-add-device" class="btn btn-primary">+ Add Android Smartphone</button>
-              <button id="btn-callout-start-demo" class="btn btn-secondary">Start Local Demo Cluster</button>
+            <div class="callout-actions" style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem;">
+              <button id="btn-callout-add-device" class="btn btn-primary">📱 Add Android Phone</button>
+              <button id="btn-callout-use-computer" class="btn btn-outline-cyan">💻 Use This Computer</button>
+              <button id="btn-callout-start-demo" class="btn btn-secondary">🚀 Start Demo Cluster</button>
+              <button id="btn-callout-run-first" class="btn btn-outline-emerald">⚡ Run First Workload</button>
             </div>
           </div>
 
@@ -604,14 +607,14 @@
               <div class="card">
                 <div class="card-header">
                   <h3>Distributed Core Subsystems</h3>
-                  <span id="subsystem-overall-badge" class="badge badge-proven">OPERATIONAL</span>
+                  <span id="subsystem-overall-badge" class="badge badge-warning">CHECKING...</span>
                 </div>
                 <div class="spec-list">
-                  <div class="spec-row"><span class="spec-label">API Gateway:</span> <span id="health-sub-gateway" class="spec-val text-emerald">HEALTHY (Axum reverse proxy)</span></div>
-                  <div class="spec-row"><span class="spec-label">Control Plane:</span> <span id="health-sub-controlplane" class="spec-val text-emerald">HEALTHY (REST + SSE Live Stream)</span></div>
-                  <div class="spec-row"><span class="spec-label">Edge Scheduler:</span> <span id="health-sub-scheduler" class="spec-val text-emerald">HEALTHY (Autonomous Reconciler)</span></div>
-                  <div class="spec-row"><span class="spec-label">Persistence Engine:</span> <span id="health-sub-persistence" class="spec-val text-emerald">HEALTHY (Sequential WAL + Durable State)</span></div>
-                  <div class="spec-row"><span class="spec-label">Worker Channel:</span> <span id="health-sub-workers" class="spec-val text-emerald">ONLINE</span></div>
+                  <div class="spec-row"><span class="spec-label">API Gateway:</span> <span id="health-sub-gateway" class="spec-val text-muted">CHECKING...</span></div>
+                  <div class="spec-row"><span class="spec-label">Control Plane:</span> <span id="health-sub-controlplane" class="spec-val text-muted">CHECKING...</span></div>
+                  <div class="spec-row"><span class="spec-label">Edge Scheduler:</span> <span id="health-sub-scheduler" class="spec-val text-muted">UNKNOWN</span></div>
+                  <div class="spec-row"><span class="spec-label">Persistence Engine:</span> <span id="health-sub-persistence" class="spec-val text-muted">UNKNOWN</span></div>
+                  <div class="spec-row"><span class="spec-label">Worker Channel:</span> <span id="health-sub-workers" class="spec-val text-muted">UNKNOWN</span></div>
                 </div>
               </div>
 
@@ -622,10 +625,92 @@
                 <div class="spec-list">
                   <div class="spec-row"><span class="spec-label">Write-Ahead Log:</span> <span class="spec-val font-mono">spaas.wal</span></div>
                   <div class="spec-row"><span class="spec-label">Snapshot File:</span> <span class="spec-val font-mono">spaas.snapshot.json</span></div>
-                  <div class="spec-row"><span class="spec-label">WAL Integrity:</span> <span class="spec-val text-emerald">CRC32 Checksum Validated</span></div>
+                  <div class="spec-row"><span class="spec-label">WAL Integrity:</span> <span id="wal-integrity-val" class="spec-val text-muted">UNKNOWN</span></div>
                   <div class="spec-row"><span class="spec-label">Recovery Policy:</span> <span class="spec-val">Snapshot restore + Sequential WAL replay</span></div>
                   <div class="spec-row"><span class="spec-label">Single Writer Invariant:</span> <span class="spec-val text-emerald">Enforced via lock file</span></div>
                 </div>
+              </div>
+            </div>
+
+            <!-- Authoritative Diagnostics & Endpoint Health Check Card -->
+            <div class="card" style="margin-top: 1.5rem;">
+              <div class="card-header">
+                <div>
+                  <h3>Authoritative Connectivity &amp; Subsystem Diagnostics</h3>
+                  <p class="text-muted" style="font-size: 0.85rem; margin-top: 0.25rem;">
+                    Live ping and state validation across Browser &rarr; Gateway &rarr; Control Plane &rarr; Scheduler &rarr; Persistence &rarr; SSE Stream.
+                  </p>
+                </div>
+                <div class="action-buttons">
+                  <button id="btn-run-diagnostics" class="btn btn-primary btn-sm">⚡ Run Diagnostics</button>
+                  <button id="btn-repair-config" class="btn btn-secondary btn-sm">🔧 Repair Configuration</button>
+                  <button id="btn-copy-diagnostics" class="btn btn-outline-cyan btn-sm">📋 Copy Report</button>
+                </div>
+              </div>
+
+              <div class="table-container" style="margin-top: 1rem;">
+                <table class="data-table" id="table-diagnostics">
+                  <thead>
+                    <tr>
+                      <th>Subsystem Component</th>
+                      <th>Target Endpoint / Channel</th>
+                      <th>Status</th>
+                      <th>RTT Latency</th>
+                      <th>Last Checked</th>
+                      <th>Diagnostic Details / Error</th>
+                    </tr>
+                  </thead>
+                  <tbody id="diagnostics-tbody">
+                    <tr id="diag-row-web">
+                      <td><span class="icon">🌐</span> <strong>Web Management Console</strong></td>
+                      <td class="font-mono" id="diag-target-web">Window Local Client</td>
+                      <td><span id="diag-badge-web" class="status-badge status-healthy">✓ READY</span></td>
+                      <td id="diag-lat-web">0 ms</td>
+                      <td id="diag-time-web">Just now</td>
+                      <td class="text-muted" id="diag-msg-web">DOM &amp; JavaScript Client Active</td>
+                    </tr>
+                    <tr id="diag-row-gw">
+                      <td><span class="icon">🚪</span> <strong>API Gateway Ingress</strong></td>
+                      <td class="font-mono" id="diag-target-gw">http://127.0.0.1:8000</td>
+                      <td><span id="diag-badge-gw" class="status-badge status-warning">CHECKING...</span></td>
+                      <td id="diag-lat-gw">--</td>
+                      <td id="diag-time-gw">--</td>
+                      <td class="text-muted" id="diag-msg-gw">Pending probe</td>
+                    </tr>
+                    <tr id="diag-row-cp">
+                      <td><span class="icon">🎛️</span> <strong>Control Plane Orchestrator</strong></td>
+                      <td class="font-mono" id="diag-target-cp">http://127.0.0.1:8080/api/v1/system/health</td>
+                      <td><span id="diag-badge-cp" class="status-badge status-warning">CHECKING...</span></td>
+                      <td id="diag-lat-cp">--</td>
+                      <td id="diag-time-cp">--</td>
+                      <td class="text-muted" id="diag-msg-cp">Pending probe</td>
+                    </tr>
+                    <tr id="diag-row-sched">
+                      <td><span class="icon">⏱️</span> <strong>Edge Reconciler &amp; Scheduler</strong></td>
+                      <td class="font-mono">Subsystem: scheduler_core</td>
+                      <td><span id="diag-badge-sched" class="status-badge status-muted">UNKNOWN</span></td>
+                      <td id="diag-lat-sched">--</td>
+                      <td id="diag-time-sched">--</td>
+                      <td class="text-muted" id="diag-msg-sched">Awaiting Control Plane response</td>
+                    </tr>
+                    <tr id="diag-row-persist">
+                      <td><span class="icon">💾</span> <strong>Durable WAL Persistence</strong></td>
+                      <td class="font-mono">Subsystem: persistence (spaas.wal)</td>
+                      <td><span id="diag-badge-persist" class="status-badge status-muted">UNKNOWN</span></td>
+                      <td id="diag-lat-persist">--</td>
+                      <td id="diag-time-persist">--</td>
+                      <td class="text-muted" id="diag-msg-persist">Awaiting Control Plane response</td>
+                    </tr>
+                    <tr id="diag-row-sse">
+                      <td><span class="icon">📡</span> <strong>Live Event Stream (SSE)</strong></td>
+                      <td class="font-mono">/api/v1/events</td>
+                      <td><span id="diag-badge-sse" class="status-badge status-warning">CONNECTING...</span></td>
+                      <td id="diag-lat-sse">--</td>
+                      <td id="diag-time-sse">--</td>
+                      <td class="text-muted" id="diag-msg-sse">Connecting EventSource channel</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>

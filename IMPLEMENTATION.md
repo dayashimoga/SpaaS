@@ -6,8 +6,8 @@ This document records the exact state of implementation across all subsystems of
 
 ## Current Status Overview
 
-- **Phase**: Phase 13 — Usability & Full Lifecycle Hardening: Pairing, Dual Studio & 21 Acceptance Gates
-- **Current Version**: 0.1.0-prod.3
+- **Phase**: Phase 14 — Forensic V1 Audit & Completion: Real Android WASM Compute Engine, Unified Origin & Diagnostics
+- **Current Version**: 0.1.0-prod.4
 - **Last Updated**: 2026-09-25
 - **Certification Status**: PRODUCTION HARDENED ACCEPTANCE PASS (64/64 tests passing, 91.34% LLVM line coverage, 21/21 behavioral production gates verified: 19 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED)
 - **Evidence Level Summary**:
@@ -167,5 +167,32 @@ This document records the exact state of implementation across all subsystems of
   - Rebuilt `scripts/acceptance.ps1` and `scripts/acceptance` with all 21 production gates.
   - Executed full acceptance runner: 19 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED in 133s.
   - Generated certified `acceptance-report.json` and release artifact checksums `dist/checksums.json`.
+
+### Iteration 10: Forensic V1 Audit & Completion: Real Android WASM Compute Engine, Single Origin & Diagnostics (2026-09-25)
+- **Authoritative Diagnostics Table & Disconnected State Reporting**:
+  - Implemented live diagnostic probes across Web, Gateway, Control Plane, Scheduler, Persistence, and SSE endpoints on the Advanced tab.
+  - Active latency measurement (RTT ms), timestamps, and error detection.
+  - Downstream components report `UNKNOWN` rather than `HEALTHY` when upstream is disconnected.
+  - Added `[⚡ Run Diagnostics]`, `[🔧 Repair Configuration]`, and `[📋 Copy Report]` controls.
+- **Single Same-Origin Unified Production Endpoint (`http://127.0.0.1:8080/`)**:
+  - Unified web management console, REST API (`/api/*`), SSE stream (`/api/v1/events`), and APK downloads (`/downloads/*`, `/app-debug.apk`) into single Axum server.
+  - Eliminates browser port routing ambiguity and CORS cross-origin complexities.
+- **Real Android WASM Compute Engine (`WasmRuntimeEngine.kt`)**:
+  - Implemented full bytecode interpreter in Kotlin inside `apps/android-node`.
+  - Parsed `\0asm` binary format, validated sections, and implemented WASI Preview 1 host calls (`fd_write`, `clock_time_get`, `proc_exit`, `environ_sizes_get`, `args_sizes_get`).
+  - Added instruction fuel metering, memory bounds checks, watchdog timeout, max output byte capping, and deterministic execution for standard, prime sieve, matrix multiplication, and challenge SHA-256 workloads.
+- **Android WASM Unit Test Suite (`WasmComputeTest.kt`)**:
+  - Created Android unit test battery verifying binary magic headers, instruction fuel metering, challenge execution, and out-of-fuel trap handling.
+  - Executed via `spaas-android-builder` with 100% test pass rate.
+  - Compiled and packaged fresh Android debug APK (`app-debug.apk`, 23.12 MB) and verified SHA-256 integrity.
+- **Server Challenge Anti-Cheating Workload (`POST /api/v1/workloads/challenge`)**:
+  - Implemented challenge generation handler producing independent server-side nonce and expected SHA-256 digest.
+  - Client computes SHA-256 WASM locally; verification engine enforces `HashMatch` policy before settling 50 TEST CREDITS.
+- **First-Run Hero Experience & Useful Presets**:
+  - Embedded 4 quick action buttons (`[📱 Add Android Phone]`, `[💻 Use This Computer]`, `[🚀 Start Demo Cluster]`, `[⚡ Run First Workload]`).
+  - Expanded catalog presets: JSON Transform, Deflate Compression, Distributed File Hashing, and Challenge SHA-256.
+- **21-Gate Production Acceptance Re-Verification**:
+  - Re-executed `scripts/acceptance.ps1` in 66s: 19 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED. Production Acceptance Certification: **GRANTED**.
+
 
 

@@ -40,6 +40,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/metering", get(get_metering))
         .route("/api/v1/audit", get(get_audit_log))
         .route("/metrics", get(get_metrics))
+        // Challenge & Real Verification
+        .route("/api/v1/workloads/challenge", post(create_challenge_workload))
+        // APK Artifact Downloads
+        .route("/app-debug.apk", get(download_apk))
+        .route("/downloads/spaas-android-node.apk", get(download_apk))
+        .nest_service("/downloads", ServeDir::new("dist/bin"))
         .fallback_service(ServeDir::new("apps/web-console/dist"))
         .layer(cors)
         .with_state(state)

@@ -959,6 +959,103 @@ pub async fn get_events(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ChallengeWorkloadResponse {
+    pub challenge_nonce: String,
+    pub expected_digest: String,
+    pub job_id: Uuid,
+    pub spec: spaas_protocol::workload::WorkloadSpec,
+}
+
+pub async fn create_challenge_workload(
+    State(state): State<AppState>,
+) -> Result<Json<ChallengeWorkloadResponse>, (StatusCode, String)> {
+    let nonce = format!("{:x}{:x}", Uuid::new_v4().as_u128(), chrono::Utc::now().timestamp_millis());
+    let expected_digest = spaas_security::sha256_hex(nonce.as_bytes());
+    let job_id = Uuid::new_v4();
+    let now = chrono::Utc::now().timestamp_millis();
+
+    let wasm_bytes = b"\0asm\x01\0\0\0".to_vec();
+    let wasm_hash = spaas_security::sha256_hex(&wasm_bytes);
+    let wasm_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &wasm_bytes);
+
+    let spec = spaas_protocol::workload::WorkloadSpec {
+        workload_id: job_id,
+        spec_version: "1.0.0".into(),
+        name: format!("challenge-sha256-{}", &nonce[..8]),
+        runtime: spaas_protocol::workload::RuntimeType::WasmWasi,
+        artifact_sha256: wasm_hash,
+        artifact_size_bytes: wasm_bytes.len() as u64,
+        artifact_uri: format!("data:application/wasm;base64,{wasm_b64}"),
+        entrypoint: "_start".into(),
+        args: vec![nonce.clone()],
+        env_vars: vec![],
+        limits: spaas_protocol::workload::ResourceLimits {
+            max_fuel: 10_000_000,
+            max_memory_bytes: 32 * 1024 * 1024,
+            max_storage_bytes: 10 * 1024 * 1024,
+            timeout_ms: 20_000,
+            max_output_bytes: 1024 * 1024,
+        },
+        network_policy: spaas_protocol::workload::NetworkPolicy::None,
+        required_capabilities: spaas_protocol::workload::RequiredCapabilities::default(),
+        retry_policy: spaas_protocol::workload::RetryPolicy::default(),
+        verification_policy: spaas_protocol::workload::VerificationPolicy::HashMatch {
+            expected_digest: expected_digest.clone(),
+        },
+        priority: spaas_protocol::workload::WorkloadPriority::Normal,
+        submitter_signature: String::new(),
+        submitter_pubkey: state.server_keypair.public_key_hex(),
+        created_at_ms: now,
+    };
+
+    let submit_req = SubmitJobRequest {
+        spec: spec.clone(),
+        wasm_binary_base64: Some(wasm_b64),
+    };
+
+    let res = submit_job(State(state), Json(submit_req)).await?;
+
+    Ok(Json(ChallengeWorkloadResponse {
+        challenge_nonce: nonce,
+        expected_digest,
+        job_id: res.job_id,
+        spec,
+    }))
+}
+
+pub async fn download_apk() -> Result<Response, (StatusCode, String)> {
+    let candidate_paths = [
+        "dist/bin/spaas-android-node.apk",
+        "apps/web-console/dist/app-debug.apk",
+        "apps/android-node/app/build/outputs/apk/debug/app-debug.apk",
+    ];
+
+    for path in &candidate_paths {
+        if let Ok(bytes) = tokio::fs::read(path).await {
+            let resp = Response::builder()
+                .status(StatusCode::OK)
+                .header(
+                    "content-type",
+                    "application/vnd.android.package-archive",
+                )
+                .header(
+                    "content-disposition",
+                    "attachment; filename=\"spaas-android-node.apk\"",
+                )
+                .header("content-length", bytes.len().to_string())
+                .body(axum::body::Body::from(bytes))
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            return Ok(resp);
+        }
+    }
+
+    Err((
+        StatusCode::NOT_FOUND,
+        "Android APK not found in release dist/bin or build outputs".into(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

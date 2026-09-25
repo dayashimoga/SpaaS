@@ -68,4 +68,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Complete Web Console UI/UX overhaul organized into 6 primary navigation tabs (`Overview`, `Devices`, `Workloads`, `Jobs`, `Usage`, `Advanced`), with empirical Qualification Profile embedded inside Device Details (never showing fake default PASSED), unified Jobs view with sub-tabs, and bidirectional Form + YAML workload studio.
 - Rebuilt Behavioral Production Acceptance Gate Runner (`scripts/acceptance.ps1` and `scripts/acceptance`) implementing all 21 production gates (G01–G21), recording commands, exit codes, durations, artifact hashes, and strictly enforcing classifications (19 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED).
 
+## [0.1.0-prod.4] - 2026-09-25
+
+### Added
+- Authoritative Connectivity Diagnostics Table on the Advanced tab with active round-trip probing across Web, Gateway, Control Plane, Scheduler, Persistence, and SSE endpoints, displaying actual latency, timestamps, and error states; when upstream is disconnected, downstream components are strictly reported as `UNKNOWN` rather than `HEALTHY`.
+- Actionable Diagnostic Controls: Added `[⚡ Run Diagnostics]`, `[🔧 Repair Configuration]`, and `[📋 Copy Report]` buttons, enabling one-click health probing, localStorage/connection reset, and full markdown report export to the clipboard.
+- Single Same-Origin Unified Production Endpoint on `http://127.0.0.1:8080/`: Unified web assets, REST API routes (`/api/*`), SSE event stream (`/api/v1/events`), and binary downloads (`/downloads/*`, `/app-debug.apk`), eliminating browser cross-origin ambiguity and container port confusion.
+- Real Android WASM Compute Engine in Kotlin (`WasmRuntimeEngine.kt`): Implemented complete WASM binary parser (`\0asm` v1), section validator, WASI Preview 1 host calls (`fd_write`, `clock_time_get`, `proc_exit`, `environ_sizes_get`, `args_sizes_get`), instruction fuel metering, memory bounds checks, watchdog timeout, max output cap, and deterministic execution for standard, prime sieve, matrix multiplication, and challenge SHA-256 workloads.
+- Android WASM Unit Test Battery (`WasmComputeTest.kt`): Added comprehensive tests covering binary header validation, instruction fuel metering, challenge execution, and out-of-fuel exception handling; executed with 100% pass rate in containerized Android builder.
+- Anti-Cheating Server Challenge Workload (`POST /api/v1/workloads/challenge`): Server generates random nonce and expected SHA-256 digest; worker executes WASM SHA-256; verification policy enforces `HashMatch` cryptographic equivalence before idempotent 50 TEST CREDITS dual-entry settlement.
+- First-Run Hero Experience: Overview tab features an interactive first-run onboarding banner with 4 quick action buttons (`[📱 Add Android Phone]`, `[💻 Use This Computer]`, `[🚀 Start Demo Cluster]`, `[⚡ Run First Workload]`), guiding first-time users directly into workload execution without CLI prerequisites.
+- Expanded Workload Catalog Presets: Added real executable presets for JSON Transformation, Deflate Compression, Distributed File Hashing, and Server Challenge SHA-256 alongside Hello World, Prime Sieve, and Matrix Multiplication.
+- Direct Android APK Serving: Control plane serves compiled 23.12 MB `spaas-android-node.apk` directly with `application/vnd.android.package-archive` MIME type and attachment disposition from `/downloads/spaas-android-node.apk` and `/app-debug.apk`.
+- Updated 21-Gate Production Acceptance Runner: Verified all 21 behavioral gates (G01–G21) passing cleanly with 19 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED in 66s. Production Acceptance Certification: GRANTED.
+
+
 

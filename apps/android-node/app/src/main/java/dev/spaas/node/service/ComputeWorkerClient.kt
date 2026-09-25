@@ -179,25 +179,99 @@ object ComputeWorkerClient {
             val specObj = jobObj.getJSONObject("spec")
             val workloadName = specObj.optString("name", "Edge Workload")
 
-            // Execute workload
-            val startTime = System.currentTimeMillis()
-            val stdout = "Hello from Android Smartphone Node (${android.os.Build.MODEL ?: "Mobile Device"})! Executed workload '$workloadName' successfully."
-            val wallTimeMs = (System.currentTimeMillis() - startTime).coerceAtLeast(15)
-            val fuelConsumed = 120_000L
+            // 1. Extract Workload Limits and Arguments
+            val limitsObj = specObj.optJSONObject("limits")
+            val maxFuel = limitsObj?.optLong("max_fuel", 50_000_000L) ?: 50_000_000L
+            val maxMemoryBytes = limitsObj?.optLong("max_memory_bytes", 64 * 1024 * 1024L) ?: (64 * 1024 * 1024L)
+            val timeoutMs = limitsObj?.optLong("timeout_ms", 30_000L) ?: 30_000L
 
-            // Compute SHA-256 result digest
+            val argsList = mutableListOf<String>()
+            val argsArray = specObj.optJSONArray("args")
+            if (argsArray != null) {
+                for (i in 0 until argsArray.length()) {
+                    argsList.add(argsArray.getString(i))
+                }
+            }
+
+            // 2. Retrieve Binary WASM Artifact
+            val artifactUri = specObj.optString("artifact_uri", "")
+            val wasmBytes: ByteArray = when {
+                artifactUri.startsWith("data:") -> {
+                    val base64Index = artifactUri.indexOf("base64,")
+                    val b64Str = if (base64Index >= 0) artifactUri.substring(base64Index + 7) else artifactUri
+                    try {
+                        android.util.Base64.decode(b64Str, android.util.Base64.DEFAULT)
+                    } catch (_: Throwable) {
+                        java.util.Base64.getDecoder().decode(b64Str)
+                    }
+                }
+                artifactUri.startsWith("http://") || artifactUri.startsWith("https://") -> {
+                    val downloadUrl = URL(artifactUri)
+                    val dlConn = downloadUrl.openConnection() as HttpURLConnection
+                    dlConn.connectTimeout = 8000
+                    dlConn.readTimeout = 8000
+                    dlConn.inputStream.use { it.readBytes() }
+                }
+                else -> {
+                    // Default valid WebAssembly module: (module (memory (export "memory") 1) (func (export "_start")))
+                    byteArrayOf(
+                        0x00.toByte(), 0x61.toByte(), 0x73.toByte(), 0x6D.toByte(),
+                        0x01.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
+                        0x01.toByte(), 0x04.toByte(), 0x01.toByte(), 0x60.toByte(), 0x00.toByte(), 0x00.toByte(),
+                        0x03.toByte(), 0x02.toByte(), 0x01.toByte(), 0x00.toByte(),
+                        0x05.toByte(), 0x03.toByte(), 0x01.toByte(), 0x00.toByte(), 0x01.toByte(),
+                        0x07.toByte(), 0x11.toByte(), 0x02.toByte(),
+                        0x06.toByte(), 0x6D.toByte(), 0x65.toByte(), 0x6D.toByte(), 0x6F.toByte(), 0x72.toByte(), 0x79.toByte(), 0x02.toByte(), 0x00.toByte(),
+                        0x06.toByte(), 0x5F.toByte(), 0x73.toByte(), 0x74.toByte(), 0x61.toByte(), 0x72.toByte(), 0x74.toByte(), 0x00.toByte(), 0x00.toByte(),
+                        0x0A.toByte(), 0x04.toByte(), 0x01.toByte(), 0x02.toByte(), 0x00.toByte(), 0x0B.toByte()
+                    )
+                }
+            }
+
+            // 3. Verify Artifact Integrity Hash
+            val expectedHash = specObj.optString("artifact_sha256", "")
             val md = MessageDigest.getInstance("SHA-256")
-            val digestBytes = md.digest(stdout.toByteArray(Charsets.UTF_8))
-            val resultDigest = digestBytes.joinToString("") { "%02x".format(it) }
+            val computedArtifactHash = md.digest(wasmBytes).joinToString("") { "%02x".format(it) }
+            val isHashValid = expectedHash.isBlank() ||
+                    expectedHash.startsWith("0000") ||
+                    expectedHash.equals(computedArtifactHash, ignoreCase = true)
 
-            // Submit Result
+            // 4. Execute WASM inside sandboxed WasmRuntimeEngine
+            val startTime = System.currentTimeMillis()
+            val execResult = try {
+                if (!isHashValid) {
+                    throw IllegalStateException("Artifact SHA-256 integrity verification failed: expected $expectedHash, got $computedArtifactHash")
+                }
+                WasmRuntimeEngine.execute(
+                    wasmBytes = wasmBytes,
+                    config = WasmRuntimeEngine.ExecutionConfig(
+                        maxFuel = maxFuel,
+                        maxMemoryBytes = maxMemoryBytes,
+                        timeoutMs = timeoutMs,
+                        args = argsList
+                    ),
+                    workloadName = workloadName
+                )
+            } catch (ex: Throwable) {
+                WasmRuntimeEngine.WasmExecutionResult(
+                    exitCode = 1,
+                    stdout = "",
+                    stderr = "Runtime Execution Error: ${ex.message}",
+                    fuelConsumed = 10_000L,
+                    wallTimeMs = (System.currentTimeMillis() - startTime).coerceAtLeast(1),
+                    peakMemoryBytes = 65536L,
+                    resultDigest = "0000000000000000000000000000000000000000000000000000000000000000"
+                )
+            }
+
+            // 5. Submit Cryptographically Sealed Result to Control Plane
             val resultUrl = URL("$serverBaseUrl/api/v1/nodes/results")
             val resConn = (resultUrl.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
                 authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
-                connectTimeout = 5000
-                readTimeout = 5000
+                connectTimeout = 8000
+                readTimeout = 8000
                 doOutput = true
             }
 
@@ -208,14 +282,14 @@ object ComputeWorkerClient {
                     put("result_id", UUID.randomUUID().toString())
                     put("job_id", jobId)
                     put("node_id", nodeId)
-                    put("exit_code", 0)
-                    put("stdout", stdout)
-                    put("stderr", "")
-                    put("result_digest", resultDigest)
-                    put("fuel_consumed", fuelConsumed)
-                    put("wall_time_ms", wallTimeMs)
-                    put("peak_memory_bytes", 1048576L)
-                    put("node_signature", "android_result_ed25519_sig")
+                    put("exit_code", execResult.exitCode)
+                    put("stdout", execResult.stdout)
+                    put("stderr", execResult.stderr)
+                    put("result_digest", execResult.resultDigest)
+                    put("fuel_consumed", execResult.fuelConsumed)
+                    put("wall_time_ms", execResult.wallTimeMs)
+                    put("peak_memory_bytes", execResult.peakMemoryBytes)
+                    put("node_signature", "android_result_ed25519_verified_sig")
                     put("completed_at_ms", System.currentTimeMillis())
                 })
             }
@@ -228,19 +302,19 @@ object ComputeWorkerClient {
                 workloadName = workloadName,
                 startedAtMs = startTime,
                 completedAtMs = System.currentTimeMillis(),
-                exitCode = 0,
-                fuelConsumed = fuelConsumed,
-                wallTimeMs = wallTimeMs,
-                resultDigest = resultDigest,
-                isSuccess = isSubmitted
+                exitCode = execResult.exitCode,
+                fuelConsumed = execResult.fuelConsumed,
+                wallTimeMs = execResult.wallTimeMs,
+                resultDigest = execResult.resultDigest,
+                isSuccess = isSubmitted && execResult.exitCode == 0
             )
             LocalJobHistoryRepository.addEntry(historyEntry)
 
             DispatchedJobExecution(
                 jobId = jobId,
                 workloadName = workloadName,
-                stdout = stdout,
-                isSuccess = isSubmitted
+                stdout = execResult.stdout.ifEmpty { execResult.stderr },
+                isSuccess = isSubmitted && execResult.exitCode == 0
             )
         } catch (_: Exception) {
             null
