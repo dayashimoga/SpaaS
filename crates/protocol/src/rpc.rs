@@ -209,9 +209,15 @@ mod tests {
         let pause_cmd = NodeRemoteCommand::PauseExecution;
         let resume_cmd = NodeRemoteCommand::ResumeExecution;
         let renum_cmd = NodeRemoteCommand::ReEnumerateCapabilities;
-        assert!(serde_json::to_string(&pause_cmd).unwrap().contains("pause_execution"));
-        assert!(serde_json::to_string(&resume_cmd).unwrap().contains("resume_execution"));
-        assert!(serde_json::to_string(&renum_cmd).unwrap().contains("re_enumerate_capabilities"));
+        assert!(serde_json::to_string(&pause_cmd)
+            .unwrap()
+            .contains("pause_execution"));
+        assert!(serde_json::to_string(&resume_cmd)
+            .unwrap()
+            .contains("resume_execution"));
+        assert!(serde_json::to_string(&renum_cmd)
+            .unwrap()
+            .contains("re_enumerate_capabilities"));
 
         // 4. JobDispatchMessage & PollJob
         let dispatch = JobDispatchMessage {
@@ -222,14 +228,20 @@ mod tests {
             wasm_bytes: Some(vec![0x00, 0x61, 0x73, 0x6d]),
             dispatched_at_ms: 25000,
         };
-        let poll_resp = PollJobResponse { job: Some(dispatch) };
+        let poll_resp = PollJobResponse {
+            job: Some(dispatch),
+        };
         let poll_json = serde_json::to_string(&poll_resp).unwrap();
         let poll_deser: PollJobResponse = serde_json::from_str(&poll_json).unwrap();
         assert!(poll_deser.job.is_some());
         assert_eq!(poll_deser.job.unwrap().job_id, job_id);
 
         // 5. RenewLease
-        let renew_req = RenewLeaseRequest { job_id, node_id, lease_id };
+        let renew_req = RenewLeaseRequest {
+            job_id,
+            node_id,
+            lease_id,
+        };
         let renew_resp = RenewLeaseResponse {
             renewed: true,
             lease_id,
@@ -265,8 +277,12 @@ mod tests {
             verification_status: "VERIFIED".into(),
             credits_earned: 50,
         };
-        assert!(serde_json::to_string(&submit_res_req).unwrap().contains("sha_xyz"));
-        assert!(serde_json::to_string(&submit_res_resp).unwrap().contains("VERIFIED"));
+        assert!(serde_json::to_string(&submit_res_req)
+            .unwrap()
+            .contains("sha_xyz"));
+        assert!(serde_json::to_string(&submit_res_resp)
+            .unwrap()
+            .contains("VERIFIED"));
 
         // 7. SystemHealthResponse, ListNodesResponse, ListJobsResponse
         let health = SystemHealthResponse {
@@ -284,10 +300,25 @@ mod tests {
         };
         assert!(serde_json::to_string(&health).unwrap().contains("HEALTHY"));
 
-        let list_nodes = ListNodesResponse { nodes: vec![], total: 0 };
-        let list_jobs = ListJobsResponse { jobs: vec![], total: 0 };
-        assert_eq!(serde_json::from_str::<ListNodesResponse>(&serde_json::to_string(&list_nodes).unwrap()).unwrap().total, 0);
-        assert_eq!(serde_json::from_str::<ListJobsResponse>(&serde_json::to_string(&list_jobs).unwrap()).unwrap().total, 0);
+        let list_nodes = ListNodesResponse {
+            nodes: vec![],
+            total: 0,
+        };
+        let list_jobs = ListJobsResponse {
+            jobs: vec![],
+            total: 0,
+        };
+        assert_eq!(
+            serde_json::from_str::<ListNodesResponse>(&serde_json::to_string(&list_nodes).unwrap())
+                .unwrap()
+                .total,
+            0
+        );
+        assert_eq!(
+            serde_json::from_str::<ListJobsResponse>(&serde_json::to_string(&list_jobs).unwrap())
+                .unwrap()
+                .total,
+            0
+        );
     }
 }
-

@@ -91,7 +91,10 @@ pub async fn heartbeat(
         (has_pending, node.clone())
     };
 
-    let _ = state.storage.append_event(WalEvent::UpsertNode { node: updated_node }).await;
+    let _ = state
+        .storage
+        .append_event(WalEvent::UpsertNode { node: updated_node })
+        .await;
 
     Ok(Json(HeartbeatResponse {
         acknowledged: true,
@@ -107,16 +110,17 @@ pub async fn submit_job(
     // 1. Verify submitter signature on WorkloadSpec
     verify_workload(&payload.spec).map_err(|e| {
         warn!(error = %e, "Rejected workload submission due to invalid cryptographic signature");
-        (StatusCode::UNAUTHORIZED, format!("Signature verification failed: {e}"))
+        (
+            StatusCode::UNAUTHORIZED,
+            format!("Signature verification failed: {e}"),
+        )
     })?;
 
     // 2. Verify WASM binary hash if bytes were supplied inline
     if let Some(ref wasm_b64) = payload.wasm_binary_base64 {
-        let wasm_bytes = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            wasm_b64,
-        )
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid base64 wasm: {e}")))?;
+        let wasm_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, wasm_b64)
+                .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid base64 wasm: {e}")))?;
 
         if let Err(e) = verify_sha256(&wasm_bytes, &payload.spec.artifact_sha256) {
             return Err((
@@ -125,7 +129,9 @@ pub async fn submit_job(
             ));
         }
 
-        state.store_wasm_artifact(payload.spec.artifact_sha256.clone(), wasm_bytes).await;
+        state
+            .store_wasm_artifact(payload.spec.artifact_sha256.clone(), wasm_bytes)
+            .await;
     }
 
     let mut job = JobRecord::new(payload.spec.clone());
@@ -137,14 +143,20 @@ pub async fn submit_job(
         nodes.values().cloned().collect()
     };
 
-    match state.scheduler.schedule_workload(&job.spec, &eligible_nodes) {
+    match state
+        .scheduler
+        .schedule_workload(&job.spec, &eligible_nodes)
+    {
         Ok(selected_nodes) if !selected_nodes.is_empty() => {
             let primary_node = selected_nodes[0];
             let lease = JobLease::new(job_id, primary_node, 30_000);
             job.assigned_node_id = Some(primary_node);
             job.current_lease = Some(lease.clone());
             job.transition_to(JobState::Scheduled).map_err(|e| {
-                (StatusCode::INTERNAL_SERVER_ERROR, format!("State transition error: {e}"))
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("State transition error: {e}"),
+                )
             })?;
 
             // Retrieve wasm bytes
@@ -174,7 +186,10 @@ pub async fn submit_job(
     }
 
     state.upsert_job(job.clone()).await;
-    state.metrics.api_requests_total.fetch_add(1, Ordering::Relaxed);
+    state
+        .metrics
+        .api_requests_total
+        .fetch_add(1, Ordering::Relaxed);
     state
         .log_audit("JOB_SUBMITTED", &job_id.to_string(), &payload.spec.name)
         .await;
@@ -198,7 +213,11 @@ pub async fn poll_job(
         let mut jobs = state.jobs.write().await;
         if let Some(job) = jobs.get_mut(&d.job_id) {
             let _ = job.transition_to(JobState::Running);
-            state.storage.append_event(WalEvent::UpsertJob { job: job.clone() }).await.ok();
+            state
+                .storage
+                .append_event(WalEvent::UpsertJob { job: job.clone() })
+                .await
+                .ok();
         }
     }
 
@@ -236,7 +255,12 @@ pub async fn renew_job_lease(
 
         lease.renew(30_000);
         let updated_lease = lease.clone();
-        let _ = state.storage.append_event(WalEvent::RenewLease { lease: updated_lease.clone() }).await;
+        let _ = state
+            .storage
+            .append_event(WalEvent::RenewLease {
+                lease: updated_lease.clone(),
+            })
+            .await;
 
         return Ok(Json(RenewLeaseResponse {
             renewed: true,
@@ -282,7 +306,10 @@ pub async fn submit_result(
             .get_mut(&payload.result.job_id)
             .ok_or((StatusCode::NOT_FOUND, "Job not found".into()))?;
 
-        if job.state != JobState::Scheduled && job.state != JobState::Running && job.state != JobState::Verifying {
+        if job.state != JobState::Scheduled
+            && job.state != JobState::Running
+            && job.state != JobState::Verifying
+        {
             return Err((
                 StatusCode::CONFLICT,
                 format!("Job is in terminal or non-executing state: {:?}", job.state),
@@ -295,14 +322,20 @@ pub async fn submit_result(
                 if lease.lease_id != req_lease_id {
                     return Err((
                         StatusCode::CONFLICT,
-                        format!("Lease ID mismatch: expected {}, got {}", lease.lease_id, req_lease_id),
+                        format!(
+                            "Lease ID mismatch: expected {}, got {}",
+                            lease.lease_id, req_lease_id
+                        ),
                     ));
                 }
             }
             if lease.is_expired(now) {
                 return Err((
                     StatusCode::CONFLICT,
-                    format!("Lease expired at {} ms (current time: {} ms); result rejected", lease.expires_at_ms, now),
+                    format!(
+                        "Lease expired at {} ms (current time: {} ms); result rejected",
+                        lease.expires_at_ms, now
+                    ),
                 ));
             }
         }
@@ -318,7 +351,8 @@ pub async fn submit_result(
         wall_time_ms: payload.result.wall_time_ms,
         memory_peak_bytes: payload.result.peak_memory_bytes,
         network_ingress_bytes: 4096,
-        network_egress_bytes: payload.result.stdout.len() as u64 + payload.result.stderr.len() as u64,
+        network_egress_bytes: payload.result.stdout.len() as u64
+            + payload.result.stderr.len() as u64,
         storage_bytes: 0,
     };
 
@@ -334,19 +368,34 @@ pub async fn submit_result(
                 usage,
                 true,
             )
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Metering error: {e}")))?
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Metering error: {e}"),
+                )
+            })?
     };
 
     // Persist completed job and metering record to durable WAL
-    state.storage.append_event(WalEvent::UpsertJob { job: job_snapshot }).await.ok();
-    state.storage.append_event(WalEvent::AppendMetering { record: metering_record.clone() }).await.ok();
+    state
+        .storage
+        .append_event(WalEvent::UpsertJob { job: job_snapshot })
+        .await
+        .ok();
+    state
+        .storage
+        .append_event(WalEvent::AppendMetering {
+            record: metering_record.clone(),
+        })
+        .await
+        .ok();
 
     state.metrics.completed_jobs.fetch_add(1, Ordering::Relaxed);
     state.metrics.running_jobs.fetch_sub(1, Ordering::Relaxed);
-    state.metrics.credits_transferred_total.fetch_add(
-        metering_record.credits_earned_by_node,
-        Ordering::Relaxed,
-    );
+    state
+        .metrics
+        .credits_transferred_total
+        .fetch_add(metering_record.credits_earned_by_node, Ordering::Relaxed);
 
     state
         .log_audit(
@@ -354,7 +403,9 @@ pub async fn submit_result(
             &payload.result.job_id.to_string(),
             &format!(
                 "Node={}, Fuel={}, Credits={}",
-                payload.node_id, payload.result.fuel_consumed, metering_record.credits_earned_by_node
+                payload.node_id,
+                payload.result.fuel_consumed,
+                metering_record.credits_earned_by_node
             ),
         )
         .await;
@@ -390,7 +441,13 @@ pub async fn qualify_node(
 
     node.qualification = Some(payload.profile);
     let updated = node.clone();
-    state.storage.append_event(WalEvent::UpsertNode { node: updated.clone() }).await.ok();
+    state
+        .storage
+        .append_event(WalEvent::UpsertNode {
+            node: updated.clone(),
+        })
+        .await
+        .ok();
     info!(node_id = %node_id, "Node qualification profile recorded");
 
     Ok(Json(updated))
@@ -441,10 +498,20 @@ pub async fn cancel_job(
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Cannot cancel job: {e}")))?;
 
     let cancelled_job = job.clone();
-    state.storage.append_event(WalEvent::UpsertJob { job: cancelled_job.clone() }).await.ok();
+    state
+        .storage
+        .append_event(WalEvent::UpsertJob {
+            job: cancelled_job.clone(),
+        })
+        .await
+        .ok();
 
     state
-        .log_audit("JOB_CANCELLED", &job_id.to_string(), "User initiated cancellation")
+        .log_audit(
+            "JOB_CANCELLED",
+            &job_id.to_string(),
+            "User initiated cancellation",
+        )
         .await;
 
     Ok(Json(cancelled_job))
@@ -465,13 +532,31 @@ pub async fn get_health(
     let nodes = state.nodes.read().await;
     let jobs = state.jobs.read().await;
 
-    let active = nodes.values().filter(|n| n.state == NodeState::Active).count();
-    let idle = nodes.values().filter(|n| n.state == NodeState::Idle).count();
-    let paused = nodes.values().filter(|n| n.state == NodeState::Paused).count();
-    let offline = nodes.values().filter(|n| n.state == NodeState::Offline).count();
+    let active = nodes
+        .values()
+        .filter(|n| n.state == NodeState::Active)
+        .count();
+    let idle = nodes
+        .values()
+        .filter(|n| n.state == NodeState::Idle)
+        .count();
+    let paused = nodes
+        .values()
+        .filter(|n| n.state == NodeState::Paused)
+        .count();
+    let offline = nodes
+        .values()
+        .filter(|n| n.state == NodeState::Offline)
+        .count();
 
-    let queued = jobs.values().filter(|j| j.state == JobState::Queued).count();
-    let running = jobs.values().filter(|j| j.state == JobState::Running).count();
+    let queued = jobs
+        .values()
+        .filter(|j| j.state == JobState::Queued)
+        .count();
+    let running = jobs
+        .values()
+        .filter(|j| j.state == JobState::Running)
+        .count();
 
     let uptime = (chrono::Utc::now().timestamp_millis() - state.started_at_ms) / 1000;
 

@@ -12,7 +12,12 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 
 #[derive(Parser, Debug)]
-#[command(name = "spaas-gateway", author, version, about = "SPaaS Ingress Gateway & Edge Reverse Proxy")]
+#[command(
+    name = "spaas-gateway",
+    author,
+    version,
+    about = "SPaaS Ingress Gateway & Edge Reverse Proxy"
+)]
 struct Args {
     #[arg(long, default_value = "0.0.0.0")]
     host: String,
@@ -34,7 +39,11 @@ async fn proxy_handler(
     State(state): State<Arc<GatewayState>>,
     req: Request,
 ) -> Result<Response, (StatusCode, String)> {
-    let path = req.uri().path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+    let path = req
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.as_str())
+        .unwrap_or("/");
     let target_url = format!("{}{}", state.upstream_url, path);
 
     let method = req.method().clone();
@@ -50,20 +59,23 @@ async fn proxy_handler(
         }
     }
 
-    let upstream_resp = upstream_req
-        .body(body_bytes)
-        .send()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Upstream connection error: {e}")))?;
+    let upstream_resp = upstream_req.body(body_bytes).send().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Upstream connection error: {e}"),
+        )
+    })?;
 
     let status = StatusCode::from_u16(upstream_resp.status().as_u16())
         .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
     let resp_headers = upstream_resp.headers().clone();
-    let resp_bytes = upstream_resp
-        .bytes()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Upstream body read error: {e}")))?;
+    let resp_bytes = upstream_resp.bytes().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Upstream body read error: {e}"),
+        )
+    })?;
 
     let mut response = Response::builder().status(status);
     for (k, v) in resp_headers.iter() {
@@ -96,7 +108,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(cors)
         .with_state(state);
 
-    info!("SPaaS Ingress Gateway listening on http://{} -> Upstream {}", addr, args.upstream_url);
+    info!(
+        "SPaaS Ingress Gateway listening on http://{} -> Upstream {}",
+        addr, args.upstream_url
+    );
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
 

@@ -94,4 +94,3 @@ mod tests {
         assert!(recent[0].success);
     }
 }
-

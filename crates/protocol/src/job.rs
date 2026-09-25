@@ -33,6 +33,7 @@ impl JobState {
     }
 
     /// Validates if transition from `self` to `next` is mathematically and protocol legal
+    #[allow(clippy::match_like_matches_macro)]
     pub fn can_transition_to(&self, next: JobState) -> bool {
         if *self == next {
             // Idempotent self-transitions allowed

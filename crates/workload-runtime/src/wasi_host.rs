@@ -29,6 +29,7 @@ impl HostState {
         }
     }
 
+    #[allow(clippy::result_unit_err)]
     pub fn append_stdout(&mut self, data: &[u8]) -> Result<usize, ()> {
         if self.stdout.len() + data.len() > self.max_output_bytes {
             let allowed = self.max_output_bytes.saturating_sub(self.stdout.len());
@@ -39,6 +40,7 @@ impl HostState {
         Ok(data.len())
     }
 
+    #[allow(clippy::result_unit_err)]
     pub fn append_stderr(&mut self, data: &[u8]) -> Result<usize, ()> {
         if self.stderr.len() + data.len() > self.max_output_bytes {
             let allowed = self.max_output_bytes.saturating_sub(self.stderr.len());
@@ -87,8 +89,10 @@ pub fn link_sandboxed_wasi(linker: &mut Linker<HostState>) -> Result<(), wasmi::
                 if memory.read(&caller, offset, &mut iov_buf).is_err() {
                     return 28; // EFAULT
                 }
-                let ptr = u32::from_le_bytes([iov_buf[0], iov_buf[1], iov_buf[2], iov_buf[3]]) as usize;
-                let len = u32::from_le_bytes([iov_buf[4], iov_buf[5], iov_buf[6], iov_buf[7]]) as usize;
+                let ptr =
+                    u32::from_le_bytes([iov_buf[0], iov_buf[1], iov_buf[2], iov_buf[3]]) as usize;
+                let len =
+                    u32::from_le_bytes([iov_buf[4], iov_buf[5], iov_buf[6], iov_buf[7]]) as usize;
 
                 let mut data = vec![0u8; len];
                 if memory.read(&caller, ptr, &mut data).is_err() {
@@ -106,7 +110,10 @@ pub fn link_sandboxed_wasi(linker: &mut Linker<HostState>) -> Result<(), wasmi::
 
             // Write nwritten back to memory
             let nwritten_bytes = total_written.to_le_bytes();
-            if memory.write(&mut caller, nwritten as usize, &nwritten_bytes).is_err() {
+            if memory
+                .write(&mut caller, nwritten as usize, &nwritten_bytes)
+                .is_err()
+            {
                 return 28; // EFAULT
             }
 
@@ -150,7 +157,12 @@ pub fn link_sandboxed_wasi(linker: &mut Linker<HostState>) -> Result<(), wasmi::
     linker.func_wrap(
         "wasi_snapshot_preview1",
         "fd_seek",
-        |_caller: Caller<'_, HostState>, _fd: i32, _offset: i64, _whence: i32, _newoffset: i32| -> i32 {
+        |_caller: Caller<'_, HostState>,
+         _fd: i32,
+         _offset: i64,
+         _whence: i32,
+         _newoffset: i32|
+         -> i32 {
             70 // ESPIPE
         },
     )?;
@@ -215,7 +227,11 @@ pub fn link_sandboxed_wasi(linker: &mut Linker<HostState>) -> Result<(), wasmi::
                 let entry_bytes = entry.as_bytes();
 
                 // write pointer to env_ptrs
-                let _ = memory.write(&mut caller, env_ptrs as usize, &(buf_ptr as u32).to_le_bytes());
+                let _ = memory.write(
+                    &mut caller,
+                    env_ptrs as usize,
+                    &(buf_ptr as u32).to_le_bytes(),
+                );
                 env_ptrs += 4;
 
                 // write string to buf_ptr
@@ -262,7 +278,11 @@ pub fn link_sandboxed_wasi(linker: &mut Linker<HostState>) -> Result<(), wasmi::
                 let entry = format!("{arg}\0");
                 let entry_bytes = entry.as_bytes();
 
-                let _ = memory.write(&mut caller, argv_ptrs as usize, &(buf_ptr as u32).to_le_bytes());
+                let _ = memory.write(
+                    &mut caller,
+                    argv_ptrs as usize,
+                    &(buf_ptr as u32).to_le_bytes(),
+                );
                 argv_ptrs += 4;
 
                 let _ = memory.write(&mut caller, buf_ptr as usize, entry_bytes);
@@ -317,7 +337,8 @@ mod tests {
 
     #[test]
     fn test_host_state_buffer_bounds() {
-        let mut state = HostState::new(10, 100, vec!["arg1".into()], vec![("K".into(), "V".into())]);
+        let mut state =
+            HostState::new(10, 100, vec!["arg1".into()], vec![("K".into(), "V".into())]);
         assert!(state.append_stdout(b"hello").is_ok());
         assert_eq!(state.stdout, b"hello");
         // Exceeds quota (10 bytes total)
@@ -373,9 +394,18 @@ mod tests {
         "#;
         let wasm = wat::parse_str(wat).expect("parse WAT");
         let module = Module::new(&engine, &wasm).expect("module compile");
-        let host_state = HostState::new(1024, 100000, vec!["arg0".into()], vec![("ENV_KEY".into(), "VAL".into())]);
+        let host_state = HostState::new(
+            1024,
+            100000,
+            vec!["arg0".into()],
+            vec![("ENV_KEY".into(), "VAL".into())],
+        );
         let mut store = Store::new(&engine, host_state);
-        let instance = linker.instantiate(&mut store, &module).unwrap().start(&mut store).unwrap();
+        let instance = linker
+            .instantiate(&mut store, &module)
+            .unwrap()
+            .start(&mut store)
+            .unwrap();
 
         // Write iovec at offset 200 pointing to offset 300 with len 5 ("hello")
         let memory = instance.get_memory(&store, "memory").unwrap();
@@ -390,4 +420,3 @@ mod tests {
         assert_eq!(store.data().stderr, b"hello");
     }
 }
-

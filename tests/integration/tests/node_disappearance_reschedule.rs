@@ -33,7 +33,8 @@ async fn test_node_disappearance_and_autonomous_reschedule() {
         false,
     );
 
-    let wasm = make_test_wat_bytes(r#"(module (memory (export "memory") 1) (func (export "_start")))"#);
+    let wasm =
+        make_test_wat_bytes(r#"(module (memory (export "memory") 1) (func (export "_start")))"#);
     let dev_key = KeyPair::generate();
 
     let mut spec = WorkloadSpec {
@@ -84,7 +85,9 @@ async fn test_node_disappearance_and_autonomous_reschedule() {
 
     // 4. Autonomous Rescheduling: Node B is now available
     let available_nodes_after_failure = vec![node_b.to_record()];
-    let re_selected = scheduler.schedule_workload(&spec, &available_nodes_after_failure).unwrap();
+    let re_selected = scheduler
+        .schedule_workload(&spec, &available_nodes_after_failure)
+        .unwrap();
     assert_eq!(re_selected[0], node_b.node_id);
 
     job.assigned_node_id = Some(node_b.node_id);

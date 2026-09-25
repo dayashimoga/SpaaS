@@ -160,7 +160,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Node { cmd } => match cmd {
             NodeCommands::List => {
                 let url = format!("{}/api/v1/nodes", cli.api_url);
-                let resp = client.get(&url).send().await?.json::<ListNodesResponse>().await?;
+                let resp = client
+                    .get(&url)
+                    .send()
+                    .await?
+                    .json::<ListNodesResponse>()
+                    .await?;
 
                 let rows: Vec<NodeRow> = resp
                     .nodes
@@ -169,14 +174,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         id: n.node_id.to_string()[..8].to_string(),
                         model: n.capabilities.device_model,
                         state: format!("{:?}", n.state),
-                        battery: format!("{}% ({:?})", n.telemetry.battery_pct, n.telemetry.charging_state),
+                        battery: format!(
+                            "{}% ({:?})",
+                            n.telemetry.battery_pct, n.telemetry.charging_state
+                        ),
                         thermal: format!("{:?}", n.telemetry.thermal_status),
                         network: format!("{:?}", n.telemetry.network_type),
                         ram: format!("{} MB", n.telemetry.available_ram_mb),
                     })
                     .collect();
 
-                println!("{}", Table::new(rows).to_string());
+                println!("{}", Table::new(rows));
             }
         },
         Commands::Workload { cmd } => match cmd {
@@ -185,7 +193,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if ext == "yaml" || ext == "yml" {
                     let content = std::fs::read_to_string(&path)?;
                     let manifest = DeveloperWorkloadManifest::from_yaml_str(&content)?;
-                    println!("{}", style("Validating Workload Manifest (spaas.io/v1)...").bold());
+                    println!(
+                        "{}",
+                        style("Validating Workload Manifest (spaas.io/v1)...").bold()
+                    );
                     println!("  Workload Name: {}", style(&manifest.metadata.name).cyan());
                     println!("  Version:       {}", manifest.metadata.version);
                     println!("  Runtime:       {:?}", manifest.spec.runtime);
@@ -195,14 +206,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("  Max Fuel:      {}", manifest.spec.limits.max_fuel);
                     println!("  Timeout:       {} ms", manifest.spec.limits.timeout_ms);
                     println!("  Verification:  {:?}", manifest.spec.verification);
-                    println!("{}", style("Status: VALID MANIFEST (spaas.io/v1)").bold().green());
+                    println!(
+                        "{}",
+                        style("Status: VALID MANIFEST (spaas.io/v1)").bold().green()
+                    );
                 } else if ext == "json" {
                     let content = std::fs::read_to_string(&path)?;
                     let manifest = DeveloperWorkloadManifest::from_json_str(&content)?;
-                    println!("{}", style("Validating Workload Manifest (spaas.io/v1 JSON)...").bold());
+                    println!(
+                        "{}",
+                        style("Validating Workload Manifest (spaas.io/v1 JSON)...").bold()
+                    );
                     println!("  Workload Name: {}", style(&manifest.metadata.name).cyan());
                     println!("  Version:       {}", manifest.metadata.version);
-                    println!("{}", style("Status: VALID MANIFEST (spaas.io/v1)").bold().green());
+                    println!(
+                        "{}",
+                        style("Status: VALID MANIFEST (spaas.io/v1)").bold().green()
+                    );
                 } else {
                     let bytes = std::fs::read(&path)?;
                     let hash = sha256_hex(&bytes);
@@ -227,10 +247,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let binary_path = if std::path::Path::new(&manifest.spec.binary).is_absolute() {
                         PathBuf::from(&manifest.spec.binary)
                     } else {
-                        path.parent().unwrap_or(std::path::Path::new(".")).join(&manifest.spec.binary)
+                        path.parent()
+                            .unwrap_or(std::path::Path::new("."))
+                            .join(&manifest.spec.binary)
                     };
-                    let bytes = std::fs::read(&binary_path)
-                        .map_err(|e| format!("Failed to read WASM binary at {}: {e}", binary_path.display()))?;
+                    let bytes = std::fs::read(&binary_path).map_err(|e| {
+                        format!(
+                            "Failed to read WASM binary at {}: {e}",
+                            binary_path.display()
+                        )
+                    })?;
                     let hash = sha256_hex(&bytes);
                     let s = WorkloadSpec {
                         workload_id: Uuid::new_v4(),
@@ -260,10 +286,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let binary_path = if std::path::Path::new(&manifest.spec.binary).is_absolute() {
                         PathBuf::from(&manifest.spec.binary)
                     } else {
-                        path.parent().unwrap_or(std::path::Path::new(".")).join(&manifest.spec.binary)
+                        path.parent()
+                            .unwrap_or(std::path::Path::new("."))
+                            .join(&manifest.spec.binary)
                     };
-                    let bytes = std::fs::read(&binary_path)
-                        .map_err(|e| format!("Failed to read WASM binary at {}: {e}", binary_path.display()))?;
+                    let bytes = std::fs::read(&binary_path).map_err(|e| {
+                        format!(
+                            "Failed to read WASM binary at {}: {e}",
+                            binary_path.display()
+                        )
+                    })?;
                     let hash = sha256_hex(&bytes);
                     let s = WorkloadSpec {
                         workload_id: Uuid::new_v4(),
@@ -329,16 +361,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let dev_key = KeyPair::generate();
                 sign_workload(&dev_key, &mut spec);
 
-                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &wasm_bytes);
+                let b64 =
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &wasm_bytes);
                 let req = SubmitJobRequest {
                     spec,
                     wasm_binary_base64: Some(b64),
                 };
 
                 let url = format!("{}/api/v1/jobs", cli.api_url);
-                let resp = client.post(&url).json(&req).send().await?.json::<SubmitJobResponse>().await?;
+                let resp = client
+                    .post(&url)
+                    .json(&req)
+                    .send()
+                    .await?
+                    .json::<SubmitJobResponse>()
+                    .await?;
 
-                println!("{}", style("Workload Submitted Successfully!").bold().green());
+                println!(
+                    "{}",
+                    style("Workload Submitted Successfully!").bold().green()
+                );
                 println!("  Job ID:      {}", style(resp.job_id).bold().yellow());
                 println!("  Initial State: {:?}", resp.state);
             }
@@ -346,7 +388,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Job { cmd } => match cmd {
             JobCommands::List => {
                 let url = format!("{}/api/v1/jobs", cli.api_url);
-                let resp = client.get(&url).send().await?.json::<ListJobsResponse>().await?;
+                let resp = client
+                    .get(&url)
+                    .send()
+                    .await?
+                    .json::<ListJobsResponse>()
+                    .await?;
 
                 let rows: Vec<JobRow> = resp
                     .jobs
@@ -355,13 +402,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         id: j.job_id.to_string()[..8].to_string(),
                         name: j.spec.name,
                         state: format!("{:?}", j.state),
-                        node: j.assigned_node_id.map(|n| n.to_string()[..8].to_string()).unwrap_or_else(|| "unassigned".into()),
+                        node: j
+                            .assigned_node_id
+                            .map(|n| n.to_string()[..8].to_string())
+                            .unwrap_or_else(|| "unassigned".into()),
                         retries: j.retry_count,
                         created: format!("{}ms", j.created_at_ms),
                     })
                     .collect();
 
-                println!("{}", Table::new(rows).to_string());
+                println!("{}", Table::new(rows));
             }
             JobCommands::Get { id } => {
                 let url = format!("{}/api/v1/jobs/{}", cli.api_url, id);
@@ -405,10 +455,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::System { cmd } => match cmd {
             SystemCommands::Health => {
                 let url = format!("{}/api/v1/system/health", cli.api_url);
-                let health = client.get(&url).send().await?.json::<SystemHealthResponse>().await?;
+                let health = client
+                    .get(&url)
+                    .send()
+                    .await?
+                    .json::<SystemHealthResponse>()
+                    .await?;
 
-                println!("{}", style("SPaaS Cluster Health & Telemetry").bold().cyan());
-                println!("  Status:              {}", style(&health.status).bold().green());
+                println!(
+                    "{}",
+                    style("SPaaS Cluster Health & Telemetry").bold().cyan()
+                );
+                println!(
+                    "  Status:              {}",
+                    style(&health.status).bold().green()
+                );
                 println!("  Active Nodes:        {}", health.active_nodes);
                 println!("  Idle Nodes:          {}", health.idle_nodes);
                 println!("  Paused Nodes:        {}", health.paused_nodes);
@@ -417,7 +478,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("  Running Jobs:        {}", health.running_jobs);
                 println!("  Completed Jobs:      {}", health.completed_jobs);
                 println!("  Failed Jobs:         {}", health.failed_jobs);
-                println!("  Avg Sched Latency:   {:.2} ms", health.average_scheduling_latency_ms);
+                println!(
+                    "  Avg Sched Latency:   {:.2} ms",
+                    health.average_scheduling_latency_ms
+                );
                 println!("  Uptime:              {}s", health.uptime_secs);
             }
         },

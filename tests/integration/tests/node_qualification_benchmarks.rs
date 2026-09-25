@@ -15,12 +15,24 @@ async fn test_node_empirical_qualification_microbenchmarks() {
     assert!(agent.qualification.is_none());
 
     // Run microbenchmark qualification suite
-    let profile = agent.run_qualification().await.expect("Qualification benchmark failed");
+    let profile = agent
+        .run_qualification()
+        .await
+        .expect("Qualification benchmark failed");
 
     // Conformance and execution assertions
-    assert!(profile.wasm_conformance_passed, "WASM conformance check must pass");
-    assert!(profile.wasi_preview1_passed, "WASI Preview 1 check must pass");
-    assert!(profile.measured_fuel_mips > 0.0, "Measured fuel MIPS must be positive");
+    assert!(
+        profile.wasm_conformance_passed,
+        "WASM conformance check must pass"
+    );
+    assert!(
+        profile.wasi_preview1_passed,
+        "WASI Preview 1 check must pass"
+    );
+    assert!(
+        profile.measured_fuel_mips > 0.0,
+        "Measured fuel MIPS must be positive"
+    );
     assert_eq!(profile.measured_memory_max_pages, 16);
     assert!(!profile.qualification_hash.is_empty());
     assert!(!profile.qualification_signature.is_empty());
@@ -32,10 +44,16 @@ async fn test_node_empirical_qualification_microbenchmarks() {
         profile.qualification_hash.as_bytes(),
         &profile.qualification_signature,
     );
-    assert!(verified.is_ok(), "Qualification signature must cryptographically verify");
+    assert!(
+        verified.is_ok(),
+        "Qualification signature must cryptographically verify"
+    );
 
     // Verify agent's to_record snapshot incorporates the qualification profile
     let record = agent.to_record();
     assert!(record.qualification.is_some());
-    assert_eq!(record.qualification.unwrap().qualification_hash, profile.qualification_hash);
+    assert_eq!(
+        record.qualification.unwrap().qualification_hash,
+        profile.qualification_hash
+    );
 }

@@ -79,7 +79,8 @@ async fn test_adversarial_infinite_loop_mitigation() {
 #[tokio::test]
 async fn test_adversarial_tampered_workload_rejected() {
     let dev_key = KeyPair::generate();
-    let wasm = make_test_wat_bytes(r#"(module (memory (export "memory") 1) (func (export "_start")))"#);
+    let wasm =
+        make_test_wat_bytes(r#"(module (memory (export "memory") 1) (func (export "_start")))"#);
 
     let mut spec = WorkloadSpec {
         workload_id: Uuid::new_v4(),
@@ -139,7 +140,8 @@ async fn test_adversarial_forged_node_result_rejected() {
     sign_job_result(&malicious_attacker_key, &mut forged_result);
 
     // Verification against the assigned honest node public key MUST fail
-    let check = verification.verify_single_result(&forged_result, &honest_node_key.public_key_hex());
+    let check =
+        verification.verify_single_result(&forged_result, &honest_node_key.public_key_hex());
     assert!(check.is_err());
 }
 
@@ -202,10 +204,11 @@ fn test_path_traversal_and_injection_defenses() {
 #[test]
 fn test_expired_auth_token_rejected() {
     let server_key = KeyPair::generate();
-    let authority_pub = spaas_security::keys::PublicKey(server_key.verifying_key().clone());
+    let authority_pub = spaas_security::keys::PublicKey(*server_key.verifying_key());
 
     // Issue expired token
-    let (_, token_str) = AuthToken::issue(&server_key, "attacker".into(), AuthRole::WorkerNode, -5000);
+    let (_, token_str) =
+        AuthToken::issue(&server_key, "attacker".into(), AuthRole::WorkerNode, -5000);
 
     let decoded = AuthToken::decode_and_verify(&token_str, &authority_pub);
     assert!(decoded.is_err());

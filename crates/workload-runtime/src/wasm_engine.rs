@@ -120,7 +120,9 @@ impl WorkloadRuntime for WasmWasiRuntime {
         let (call_res, remaining_fuel, host) = match run_res {
             Ok(Ok(tuple)) => tuple,
             Ok(Err(join_err)) => {
-                return Err(RuntimeError::Internal(format!("Execution task panicked: {join_err}")));
+                return Err(RuntimeError::Internal(format!(
+                    "Execution task panicked: {join_err}"
+                )));
             }
             Err(_) => {
                 return Err(RuntimeError::Timeout {
@@ -241,7 +243,10 @@ mod tests {
         let result = runtime.execute(ctx).await.unwrap();
         assert_eq!(result.exit_code, 0);
         assert!(!result.node_signature.is_empty());
-        assert!(spaas_security::signing::verify_job_result(&result, &node_keys.public_key_hex()).is_ok());
+        assert!(
+            spaas_security::signing::verify_job_result(&result, &node_keys.public_key_hex())
+                .is_ok()
+        );
     }
 
     #[tokio::test]
@@ -306,8 +311,10 @@ mod tests {
         let sha = sha256_hex(&wasm);
 
         // 1. Zero fuel
-        let mut spec = WorkloadSpec::default();
-        spec.artifact_sha256 = sha.clone();
+        let mut spec = WorkloadSpec {
+            artifact_sha256: sha.clone(),
+            ..Default::default()
+        };
         spec.limits.max_fuel = 0;
         spec.limits.timeout_ms = 1000;
         let node_keys = KeyPair::generate();
@@ -317,7 +324,10 @@ mod tests {
             node_id: Uuid::new_v4(),
             node_keypair: &node_keys,
         };
-        assert!(matches!(runtime.execute(ctx).await.unwrap_err(), RuntimeError::OutOfFuel { .. }));
+        assert!(matches!(
+            runtime.execute(ctx).await.unwrap_err(),
+            RuntimeError::OutOfFuel { .. }
+        ));
 
         // 2. Zero timeout
         spec.limits.max_fuel = 1000;
@@ -328,7 +338,10 @@ mod tests {
             node_id: Uuid::new_v4(),
             node_keypair: &node_keys,
         };
-        assert!(matches!(runtime.execute(ctx2).await.unwrap_err(), RuntimeError::Timeout { .. }));
+        assert!(matches!(
+            runtime.execute(ctx2).await.unwrap_err(),
+            RuntimeError::Timeout { .. }
+        ));
 
         // 3. Artifact verification failed (tampered sha)
         spec.limits.timeout_ms = 1000;
@@ -339,7 +352,10 @@ mod tests {
             node_id: Uuid::new_v4(),
             node_keypair: &node_keys,
         };
-        assert!(matches!(runtime.execute(ctx3).await.unwrap_err(), RuntimeError::ArtifactVerificationFailed(_)));
+        assert!(matches!(
+            runtime.execute(ctx3).await.unwrap_err(),
+            RuntimeError::ArtifactVerificationFailed(_)
+        ));
 
         // 4. Missing entrypoint
         spec.artifact_sha256 = sha.clone();
@@ -350,7 +366,10 @@ mod tests {
             node_id: Uuid::new_v4(),
             node_keypair: &node_keys,
         };
-        assert!(matches!(runtime.execute(ctx4).await.unwrap_err(), RuntimeError::EntrypointNotFound(_)));
+        assert!(matches!(
+            runtime.execute(ctx4).await.unwrap_err(),
+            RuntimeError::EntrypointNotFound(_)
+        ));
 
         // 5. Unsupported runtime type
         spec.entrypoint = "_start".into();
@@ -361,7 +380,10 @@ mod tests {
             node_id: Uuid::new_v4(),
             node_keypair: &node_keys,
         };
-        assert!(matches!(runtime.execute(ctx5).await.unwrap_err(), RuntimeError::CompilationFailed(_)));
+        assert!(matches!(
+            runtime.execute(ctx5).await.unwrap_err(),
+            RuntimeError::CompilationFailed(_)
+        ));
 
         // 6. Malformed bytecode
         spec.runtime = RuntimeType::WasmWasi;
@@ -373,7 +395,10 @@ mod tests {
             node_id: Uuid::new_v4(),
             node_keypair: &node_keys,
         };
-        assert!(matches!(runtime.execute(ctx6).await.unwrap_err(), RuntimeError::CompilationFailed(_)));
+        assert!(matches!(
+            runtime.execute(ctx6).await.unwrap_err(),
+            RuntimeError::CompilationFailed(_)
+        ));
     }
 
     #[tokio::test]
@@ -429,7 +454,10 @@ mod tests {
         let errs = vec![
             RuntimeError::OutOfFuel { fuel_limit: 100 },
             RuntimeError::Timeout { timeout_ms: 50 },
-            RuntimeError::MemoryLimitExceeded { requested_bytes: 200, max_bytes: 100 },
+            RuntimeError::MemoryLimitExceeded {
+                requested_bytes: 200,
+                max_bytes: 100,
+            },
             RuntimeError::OutputBufferExceeded { max_bytes: 512 },
             RuntimeError::ArtifactVerificationFailed("bad hash".into()),
             RuntimeError::CompilationFailed("bad wasm".into()),
@@ -443,4 +471,3 @@ mod tests {
         }
     }
 }
-

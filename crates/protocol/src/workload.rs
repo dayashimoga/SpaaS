@@ -1,21 +1,16 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeType {
     /// WebAssembly with WASI Preview 1 sandboxing (Default production runtime)
+    #[default]
     WasmWasi,
     /// Future extensible AI inference runtime (e.g. ONNX/TFLite)
     AiInference,
     /// Future native sandboxed container (Linux/MicroVM)
     NativeSandbox,
-}
-
-impl Default for RuntimeType {
-    fn default() -> Self {
-        Self::WasmWasi
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,7 +31,7 @@ impl Default for ResourceLimits {
     fn default() -> Self {
         Self {
             max_fuel: 50_000_000,
-            max_memory_bytes: 64 * 1024 * 1024, // 64 MB
+            max_memory_bytes: 64 * 1024 * 1024,  // 64 MB
             max_storage_bytes: 10 * 1024 * 1024, // 10 MB
             timeout_ms: 30_000,                  // 30 seconds
             max_output_bytes: 1024 * 1024,       // 1 MB
@@ -44,21 +39,16 @@ impl Default for ResourceLimits {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum NetworkPolicy {
     /// Sandboxed execution with zero network access (Strongest isolation)
+    #[default]
     None,
     /// Outbound HTTP/HTTPS requests to pre-approved endpoints only
     OutboundRestricted,
     /// Full network access (Requires elevated provider consent)
     Full,
-}
-
-impl Default for NetworkPolicy {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,60 +100,39 @@ impl Default for RetryPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum VerificationPolicy {
     /// Zero verification overhead for best-effort / low-cost jobs
     None,
     /// Single node execution, trusts signature and hash
+    #[default]
     SingleNode,
     /// Compares output digest against a known expected SHA-256 digest
-    HashMatch {
-        expected_digest: String,
-    },
+    HashMatch { expected_digest: String },
     /// Redundant execution with consensus quorum across multiple untrusted nodes.
     /// Invariant: M-of-N protects against non-colluding nodes; it DOES NOT protect against colluding groups.
-    MOfN {
-        replicas: u32,
-        threshold: u32,
-    },
+    MOfN { replicas: u32, threshold: u32 },
     /// Spot check by re-executing on a deterministic verification node
     DeterministicReplay,
     /// Restricts execution only to nodes with high historical reputation
-    TrustedNode {
-        min_reputation: u32,
-    },
+    TrustedNode { min_reputation: u32 },
     /// Delegated verification via custom external verifier
-    CustomVerifier {
-        verifier_endpoint: String,
-    },
+    CustomVerifier { verifier_endpoint: String },
     /// Random spot check (probabilistic second execution)
-    SpotCheck {
-        probability_pct: u8,
-    },
+    SpotCheck { probability_pct: u8 },
     /// Reserved for hardware TEE/AVF pKVM attestation (currently UNSUPPORTED on non-TEE devices)
     TeeAttested,
 }
 
-impl Default for VerificationPolicy {
-    fn default() -> Self {
-        Self::SingleNode
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 #[repr(u8)]
 pub enum WorkloadPriority {
     Low = 0,
+    #[default]
     Normal = 10,
     High = 20,
     Critical = 30,
-}
-
-impl Default for WorkloadPriority {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 /// Versioned Workload Specification (Section 6)
@@ -232,7 +201,8 @@ impl Default for WorkloadSpec {
             spec_version: "1.0.0".into(),
             name: "default_workload".into(),
             runtime: RuntimeType::WasmWasi,
-            artifact_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
+            artifact_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .into(),
             artifact_size_bytes: 0,
             artifact_uri: "inline://".into(),
             entrypoint: "_start".into(),
@@ -354,7 +324,8 @@ mod tests {
             spec_version: "1.0.0".into(),
             name: "matrix_multiply".into(),
             runtime: RuntimeType::WasmWasi,
-            artifact_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
+            artifact_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .into(),
             artifact_size_bytes: 4096,
             artifact_uri: "spaas://artifacts/sample.wasm".into(),
             entrypoint: "_start".into(),
@@ -375,7 +346,10 @@ mod tests {
         let decoded: WorkloadSpec = serde_json::from_str(&json).unwrap();
         assert_eq!(spec.workload_id, decoded.workload_id);
         assert_eq!(spec.limits.max_fuel, decoded.limits.max_fuel);
-        assert_eq!(spec.canonical_bytes_for_signing(), decoded.canonical_bytes_for_signing());
+        assert_eq!(
+            spec.canonical_bytes_for_signing(),
+            decoded.canonical_bytes_for_signing()
+        );
     }
 
     #[test]
@@ -418,12 +392,21 @@ spec:
         let policies = vec![
             VerificationPolicy::None,
             VerificationPolicy::SingleNode,
-            VerificationPolicy::HashMatch { expected_digest: "hash_abc".into() },
-            VerificationPolicy::MOfN { replicas: 5, threshold: 3 },
+            VerificationPolicy::HashMatch {
+                expected_digest: "hash_abc".into(),
+            },
+            VerificationPolicy::MOfN {
+                replicas: 5,
+                threshold: 3,
+            },
             VerificationPolicy::DeterministicReplay,
             VerificationPolicy::TrustedNode { min_reputation: 90 },
-            VerificationPolicy::SpotCheck { probability_pct: 10 },
-            VerificationPolicy::CustomVerifier { verifier_endpoint: "https://verifier.spaas.dev".into() },
+            VerificationPolicy::SpotCheck {
+                probability_pct: 10,
+            },
+            VerificationPolicy::CustomVerifier {
+                verifier_endpoint: "https://verifier.spaas.dev".into(),
+            },
             VerificationPolicy::TeeAttested,
         ];
 

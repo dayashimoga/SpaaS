@@ -130,29 +130,40 @@ mod tests {
         sign_job_result(&keys, &mut res);
 
         // 1. Verify signature success
-        assert!(engine.verify_single_result(&res, &keys.public_key_hex()).is_ok());
+        assert!(engine
+            .verify_single_result(&res, &keys.public_key_hex())
+            .is_ok());
 
         // 2. Verify signature failure (wrong pubkey)
         let other_keys = KeyPair::generate();
-        assert!(engine.verify_single_result(&res, &other_keys.public_key_hex()).is_err());
+        assert!(engine
+            .verify_single_result(&res, &other_keys.public_key_hex())
+            .is_err());
 
         // 3. Hash match
         assert!(engine.verify_hash_match(&res, &digest).is_ok());
         assert!(engine.verify_hash_match(&res, "sha_mismatch").is_err());
 
         // 4. Redundant quorum
-        assert!(matches!(engine.verify_redundant_quorum(&[], 2), Err(ProtocolError::ConsensusFailed { .. })));
+        assert!(matches!(
+            engine.verify_redundant_quorum(&[], 2),
+            Err(ProtocolError::ConsensusFailed { .. })
+        ));
 
         let mut res2 = res.clone();
         res2.result_id = Uuid::new_v4();
         res2.node_id = Uuid::new_v4();
 
-        let outcome = engine.verify_redundant_quorum(&[res.clone(), res2], 2).unwrap();
+        let outcome = engine
+            .verify_redundant_quorum(&[res.clone(), res2], 2)
+            .unwrap();
         assert!(outcome.is_consensus_reached);
         assert_eq!(outcome.agreed_digest, digest);
 
         // Insufficient matching (require 3 matching, only have 2)
-        assert!(matches!(engine.verify_redundant_quorum(&[res], 3), Err(ProtocolError::ConsensusFailed { .. })));
+        assert!(matches!(
+            engine.verify_redundant_quorum(&[res], 3),
+            Err(ProtocolError::ConsensusFailed { .. })
+        ));
     }
 }
-

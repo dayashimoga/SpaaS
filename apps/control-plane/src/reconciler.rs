@@ -29,7 +29,10 @@ pub async fn run_reconciler_loop(state: AppState) {
                     warn!(node_id = %node_id, "Node missed heartbeats; marked OFFLINE");
 
                     let updated = node.clone();
-                    let _ = state.storage.append_event(WalEvent::UpsertNode { node: updated }).await;
+                    let _ = state
+                        .storage
+                        .append_event(WalEvent::UpsertNode { node: updated })
+                        .await;
                 }
             }
         }
@@ -61,10 +64,13 @@ pub async fn run_reconciler_loop(state: AppState) {
                     if node_died || is_timed_out || is_lease_expired {
                         let expired_lease = job.current_lease.take();
                         if let Some(l) = expired_lease {
-                            let _ = state.storage.append_event(WalEvent::RevokeLease {
-                                job_id: *job_id,
-                                lease_id: l.lease_id,
-                            }).await;
+                            let _ = state
+                                .storage
+                                .append_event(WalEvent::RevokeLease {
+                                    job_id: *job_id,
+                                    lease_id: l.lease_id,
+                                })
+                                .await;
                         }
 
                         if job.retry_count < job.spec.retry_policy.max_retries {
@@ -89,18 +95,26 @@ pub async fn run_reconciler_loop(state: AppState) {
                             jobs_to_reschedule.push(*job_id);
 
                             let updated_job = job.clone();
-                            let _ = state.storage.append_event(WalEvent::UpsertJob { job: updated_job }).await;
+                            let _ = state
+                                .storage
+                                .append_event(WalEvent::UpsertJob { job: updated_job })
+                                .await;
                         } else {
                             warn!(
                                 job_id = %job_id,
                                 "Job exceeded max retries; marking FAILED"
                             );
                             let _ = job.transition_to(JobState::Failed);
-                            job.error_message = Some("Node disappeared or lease expired with retries exhausted".into());
+                            job.error_message = Some(
+                                "Node disappeared or lease expired with retries exhausted".into(),
+                            );
                             state.metrics.failed_jobs.fetch_add(1, Ordering::Relaxed);
 
                             let updated_job = job.clone();
-                            let _ = state.storage.append_event(WalEvent::UpsertJob { job: updated_job }).await;
+                            let _ = state
+                                .storage
+                                .append_event(WalEvent::UpsertJob { job: updated_job })
+                                .await;
                         }
                     }
                 }
@@ -124,7 +138,10 @@ pub async fn run_reconciler_loop(state: AppState) {
         for q_id in queued_job_ids {
             let mut jobs = state.jobs.write().await;
             if let Some(job) = jobs.get_mut(&q_id) {
-                if let Ok(selected) = state.scheduler.schedule_workload(&job.spec, &eligible_nodes) {
+                if let Ok(selected) = state
+                    .scheduler
+                    .schedule_workload(&job.spec, &eligible_nodes)
+                {
                     if !selected.is_empty() {
                         let primary = selected[0];
                         let lease = JobLease::new(q_id, primary, 30_000);
@@ -149,8 +166,14 @@ pub async fn run_reconciler_loop(state: AppState) {
                         dispatches.insert(primary, dispatch);
 
                         let updated_job = job.clone();
-                        let _ = state.storage.append_event(WalEvent::GrantLease { lease }).await;
-                        let _ = state.storage.append_event(WalEvent::UpsertJob { job: updated_job }).await;
+                        let _ = state
+                            .storage
+                            .append_event(WalEvent::GrantLease { lease })
+                            .await;
+                        let _ = state
+                            .storage
+                            .append_event(WalEvent::UpsertJob { job: updated_job })
+                            .await;
 
                         info!(job_id = %q_id, node_id = %primary, "Queued job scheduled by reconciler with renewable lease");
                     }

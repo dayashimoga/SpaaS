@@ -1,59 +1,38 @@
 {
-    "evidence_classifications":  {
-                                     "android_foreground_service":  "IMPLEMENTED-UNPROVEN",
-                                     "metering_idempotency":  "PROVEN",
-                                     "android_runtime_verification":  "HARDWARE-REQUIRED",
-                                     "ed25519_signatures":  "PROVEN",
-                                     "web_console_visual_ux":  "PROVEN",
-                                     "developer_manifest_v1":  "PROVEN",
-                                     "durable_wal_persistence":  "PROVEN",
-                                     "qualcomm_npu_avf_pkvm":  "HARDWARE-REQUIRED",
-                                     "desktop_worker_compute":  "PROVEN",
-                                     "podman_fullstack_e2e":  "PROVEN",
-                                     "wasm_wasi_sandbox":  "PROVEN",
-                                     "scheduler_multi_attribute":  "PROVEN",
-                                     "android_apk_build":  "PROVEN",
-                                     "renewable_job_leases":  "PROVEN",
-                                     "heterogeneous_simulation":  "SIMULATION-PROVEN",
-                                     "node_qualification_benchmarks":  "PROVEN"
-                                 },
-    "test_summary":  {
-                         "passed":  64,
-                         "failed":  0,
-                         "coverage_report_html":  "target/coverage/tarpaulin-report.html",
-                         "total_tests":  64,
-                         "measured_line_coverage_pct":  91.34,
-                         "pass_rate_pct":  100,
-                         "coverage_report_json":  "target/coverage/tarpaulin-report.json"
-                     },
-    "gate_results":  {
-                         "G01":  "PROVEN",
-                         "G02":  "PROVEN",
-                         "G03":  "PROVEN",
-                         "G04":  "PROVEN",
-                         "G05":  "PROVEN",
-                         "G06":  "PROVEN",
-                         "G07":  "PROVEN",
-                         "G08":  "SIMULATION-PROVEN",
-                         "G09":  "PROVEN",
-                         "G10":  "PROVEN",
-                         "G11":  "PROVEN",
-                         "G12":  "PROVEN",
-                         "G13":  "PROVEN",
-                         "G14":  "HARDWARE-REQUIRED",
-                         "G15":  "PROVEN",
-                         "G16":  "PROVEN",
-                         "G17":  "PROVEN",
-                         "G18":  "PROVEN"
-                     },
-    "timestamp":  "2026-09-25T14:40:39.7522313+05:30",
-    "git_commit":  "05103705bb9bb74abb4745574c8f9bfe8fbe0959",
-    "summary":  {
-                    "total_gates":  18,
-                    "failed_gates":  0,
-                    "proven_gates":  16,
-                    "simulation_proven_gates":  1,
-                    "hardware_required_gates":  1
-                },
-    "status":  "PRODUCTION_HARDENED_ACCEPTANCE_PASS"
+  "git_commit": "d9af87f04d948abff6782522660cef035b3ab8b7",
+  "evidence_classifications": {
+    "wasm_wasi_sandbox": "PROVEN",
+    "ed25519_signatures": "PROVEN",
+    "scheduler_multi_attribute": "PROVEN",
+    "durable_wal_persistence": "PROVEN",
+    "renewable_job_leases": "PROVEN",
+    "metering_idempotency": "PROVEN",
+    "desktop_worker_compute": "PROVEN",
+    "developer_manifest_v1": "PROVEN",
+    "node_qualification_benchmarks": "PROVEN",
+    "android_apk_build": "PROVEN",
+    "podman_fullstack_e2e": "PROVEN",
+    "web_console_visual_ux": "PROVEN",
+    "heterogeneous_simulation": "SIMULATION-PROVEN",
+    "android_foreground_service": "IMPLEMENTED-UNPROVEN",
+    "android_runtime_verification": "HARDWARE-REQUIRED",
+    "qualcomm_npu_avf_pkvm": "HARDWARE-REQUIRED"
+  },
+  "test_summary": {
+    "total_tests": 64,
+    "passed": 64,
+    "failed": 0,
+    "pass_rate_pct": 100.0,
+    "measured_line_coverage_pct": 91.34,
+    "coverage_report_html": "target/coverage/tarpaulin-report.html",
+    "coverage_report_json": "target/coverage/tarpaulin-report.json"
+  },
+  "summary": {
+    "total_gates": 18,
+    "proven_gates": 16,
+    "simulation_proven_gates": 1,
+    "hardware_required_gates": 1,
+    "failed_gates": 0
+  },
+  "status": "PRODUCTION_HARDENED_ACCEPTANCE_PASS"
 }

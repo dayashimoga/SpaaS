@@ -69,4 +69,3 @@ mod tests {
         assert_eq!(deser.max_queue_capacity, 10_000);
     }
 }
-

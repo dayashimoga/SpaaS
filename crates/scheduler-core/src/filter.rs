@@ -7,12 +7,24 @@ pub enum FilterRejectionReason {
     NodeOfflineOrPaused,
     UserExplicitlyPaused,
     MaxConcurrentJobsReached,
-    ArchitectureMismatch { required: Vec<String>, actual: String },
-    InsufficientRam { required_mb: u64, available_mb: u64 },
-    BatteryTooLow { threshold_pct: u8, actual_pct: u8 },
+    ArchitectureMismatch {
+        required: Vec<String>,
+        actual: String,
+    },
+    InsufficientRam {
+        required_mb: u64,
+        available_mb: u64,
+    },
+    BatteryTooLow {
+        threshold_pct: u8,
+        actual_pct: u8,
+    },
     ChargingRequiredNotMet,
     UnmeteredNetworkRequiredNotMet,
-    ThermalThrottled { max_allowed: ThermalStatus, actual: ThermalStatus },
+    ThermalThrottled {
+        max_allowed: ThermalStatus,
+        actual: ThermalStatus,
+    },
 }
 
 /// Evaluates if a node is strictly eligible to execute a given workload
@@ -43,10 +55,10 @@ pub fn evaluate_node_eligibility(
     // 5. Architecture match
     let req_caps = &spec.required_capabilities;
     if !req_caps.architectures.is_empty()
-        && !req_caps.architectures.iter().any(|arch| {
-            arch.eq_ignore_ascii_case(&node.capabilities.architecture)
-                || arch == "*"
-        })
+        && !req_caps
+            .architectures
+            .iter()
+            .any(|arch| arch.eq_ignore_ascii_case(&node.capabilities.architecture) || arch == "*")
     {
         return Err(FilterRejectionReason::ArchitectureMismatch {
             required: req_caps.architectures.clone(),
@@ -63,7 +75,9 @@ pub fn evaluate_node_eligibility(
     }
 
     // 7. Battery threshold (max of workload requirement and node policy)
-    let min_battery = req_caps.min_battery_pct.max(node.policy.min_battery_threshold_pct);
+    let min_battery = req_caps
+        .min_battery_pct
+        .max(node.policy.min_battery_threshold_pct);
     if node.telemetry.battery_pct < min_battery {
         return Err(FilterRejectionReason::BatteryTooLow {
             threshold_pct: min_battery,
@@ -78,7 +92,8 @@ pub fn evaluate_node_eligibility(
     }
 
     // 9. Network requirement
-    let requires_unmetered = req_caps.require_unmetered_network || node.policy.only_on_unmetered_network;
+    let requires_unmetered =
+        req_caps.require_unmetered_network || node.policy.only_on_unmetered_network;
     if requires_unmetered && !node.telemetry.network_type.is_unmetered() {
         return Err(FilterRejectionReason::UnmeteredNetworkRequiredNotMet);
     }
@@ -148,54 +163,83 @@ mod tests {
 
         // 2. Not enrolled
         node.enrollment = EnrollmentStatus::Suspended;
-        assert_eq!(evaluate_node_eligibility(&node, &spec), Err(FilterRejectionReason::NotEnrolled));
+        assert_eq!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::NotEnrolled)
+        );
         node.enrollment = EnrollmentStatus::Enrolled;
 
         // 3. Node offline
         node.state = NodeState::Offline;
-        assert_eq!(evaluate_node_eligibility(&node, &spec), Err(FilterRejectionReason::NodeOfflineOrPaused));
+        assert_eq!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::NodeOfflineOrPaused)
+        );
         node.state = NodeState::Idle;
 
         // 4. User paused
         node.policy.is_user_paused = true;
-        assert_eq!(evaluate_node_eligibility(&node, &spec), Err(FilterRejectionReason::UserExplicitlyPaused));
+        assert_eq!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::UserExplicitlyPaused)
+        );
         node.policy.is_user_paused = false;
 
         // 5. Max concurrent jobs
         node.telemetry.active_job_count = 1;
-        assert_eq!(evaluate_node_eligibility(&node, &spec), Err(FilterRejectionReason::MaxConcurrentJobsReached));
+        assert_eq!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::MaxConcurrentJobsReached)
+        );
         node.telemetry.active_job_count = 0;
 
         // 6. Architecture mismatch
         spec.required_capabilities.architectures = vec!["x86_64".into()];
-        assert!(matches!(evaluate_node_eligibility(&node, &spec), Err(FilterRejectionReason::ArchitectureMismatch { .. })));
+        assert!(matches!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::ArchitectureMismatch { .. })
+        ));
         spec.required_capabilities.architectures = vec!["*".into()];
         assert!(evaluate_node_eligibility(&node, &spec).is_ok());
         spec.required_capabilities.architectures.clear();
 
         // 7. Insufficient RAM
         spec.required_capabilities.min_ram_mb = 4096;
-        assert!(matches!(evaluate_node_eligibility(&node, &spec), Err(FilterRejectionReason::InsufficientRam { .. })));
+        assert!(matches!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::InsufficientRam { .. })
+        ));
         spec.required_capabilities.min_ram_mb = 512;
 
         // 8. Battery too low
         node.telemetry.battery_pct = 20;
-        assert!(matches!(evaluate_node_eligibility(&node, &spec), Err(FilterRejectionReason::BatteryTooLow { .. })));
+        assert!(matches!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::BatteryTooLow { .. })
+        ));
         node.telemetry.battery_pct = 80;
 
         // 9. Charging required not met
         node.telemetry.charging_state = ChargingState::Discharging;
-        assert_eq!(evaluate_node_eligibility(&node, &spec), Err(FilterRejectionReason::ChargingRequiredNotMet));
+        assert_eq!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::ChargingRequiredNotMet)
+        );
         node.telemetry.charging_state = ChargingState::ChargingAc;
 
         // 10. Unmetered network required not met
         node.telemetry.network_type = NetworkType::CellularMetered;
-        assert_eq!(evaluate_node_eligibility(&node, &spec), Err(FilterRejectionReason::UnmeteredNetworkRequiredNotMet));
+        assert_eq!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::UnmeteredNetworkRequiredNotMet)
+        );
         node.telemetry.network_type = NetworkType::WifiUnmetered;
 
         // 11. Thermal throttled
         node.telemetry.thermal_status = ThermalStatus::Severe;
-        assert!(matches!(evaluate_node_eligibility(&node, &spec), Err(FilterRejectionReason::ThermalThrottled { .. })));
+        assert!(matches!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::ThermalThrottled { .. })
+        ));
     }
 }
-

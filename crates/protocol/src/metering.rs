@@ -23,8 +23,9 @@ impl ResourceUsage {
     pub fn calculate_credits(&self) -> u64 {
         let fuel_credits = self.fuel_consumed / 100_000;
         let memory_mb_sec = (self.memory_peak_bytes / (1024 * 1024)) * (self.wall_time_ms / 1000);
-        let bandwidth_credits = (self.network_ingress_bytes + self.network_egress_bytes) / (100 * 1024);
-        
+        let bandwidth_credits =
+            (self.network_ingress_bytes + self.network_egress_bytes) / (100 * 1024);
+
         // Minimum charge of 1 credit for any completed execution
         (fuel_credits + memory_mb_sec + bandwidth_credits).max(1)
     }
@@ -63,7 +64,11 @@ impl MeteringRecord {
         hasher.update(result_digest.as_bytes());
         let idempotency_key = hex::encode(hasher.finalize());
 
-        let credits = if is_verified { usage.calculate_credits() } else { 0 };
+        let credits = if is_verified {
+            usage.calculate_credits()
+        } else {
+            0
+        };
 
         Self {
             record_id: Uuid::new_v4(),
@@ -103,8 +108,8 @@ mod tests {
             fuel_consumed: 1_000_000, // 10 credits
             wall_time_ms: 2000,
             memory_peak_bytes: 32 * 1024 * 1024, // 32MB * 2s = 64 credits
-            network_ingress_bytes: 200 * 1024,  // 2 credits
-            network_egress_bytes: 100 * 1024,   // 1 credit
+            network_ingress_bytes: 200 * 1024,   // 2 credits
+            network_egress_bytes: 100 * 1024,    // 1 credit
             storage_bytes: 1024,
         };
 

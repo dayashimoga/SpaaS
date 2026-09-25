@@ -10,7 +10,12 @@ use state::AppState;
 use tracing::info;
 
 #[derive(Parser, Debug)]
-#[command(name = "spaas-control-plane", author, version, about = "SPaaS Control Plane Orchestration Service")]
+#[command(
+    name = "spaas-control-plane",
+    author,
+    version,
+    about = "SPaaS Control Plane Orchestration Service"
+)]
 struct Args {
     #[arg(long, default_value = "0.0.0.0")]
     host: String,

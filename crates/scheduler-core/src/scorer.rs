@@ -99,7 +99,10 @@ mod tests {
         let score_exc = score_node(&node_excellent, &weights);
         let score_med = score_node(&node_mediocre, &weights);
 
-        assert!(score_exc > score_med, "Excellent node must outscore mediocre node");
+        assert!(
+            score_exc > score_med,
+            "Excellent node must outscore mediocre node"
+        );
         assert!(score_exc >= 80.0);
 
         // Test other charging, thermal, and network variants

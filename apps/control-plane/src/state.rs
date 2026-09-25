@@ -32,10 +32,12 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(data_dir: impl AsRef<Path>) -> Self {
-        let storage = Arc::new(
-            DurableStorage::open(data_dir.as_ref())
-                .unwrap_or_else(|e| panic!("Failed to open durable storage at {:?}: {e}", data_dir.as_ref())),
-        );
+        let storage = Arc::new(DurableStorage::open(data_dir.as_ref()).unwrap_or_else(|e| {
+            panic!(
+                "Failed to open durable storage at {:?}: {e}",
+                data_dir.as_ref()
+            )
+        }));
 
         let recovered = storage.initial_state.clone();
 
@@ -87,7 +89,10 @@ impl AppState {
             let mut log = self.audit_log.write().await;
             log.push(record.clone());
         }
-        let _ = self.storage.append_event(WalEvent::AppendAudit { record }).await;
+        let _ = self
+            .storage
+            .append_event(WalEvent::AppendAudit { record })
+            .await;
     }
 
     pub async fn upsert_node(&self, node: NodeRecord) {
@@ -95,7 +100,10 @@ impl AppState {
             let mut nodes = self.nodes.write().await;
             nodes.insert(node.node_id, node.clone());
         }
-        let _ = self.storage.append_event(WalEvent::UpsertNode { node }).await;
+        let _ = self
+            .storage
+            .append_event(WalEvent::UpsertNode { node })
+            .await;
     }
 
     pub async fn upsert_job(&self, job: JobRecord) {
@@ -113,7 +121,10 @@ impl AppState {
                 job.current_lease = Some(lease.clone());
             }
         }
-        let _ = self.storage.append_event(WalEvent::GrantLease { lease }).await;
+        let _ = self
+            .storage
+            .append_event(WalEvent::GrantLease { lease })
+            .await;
     }
 
     #[allow(dead_code)]
@@ -124,7 +135,10 @@ impl AppState {
                 job.current_lease = Some(lease.clone());
             }
         }
-        let _ = self.storage.append_event(WalEvent::RenewLease { lease }).await;
+        let _ = self
+            .storage
+            .append_event(WalEvent::RenewLease { lease })
+            .await;
     }
 
     #[allow(dead_code)]
@@ -135,7 +149,10 @@ impl AppState {
                 job.current_lease = None;
             }
         }
-        let _ = self.storage.append_event(WalEvent::RevokeLease { job_id, lease_id }).await;
+        let _ = self
+            .storage
+            .append_event(WalEvent::RevokeLease { job_id, lease_id })
+            .await;
     }
 
     pub async fn store_wasm_artifact(&self, sha256: String, bytes: Vec<u8>) {
@@ -143,7 +160,10 @@ impl AppState {
             let mut artifacts = self.wasm_artifacts.write().await;
             artifacts.insert(sha256.clone(), bytes.clone());
         }
-        let _ = self.storage.append_event(WalEvent::StoreArtifact { sha256, bytes }).await;
+        let _ = self
+            .storage
+            .append_event(WalEvent::StoreArtifact { sha256, bytes })
+            .await;
     }
 }
 
@@ -197,18 +217,45 @@ mod tests {
         // 4. Grant, renew, revoke lease
         let mut lease = JobLease::new(job_id, node_id, 1000);
         state.grant_lease(lease.clone()).await;
-        assert!(state.jobs.read().await.get(&job_id).unwrap().current_lease.is_some());
+        assert!(state
+            .jobs
+            .read()
+            .await
+            .get(&job_id)
+            .unwrap()
+            .current_lease
+            .is_some());
 
         lease.renew(2000);
         state.renew_lease(lease.clone()).await;
-        assert_eq!(state.jobs.read().await.get(&job_id).unwrap().current_lease.as_ref().unwrap().term, 2);
+        assert_eq!(
+            state
+                .jobs
+                .read()
+                .await
+                .get(&job_id)
+                .unwrap()
+                .current_lease
+                .as_ref()
+                .unwrap()
+                .term,
+            2
+        );
 
         state.revoke_lease(job_id, lease.lease_id).await;
-        assert!(state.jobs.read().await.get(&job_id).unwrap().current_lease.is_none());
+        assert!(state
+            .jobs
+            .read()
+            .await
+            .get(&job_id)
+            .unwrap()
+            .current_lease
+            .is_none());
 
         // 5. Store WASM artifact
-        state.store_wasm_artifact("sha_wasm".into(), vec![0x00, 0x61, 0x73, 0x6d]).await;
+        state
+            .store_wasm_artifact("sha_wasm".into(), vec![0x00, 0x61, 0x73, 0x6d])
+            .await;
         assert!(state.wasm_artifacts.read().await.contains_key("sha_wasm"));
     }
 }
-

@@ -45,13 +45,14 @@ spec:
 "#;
 
     // 1. Parse and validate YAML manifest
-    let manifest = DeveloperWorkloadManifest::from_yaml_str(yaml_manifest).expect("Valid YAML manifest failed to parse");
+    let manifest = DeveloperWorkloadManifest::from_yaml_str(yaml_manifest)
+        .expect("Valid YAML manifest failed to parse");
     assert_eq!(manifest.api_version, "spaas.io/v1");
     assert_eq!(manifest.kind, "Workload");
     assert_eq!(manifest.metadata.name, "edge-prime-sieve");
     assert_eq!(manifest.metadata.version, "1.2.0");
     assert_eq!(manifest.spec.limits.max_fuel, 25_000_000);
-    assert_eq!(manifest.spec.capabilities.require_charging, true);
+    assert!(manifest.spec.capabilities.require_charging);
     assert_eq!(manifest.spec.priority, WorkloadPriority::High);
 
     // 2. Synthesize test wasm bytecode for execution

@@ -85,11 +85,11 @@ fn test_job_lease_lifecycle_and_late_result_rejection() {
     };
 
     // Control Plane validation: Job is in Queued state and has no active lease for Node A
-    let late_submission_accepted = match &job.current_lease {
-        Some(l) if l.lease_id == expired_lease.lease_id && !l.is_expired(current_time_ms) => true,
-        _ => false,
-    };
-    assert!(!late_submission_accepted, "Late result from expired lease must be rejected");
+    let late_submission_accepted = matches!(&job.current_lease, Some(l) if l.lease_id == expired_lease.lease_id && !l.is_expired(current_time_ms));
+    assert!(
+        !late_submission_accepted,
+        "Late result from expired lease must be rejected"
+    );
 
     // 6. Scheduler reassigns job to Node B with fresh lease B
     let lease_b = JobLease {

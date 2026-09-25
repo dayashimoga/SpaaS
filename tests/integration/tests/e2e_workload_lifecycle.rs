@@ -141,7 +141,13 @@ async fn test_full_e2e_workload_lifecycle() {
         .unwrap();
 
     assert!(metering_rec.credits_earned_by_node > 0);
-    assert_eq!(ledger.get_account(&node_high.public_key_hex()).unwrap().balance_credits, metering_rec.credits_earned_by_node as i64);
+    assert_eq!(
+        ledger
+            .get_account(&node_high.public_key_hex())
+            .unwrap()
+            .balance_credits,
+        metering_rec.credits_earned_by_node as i64
+    );
 
     // 10. Audit log verified
     assert_eq!(node_high.history.total_jobs_recorded(), 1);

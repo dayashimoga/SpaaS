@@ -28,7 +28,10 @@ impl VerificationEvidenceClass {
 
     /// Returns true if verified via simulated or emulated environments
     pub fn is_test_verified(&self) -> bool {
-        matches!(self, Self::Proven | Self::EmulatorProven | Self::SimulationProven)
+        matches!(
+            self,
+            Self::Proven | Self::EmulatorProven | Self::SimulationProven
+        )
     }
 
     /// Returns a human-readable display label
@@ -71,11 +74,26 @@ mod tests {
 
         // Labels and Display
         assert_eq!(format!("{}", VerificationEvidenceClass::Proven), "PROVEN");
-        assert_eq!(format!("{}", VerificationEvidenceClass::EmulatorProven), "EMULATOR-PROVEN");
-        assert_eq!(format!("{}", VerificationEvidenceClass::SimulationProven), "SIMULATION-PROVEN");
-        assert_eq!(format!("{}", VerificationEvidenceClass::ImplementedUnproven), "IMPLEMENTED-UNPROVEN");
-        assert_eq!(format!("{}", VerificationEvidenceClass::HardwareRequired), "HARDWARE-REQUIRED");
-        assert_eq!(format!("{}", VerificationEvidenceClass::Unsupported), "UNSUPPORTED");
+        assert_eq!(
+            format!("{}", VerificationEvidenceClass::EmulatorProven),
+            "EMULATOR-PROVEN"
+        );
+        assert_eq!(
+            format!("{}", VerificationEvidenceClass::SimulationProven),
+            "SIMULATION-PROVEN"
+        );
+        assert_eq!(
+            format!("{}", VerificationEvidenceClass::ImplementedUnproven),
+            "IMPLEMENTED-UNPROVEN"
+        );
+        assert_eq!(
+            format!("{}", VerificationEvidenceClass::HardwareRequired),
+            "HARDWARE-REQUIRED"
+        );
+        assert_eq!(
+            format!("{}", VerificationEvidenceClass::Unsupported),
+            "UNSUPPORTED"
+        );
     }
 
     #[test]

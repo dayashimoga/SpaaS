@@ -78,7 +78,8 @@ impl NodeQualificationEngine {
         // Hash and sign qualification output
         let qual_summary = format!("{}:{}:{:.4}", node_id, fuel_consumed, measured_mips);
         let qual_hash = sha256_hex(qual_summary.as_bytes());
-        let signature_b64 = spaas_security::signing::sign_message(node_keypair, qual_hash.as_bytes());
+        let signature_b64 =
+            spaas_security::signing::sign_message(node_keypair, qual_hash.as_bytes());
 
         Ok(NodeQualificationProfile {
             qualified_at_ms: chrono::Utc::now().timestamp_millis(),
@@ -113,4 +114,3 @@ mod tests {
         assert!(!qual.qualification_signature.is_empty());
     }
 }
-

@@ -8,7 +8,9 @@ pub enum RuntimeError {
     #[error("Execution timed out after {timeout_ms} ms")]
     Timeout { timeout_ms: u64 },
 
-    #[error("Memory limit exceeded: requested {requested_bytes} bytes, limit is {max_bytes} bytes")]
+    #[error(
+        "Memory limit exceeded: requested {requested_bytes} bytes, limit is {max_bytes} bytes"
+    )]
     MemoryLimitExceeded {
         requested_bytes: u64,
         max_bytes: u64,

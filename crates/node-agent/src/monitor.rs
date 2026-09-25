@@ -66,7 +66,10 @@ mod tests {
         let mut telemetry = NodeTelemetry::default();
 
         // 1. Normal state: no yield
-        assert_eq!(ResourceSafetyMonitor::check_safety_yield(&telemetry, &policy), None);
+        assert_eq!(
+            ResourceSafetyMonitor::check_safety_yield(&telemetry, &policy),
+            None
+        );
 
         // 2. UserPaused
         policy.is_user_paused = true;
@@ -112,4 +115,3 @@ mod tests {
         );
     }
 }
-

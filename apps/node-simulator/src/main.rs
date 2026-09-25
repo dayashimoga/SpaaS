@@ -7,7 +7,12 @@ use std::time::Duration;
 use tracing::info;
 
 #[derive(Parser, Debug)]
-#[command(name = "spaas-node-simulator", author, version, about = "SPaaS Heterogeneous Node Simulation Lab")]
+#[command(
+    name = "spaas-node-simulator",
+    author,
+    version,
+    about = "SPaaS Heterogeneous Node Simulation Lab"
+)]
 struct Args {
     #[arg(short, long, default_value = "http://127.0.0.1:8080")]
     control_plane_url: String,
@@ -32,18 +37,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(" EVIDENCE LEVEL: SIMULATION-PROVEN (Always labelled)");
     info!(" Nodes to simulate:       {}", args.nodes);
     info!(" Control Plane URL:       {}", args.control_plane_url);
-    info!(" Adversarial Node Ratio:  {:.1}%", args.adversarial_ratio * 100.0);
+    info!(
+        " Adversarial Node Ratio:  {:.1}%",
+        args.adversarial_ratio * 100.0
+    );
     info!(" Simulation Run Duration: {}s", args.duration_secs);
     info!("===========================================================");
 
-    let cluster = SimulatorCluster::new(
-        args.control_plane_url,
-        args.nodes,
-        args.adversarial_ratio,
-    );
+    let cluster = SimulatorCluster::new(args.control_plane_url, args.nodes, args.adversarial_ratio);
 
-    let registered = cluster.register_all().await.map_err(|e| e)?;
-    info!("Registered {} / {} nodes successfully", registered, args.nodes);
+    let registered = cluster.register_all().await?;
+    info!(
+        "Registered {} / {} nodes successfully",
+        registered, args.nodes
+    );
 
     if registered > 0 {
         cluster

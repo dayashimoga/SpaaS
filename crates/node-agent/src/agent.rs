@@ -2,7 +2,8 @@ use crate::history::LocalJobHistoryStore;
 use crate::monitor::{ResourceSafetyMonitor, YieldReason};
 use spaas_protocol::job::JobResult;
 use spaas_protocol::node::{
-    EnrollmentStatus, NodeHardwareCapabilities, NodeRecord, NodeState, NodeTelemetry, ProviderPolicy,
+    EnrollmentStatus, NodeHardwareCapabilities, NodeRecord, NodeState, NodeTelemetry,
+    ProviderPolicy,
 };
 use spaas_protocol::rpc::JobDispatchMessage;
 use spaas_runtime::traits::{ExecutionContext, WorkloadRuntime};
@@ -112,7 +113,10 @@ impl NodeAgent {
         let yield_check = ResourceSafetyMonitor::check_safety_yield(&self.telemetry, &self.policy);
         if yield_check.is_some() && self.state != NodeState::Paused {
             self.state = NodeState::Paused;
-        } else if yield_check.is_none() && self.state == NodeState::Paused && !self.policy.is_user_paused {
+        } else if yield_check.is_none()
+            && self.state == NodeState::Paused
+            && !self.policy.is_user_paused
+        {
             self.state = NodeState::Idle;
         }
         yield_check
@@ -261,7 +265,10 @@ mod tests {
 
         // Test to_record
         let rec = agent.to_record();
-        assert_eq!(rec.device_type, spaas_protocol::node::NodeDeviceType::SimulatedNode);
+        assert_eq!(
+            rec.device_type,
+            spaas_protocol::node::NodeDeviceType::SimulatedNode
+        );
         assert_eq!(rec.state, NodeState::Idle);
 
         let agent_physical = NodeAgent::new(
@@ -269,7 +276,10 @@ mod tests {
             ProviderPolicy::default(),
             false,
         );
-        assert_eq!(agent_physical.to_record().device_type, spaas_protocol::node::NodeDeviceType::AndroidSmartphone);
+        assert_eq!(
+            agent_physical.to_record().device_type,
+            spaas_protocol::node::NodeDeviceType::AndroidSmartphone
+        );
 
         // Test pause and resume
         agent.pause();
@@ -280,8 +290,10 @@ mod tests {
         assert!(!agent.policy.is_user_paused);
 
         // Test telemetry update with safety yield
-        let mut tel = NodeTelemetry::default();
-        tel.battery_pct = 5; // below 20% default threshold
+        let mut tel = NodeTelemetry {
+            battery_pct: 5, // below 20% default threshold
+            ..Default::default()
+        };
         let reason = agent.update_telemetry(tel.clone());
         assert_eq!(reason, Some(YieldReason::BatteryTooLow));
         assert_eq!(agent.state, NodeState::Paused);

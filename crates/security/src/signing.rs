@@ -82,7 +82,11 @@ pub fn verify_job_result(
 
     // 2. Verify node Ed25519 signature over result_digest
     let pubkey = PublicKey::from_hex(expected_node_pubkey)?;
-    verify_signature(&pubkey, result.result_digest.as_bytes(), &result.node_signature)
+    verify_signature(
+        &pubkey,
+        result.result_digest.as_bytes(),
+        &result.node_signature,
+    )
 }
 
 #[cfg(test)]
@@ -168,11 +172,13 @@ mod tests {
         assert!(verify_signature(&pubkey, msg, "!invalid_base64!").is_err());
 
         // Invalid length (base64 of 32 bytes instead of 64 bytes)
-        let short_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 32]);
+        let short_b64 =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 32]);
         assert!(verify_signature(&pubkey, msg, &short_b64).is_err());
 
         // Corrupted 64-byte signature
-        let corrupt_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 64]);
+        let corrupt_b64 =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 64]);
         assert!(verify_signature(&pubkey, msg, &corrupt_b64).is_err());
     }
 }

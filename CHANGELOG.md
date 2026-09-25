@@ -55,4 +55,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - High-scale scheduler throughput and latency benchmarks (`test_scheduler_high_scale_latency_and_throughput_benchmarks` in `tests/integration/tests/scheduler_multi_attribute.rs`) proving 1,000 node p50 dispatch latency of 137 µs and 5,000 node evaluation in sub-millisecond time.
 - Automated end-to-end browser verification of the Web Management Console across 11 views, live metric visualizers, workload manifest modal, and dark mode contrast toggles, captured in `web_console_e2e_1790325769074.webp`.
 - Forensic production certification runner hardening in `scripts/acceptance.ps1` and `scripts/acceptance` with strict classification enforcement (16 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED).
+- Fixed workspace-wide rustfmt formatting and resolved all Clippy linter warnings across all crates. Granted Git executable permissions (chmod +x) to all scripts, eliminated subshell command-not-found issues with auto-detected cargo wrappers, and hardened process teardown (pkill -x) for CI reliability.
 

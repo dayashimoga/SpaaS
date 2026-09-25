@@ -35,6 +35,7 @@ pub struct AuditRecord {
 }
 
 /// Durable events recorded sequentially to Write-Ahead Log (WAL)
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WalEvent {
@@ -60,7 +61,12 @@ pub struct WalEntry {
 impl WalEntry {
     pub fn compute_checksum(seq: u64, timestamp_ms: i64, event_json: &str) -> u32 {
         let mut crc = 0xFFFFFFFFu32;
-        for b in seq.to_le_bytes().iter().chain(timestamp_ms.to_le_bytes().iter()).chain(event_json.as_bytes().iter()) {
+        for b in seq
+            .to_le_bytes()
+            .iter()
+            .chain(timestamp_ms.to_le_bytes().iter())
+            .chain(event_json.as_bytes().iter())
+        {
             crc ^= *b as u32;
             for _ in 0..8 {
                 if (crc & 1) != 0 {
@@ -109,7 +115,10 @@ impl DurableStorage {
             let reader = BufReader::new(snap_file);
             match serde_json::from_reader::<_, RecoveredState>(reader) {
                 Ok(snap) => {
-                    info!("Loaded durable snapshot with sequence up to {}", snap.last_seq);
+                    info!(
+                        "Loaded durable snapshot with sequence up to {}",
+                        snap.last_seq
+                    );
                     snap
                 }
                 Err(e) => {
@@ -138,11 +147,15 @@ impl DurableStorage {
 
                 // Validate checksum
                 let event_json = serde_json::to_string(&entry.event)?;
-                let expected = WalEntry::compute_checksum(entry.seq, entry.timestamp_ms, &event_json);
+                let expected =
+                    WalEntry::compute_checksum(entry.seq, entry.timestamp_ms, &event_json);
                 if entry.checksum != expected {
                     return Err(PersistenceError::CorruptWal(
                         entry.seq,
-                        format!("Checksum mismatch: expected {expected}, got {}", entry.checksum),
+                        format!(
+                            "Checksum mismatch: expected {expected}, got {}",
+                            entry.checksum
+                        ),
                     ));
                 }
 
@@ -151,7 +164,10 @@ impl DurableStorage {
                     last_seq = entry.seq;
                 }
             }
-            info!("WAL replay completed successfully up to sequence {}", last_seq);
+            info!(
+                "WAL replay completed successfully up to sequence {}",
+                last_seq
+            );
         }
 
         state.last_seq = last_seq;
@@ -258,7 +274,10 @@ impl DurableStorage {
 
         // Atomic file rename
         fs::rename(&snap_tmp, &self.snapshot_path)?;
-        info!("Atomic checkpoint snapshot created at seq {}", state_clone.last_seq);
+        info!(
+            "Atomic checkpoint snapshot created at seq {}",
+            state_clone.last_seq
+        );
 
         Ok(())
     }
@@ -297,7 +316,10 @@ mod tests {
             is_simulated: false,
         };
 
-        storage.append_event(WalEvent::UpsertNode { node: node.clone() }).await.unwrap();
+        storage
+            .append_event(WalEvent::UpsertNode { node: node.clone() })
+            .await
+            .unwrap();
 
         let job_id = Uuid::new_v4();
         let job = JobRecord::new(WorkloadSpec {
@@ -322,11 +344,19 @@ mod tests {
             created_at_ms: 1000,
         });
 
-        storage.append_event(WalEvent::UpsertJob { job: job.clone() }).await.unwrap();
+        storage
+            .append_event(WalEvent::UpsertJob { job: job.clone() })
+            .await
+            .unwrap();
 
         // 2. Grant lease
         let lease = JobLease::new(job_id, node.node_id, 30_000);
-        storage.append_event(WalEvent::GrantLease { lease: lease.clone() }).await.unwrap();
+        storage
+            .append_event(WalEvent::GrantLease {
+                lease: lease.clone(),
+            })
+            .await
+            .unwrap();
 
         // Drop current storage handle to simulate sudden restart/process exit
         drop(storage);
@@ -340,7 +370,10 @@ mod tests {
         assert_eq!(state.jobs.len(), 1);
         let recovered_job = state.jobs.get(&job_id).unwrap();
         assert!(recovered_job.current_lease.is_some());
-        assert_eq!(recovered_job.current_lease.as_ref().unwrap().lease_id, lease.lease_id);
+        assert_eq!(
+            recovered_job.current_lease.as_ref().unwrap().lease_id,
+            lease.lease_id
+        );
     }
 
     #[tokio::test]
@@ -349,7 +382,9 @@ mod tests {
         let wal_path = dir.path().join("spaas.wal");
 
         // Write an entry with forged/corrupted checksum
-        let event = WalEvent::UpsertJob { job: JobRecord::new(WorkloadSpec::default()) };
+        let event = WalEvent::UpsertJob {
+            job: JobRecord::new(WorkloadSpec::default()),
+        };
         let entry = WalEntry {
             seq: 1,
             timestamp_ms: 1000,
@@ -386,7 +421,10 @@ mod tests {
 
         let _job_id = Uuid::new_v4();
         let job = JobRecord::new(WorkloadSpec::default());
-        storage.append_event(WalEvent::UpsertJob { job: job.clone() }).await.unwrap();
+        storage
+            .append_event(WalEvent::UpsertJob { job: job.clone() })
+            .await
+            .unwrap();
 
         // Checkpoint snapshot
         storage.checkpoint_snapshot().await.unwrap();
@@ -394,10 +432,13 @@ mod tests {
 
         // Append more events after snapshot
         let artifact_hash = "sha256_wasm_art".to_string();
-        storage.append_event(WalEvent::StoreArtifact {
-            sha256: artifact_hash.clone(),
-            bytes: vec![1, 2, 3, 4],
-        }).await.unwrap();
+        storage
+            .append_event(WalEvent::StoreArtifact {
+                sha256: artifact_hash.clone(),
+                bytes: vec![1, 2, 3, 4],
+            })
+            .await
+            .unwrap();
 
         drop(storage);
 
@@ -424,27 +465,74 @@ mod tests {
             region: "us".into(),
             is_simulated: true,
         };
-        restored.append_event(WalEvent::UpsertNode { node: dummy_node }).await.unwrap();
+        restored
+            .append_event(WalEvent::UpsertNode { node: dummy_node })
+            .await
+            .unwrap();
         assert_eq!(restored.state().read().await.nodes.len(), 1);
 
-        restored.append_event(WalEvent::RemoveNode { node_id }).await.unwrap();
+        restored
+            .append_event(WalEvent::RemoveNode { node_id })
+            .await
+            .unwrap();
         assert_eq!(restored.state().read().await.nodes.len(), 0);
 
         let mut lease = JobLease::new(job.job_id, node_id, 1000);
-        restored.append_event(WalEvent::GrantLease { lease: lease.clone() }).await.unwrap();
+        restored
+            .append_event(WalEvent::GrantLease {
+                lease: lease.clone(),
+            })
+            .await
+            .unwrap();
         lease.renew(2000);
-        restored.append_event(WalEvent::RenewLease { lease: lease.clone() }).await.unwrap();
-        assert_eq!(restored.state().read().await.jobs.get(&job.job_id).unwrap().current_lease.as_ref().unwrap().term, 2);
+        restored
+            .append_event(WalEvent::RenewLease {
+                lease: lease.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            restored
+                .state()
+                .read()
+                .await
+                .jobs
+                .get(&job.job_id)
+                .unwrap()
+                .current_lease
+                .as_ref()
+                .unwrap()
+                .term,
+            2
+        );
 
-        restored.append_event(WalEvent::RevokeLease { job_id: job.job_id, lease_id: lease.lease_id }).await.unwrap();
-        assert!(restored.state().read().await.jobs.get(&job.job_id).unwrap().current_lease.is_none());
+        restored
+            .append_event(WalEvent::RevokeLease {
+                job_id: job.job_id,
+                lease_id: lease.lease_id,
+            })
+            .await
+            .unwrap();
+        assert!(restored
+            .state()
+            .read()
+            .await
+            .jobs
+            .get(&job.job_id)
+            .unwrap()
+            .current_lease
+            .is_none());
     }
 
     #[tokio::test]
     async fn test_corrupted_snapshot_recovers_gracefully() {
         let dir = tempdir().unwrap();
         // Write invalid JSON snapshot
-        std::fs::write(dir.path().join("spaas.snapshot.json"), b"invalid json content").unwrap();
+        std::fs::write(
+            dir.path().join("spaas.snapshot.json"),
+            b"invalid json content",
+        )
+        .unwrap();
 
         // Storage open should succeed and fall back to default state
         let storage = DurableStorage::open(dir.path()).unwrap();
@@ -454,9 +542,14 @@ mod tests {
     #[test]
     fn test_persistence_error_display() {
         let errs = vec![
-            PersistenceError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found")),
+            PersistenceError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "file not found",
+            )),
             PersistenceError::CorruptWal(42, "checksum error".into()),
-            PersistenceError::Serialization(serde_json::from_str::<String>("bad_json").unwrap_err()),
+            PersistenceError::Serialization(
+                serde_json::from_str::<String>("bad_json").unwrap_err(),
+            ),
             PersistenceError::LockError("lock poisoned".into()),
         ];
         for err in errs {
@@ -464,4 +557,3 @@ mod tests {
         }
     }
 }
-

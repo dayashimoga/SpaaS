@@ -17,7 +17,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/nodes/register", post(register_node))
         .route("/api/v1/nodes/heartbeat", post(heartbeat))
         .route("/api/v1/nodes/:node_id/poll", get(poll_job))
-        .route("/api/v1/nodes/:node_id/qualification", post(qualify_node).get(get_node_qualification))
+        .route(
+            "/api/v1/nodes/:node_id/qualification",
+            post(qualify_node).get(get_node_qualification),
+        )
         .route("/api/v1/nodes/results", post(submit_result))
         .route("/api/v1/nodes", get(list_nodes))
         // Job Management & Leases

@@ -34,7 +34,12 @@ impl MeteringLedger {
 
         account.balance_credits += amount as i64;
         account.updated_at_ms = chrono::Utc::now().timestamp_millis();
-        info!(public_key = pubkey, amount, balance = account.balance_credits, "Account balance topped up");
+        info!(
+            public_key = pubkey,
+            amount,
+            balance = account.balance_credits,
+            "Account balance topped up"
+        );
     }
 
     /// Returns account summary for a public key
@@ -43,6 +48,7 @@ impl MeteringLedger {
     }
 
     /// Records job usage with strict idempotency and dual-entry accounting
+    #[allow(clippy::too_many_arguments)]
     pub fn record_job_execution(
         &mut self,
         job_id: Uuid,
@@ -64,7 +70,10 @@ impl MeteringLedger {
         );
 
         // 1. Idempotency Check: if identical job execution already processed, return cached record
-        if let Some(existing) = self.records_by_idempotency_key.get(&temp_record.idempotency_key) {
+        if let Some(existing) = self
+            .records_by_idempotency_key
+            .get(&temp_record.idempotency_key)
+        {
             warn!(
                 idempotency_key = %temp_record.idempotency_key,
                 job_id = %job_id,
@@ -173,7 +182,10 @@ mod tests {
             )
             .unwrap();
 
-        let initial_provider_balance = ledger.get_account("node_provider_key").unwrap().balance_credits;
+        let initial_provider_balance = ledger
+            .get_account("node_provider_key")
+            .unwrap()
+            .balance_credits;
         assert_eq!(rec1.credits_earned_by_node, 15);
         assert_eq!(initial_provider_balance, 15);
 
@@ -192,9 +204,18 @@ mod tests {
 
         assert_eq!(rec1.idempotency_key, rec2.idempotency_key);
         // Balance must remain unchanged due to idempotency protection
-        let second_provider_balance = ledger.get_account("node_provider_key").unwrap().balance_credits;
+        let second_provider_balance = ledger
+            .get_account("node_provider_key")
+            .unwrap()
+            .balance_credits;
         assert_eq!(second_provider_balance, initial_provider_balance);
-        assert_eq!(ledger.get_account("node_provider_key").unwrap().total_jobs_executed, 1);
+        assert_eq!(
+            ledger
+                .get_account("node_provider_key")
+                .unwrap()
+                .total_jobs_executed,
+            1
+        );
 
         // all_records and all_accounts
         assert_eq!(ledger.all_records().len(), 1);
@@ -220,4 +241,3 @@ mod tests {
         assert_eq!(topup_acc.balance_credits, 500);
     }
 }
-

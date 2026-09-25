@@ -70,7 +70,13 @@ async fn test_adversarial_memory_bomb() {
 
     let result = runtime.execute(ctx).await;
     // wasmi restricts memory growth based on maximum initial/runtime bounds or fuel
-    assert!(result.is_ok() || matches!(result, Err(RuntimeError::OutOfFuel { .. }) | Err(RuntimeError::MemoryLimitExceeded { .. })));
+    assert!(
+        result.is_ok()
+            || matches!(
+                result,
+                Err(RuntimeError::OutOfFuel { .. }) | Err(RuntimeError::MemoryLimitExceeded { .. })
+            )
+    );
 }
 
 #[tokio::test]
@@ -109,7 +115,10 @@ async fn test_adversarial_deep_recursion() {
     };
 
     let result = runtime.execute(ctx).await;
-    assert!(matches!(result, Err(RuntimeError::OutOfFuel { .. }) | Err(RuntimeError::Trap(_))));
+    assert!(matches!(
+        result,
+        Err(RuntimeError::OutOfFuel { .. }) | Err(RuntimeError::Trap(_))
+    ));
 }
 
 #[tokio::test]
@@ -182,7 +191,11 @@ async fn test_concurrent_sandboxed_executions() {
         let handle = tokio::spawn(async move {
             let key = KeyPair::generate();
             let node_id = Uuid::new_v4();
-            let spec = make_spec(&format!("concurrent_{i}"), &wasm_clone, ResourceLimits::default());
+            let spec = make_spec(
+                &format!("concurrent_{i}"),
+                &wasm_clone,
+                ResourceLimits::default(),
+            );
             let ctx = ExecutionContext {
                 spec: &spec,
                 wasm_bytes: &wasm_clone,

@@ -32,7 +32,10 @@ pub fn sanitize_sandboxed_path(
     base_dir: &Path,
     relative_path: &str,
 ) -> Result<PathBuf, SecurityError> {
-    if relative_path.contains("..") || relative_path.starts_with('/') || relative_path.starts_with('\\') {
+    if relative_path.contains("..")
+        || relative_path.starts_with('/')
+        || relative_path.starts_with('\\')
+    {
         return Err(SecurityError::IllegalInput(format!(
             "Path traversal attempt rejected: {relative_path}"
         )));
@@ -40,9 +43,7 @@ pub fn sanitize_sandboxed_path(
 
     let joined = base_dir.join(relative_path);
     // Ensure that normalized path stays under base_dir
-    let normalized = joined
-        .components()
-        .collect::<PathBuf>();
+    let normalized = joined.components().collect::<PathBuf>();
 
     if !normalized.starts_with(base_dir) {
         return Err(SecurityError::IllegalInput(format!(

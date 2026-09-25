@@ -98,7 +98,10 @@ impl SimulatorCluster {
 
     /// Runs periodic heartbeats and job dispatch listeners for all nodes
     pub async fn run_simulation_loop(&self, duration: Duration) {
-        info!("Starting simulation loop for {} nodes...", self.agents.len());
+        info!(
+            "Starting simulation loop for {} nodes...",
+            self.agents.len()
+        );
         let start_time = tokio::time::Instant::now();
         let client = reqwest::Client::new();
 
@@ -127,7 +130,10 @@ impl SimulatorCluster {
                 let _ = client.post(&hb_url).json(&hb_req).send().await;
 
                 // Poll for work
-                let poll_url = format!("{}/api/v1/nodes/{}/poll", self.control_plane_url, agent.node_id);
+                let poll_url = format!(
+                    "{}/api/v1/nodes/{}/poll",
+                    self.control_plane_url, agent.node_id
+                );
                 if let Ok(resp) = client.get(&poll_url).send().await {
                     if let Ok(poll_res) = resp.json::<PollJobResponse>().await {
                         if let Some(dispatch) = poll_res.job {
@@ -142,7 +148,8 @@ impl SimulatorCluster {
                                     job_result.result_digest = "corrupted_malicious_digest".into();
                                 }
 
-                                let res_url = format!("{}/api/v1/nodes/results", self.control_plane_url);
+                                let res_url =
+                                    format!("{}/api/v1/nodes/results", self.control_plane_url);
                                 let submit_req = SubmitJobResultRequest {
                                     node_id: agent.node_id,
                                     lease_id: Some(lease_id),

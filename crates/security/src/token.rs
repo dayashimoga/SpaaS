@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn test_token_issue_and_verify() {
         let authority = KeyPair::generate();
-        let authority_pub = PublicKey(authority.verifying_key().clone());
+        let authority_pub = PublicKey(*authority.verifying_key());
 
         let (_token, encoded) =
             AuthToken::issue(&authority, "node-123".into(), AuthRole::WorkerNode, 60_000);

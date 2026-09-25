@@ -4,7 +4,12 @@ use std::time::Duration;
 use tracing::info;
 
 #[derive(Parser, Debug)]
-#[command(name = "spaas-scheduler-daemon", author, version, about = "SPaaS Distributed Scheduler Daemon")]
+#[command(
+    name = "spaas-scheduler-daemon",
+    author,
+    version,
+    about = "SPaaS Distributed Scheduler Daemon"
+)]
 struct Args {
     #[arg(short, long, default_value = "http://127.0.0.1:8080")]
     control_plane_url: String,
@@ -30,7 +35,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let health_url = format!("{}/api/v1/system/health", args.control_plane_url);
         if let Ok(resp) = client.get(&health_url).send().await {
-            if let Ok(health) = resp.json::<spaas_protocol::rpc::SystemHealthResponse>().await {
+            if let Ok(health) = resp
+                .json::<spaas_protocol::rpc::SystemHealthResponse>()
+                .await
+            {
                 if health.queue_depth > 0 {
                     info!(
                         queue_depth = health.queue_depth,

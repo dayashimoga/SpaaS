@@ -1,6 +1,6 @@
 use spaas_node_agent::NodeAgent;
-use spaas_protocol::rpc::JobDispatchMessage;
 use spaas_protocol::node::{NodeDeviceType, NodeHardwareCapabilities, ProviderPolicy};
+use spaas_protocol::rpc::JobDispatchMessage;
 use spaas_protocol::workload::*;
 use spaas_security::hash::sha256_hex;
 use spaas_security::keys::KeyPair;
@@ -14,7 +14,9 @@ async fn test_desktop_physical_compute_worker() {
 
     let hardware = NodeHardwareCapabilities {
         architecture: arch,
-        cpu_cores: std::thread::available_parallelism().map(|p| p.get() as u32).unwrap_or(4),
+        cpu_cores: std::thread::available_parallelism()
+            .map(|p| p.get() as u32)
+            .unwrap_or(4),
         total_ram_mb: 16384,
         total_storage_mb: 256000,
         device_model: "Physical Desktop Node".into(),
@@ -39,10 +41,16 @@ async fn test_desktop_physical_compute_worker() {
 
     // Instantiate physical desktop worker agent
     let mut desktop_agent = NodeAgent::new(hardware, policy, false);
-    assert_eq!(desktop_agent.to_record().device_type, NodeDeviceType::AndroidSmartphone); // Can assign desktop device type
+    assert_eq!(
+        desktop_agent.to_record().device_type,
+        NodeDeviceType::AndroidSmartphone
+    ); // Can assign desktop device type
 
     // 1. Run local qualification benchmark
-    let qual = desktop_agent.run_qualification().await.expect("Desktop qualification failed");
+    let qual = desktop_agent
+        .run_qualification()
+        .await
+        .expect("Desktop qualification failed");
     assert!(qual.wasm_conformance_passed);
     assert!(qual.measured_fuel_mips > 0.0);
 
@@ -115,7 +123,10 @@ async fn test_desktop_physical_compute_worker() {
     };
 
     // 3. Desktop agent executes compute payload
-    let result = desktop_agent.execute_dispatched_job(dispatch).await.expect("Desktop execution failed");
+    let result = desktop_agent
+        .execute_dispatched_job(dispatch)
+        .await
+        .expect("Desktop execution failed");
 
     // 4. Verify result properties
     assert_eq!(result.exit_code, 0);
@@ -126,5 +137,8 @@ async fn test_desktop_physical_compute_worker() {
 
     // 5. Verify cryptographic seal produced by desktop worker
     let verify_res = verify_job_result(&result, &desktop_agent.public_key_hex());
-    assert!(verify_res.is_ok(), "Desktop worker result signature must verify");
+    assert!(
+        verify_res.is_ok(),
+        "Desktop worker result signature must verify"
+    );
 }

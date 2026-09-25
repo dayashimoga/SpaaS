@@ -1,17 +1,18 @@
 use spaas_protocol::node::{
-    ChargingState, NetworkType, NodeHardwareCapabilities, NodeTelemetry, ProviderPolicy, ThermalStatus,
+    ChargingState, NetworkType, NodeHardwareCapabilities, NodeTelemetry, ProviderPolicy,
+    ThermalStatus,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum SimulatorArchetype {
-    FlagshipAcCharging,    // Pixel 8 Pro / Galaxy S24 Ultra
-    MidrangeWifi,          // Galaxy A54
-    BudgetCellular,        // Budget Android phone
-    OverheatingPhone,      // Thermal throttle testing
-    LowBatteryPhone,       // Battery threshold testing
-    AdversarialNode,       // Malicious node returning forged results
-    FlakyDisconnecting,    // Intermittent dropouts
+    FlagshipAcCharging, // Pixel 8 Pro / Galaxy S24 Ultra
+    MidrangeWifi,       // Galaxy A54
+    BudgetCellular,     // Budget Android phone
+    OverheatingPhone,   // Thermal throttle testing
+    LowBatteryPhone,    // Battery threshold testing
+    AdversarialNode,    // Malicious node returning forged results
+    FlakyDisconnecting, // Intermittent dropouts
 }
 
 #[allow(dead_code)]
@@ -24,7 +25,10 @@ pub struct SimulatedDeviceProfile {
     pub drop_probability_pct: u8,
 }
 
-pub fn generate_device_profile(archetype: SimulatorArchetype, index: usize) -> SimulatedDeviceProfile {
+pub fn generate_device_profile(
+    archetype: SimulatorArchetype,
+    index: usize,
+) -> SimulatedDeviceProfile {
     match archetype {
         SimulatorArchetype::FlagshipAcCharging => SimulatedDeviceProfile {
             archetype,

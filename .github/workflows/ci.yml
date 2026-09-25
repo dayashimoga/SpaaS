@@ -107,8 +107,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: spaas-android-node-apk
+          path: apps/android-node/app/build/outputs/apk/debug/
       - name: Install Web Console Deps
         run: cd apps/web-console && npm ci
+      - name: Make Scripts Executable
+        run: chmod +x scripts/*
       - name: Run Full Acceptance Suite
         run: ./scripts/acceptance
       - name: Generate Checksums & SBOM

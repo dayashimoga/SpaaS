@@ -8,8 +8,8 @@ pub use trace::CorrelationContext;
 pub fn init_telemetry(service_name: &str) {
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,spaas=debug"));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,spaas=debug"));
 
     let _ = tracing_subscriber::registry()
         .with(filter)

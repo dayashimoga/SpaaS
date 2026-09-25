@@ -2,7 +2,10 @@ use spaas_metering::MeteringLedger;
 use spaas_persistence::{AuditRecord, DurableStorage, WalEvent};
 use spaas_protocol::job::{JobLease, JobRecord, JobState};
 use spaas_protocol::metering::{MeteringRecord, ResourceUsage};
-use spaas_protocol::node::{EnrollmentStatus, NodeHardwareCapabilities, NodeRecord, NodeState, NodeTelemetry, ProviderPolicy};
+use spaas_protocol::node::{
+    EnrollmentStatus, NodeHardwareCapabilities, NodeRecord, NodeState, NodeTelemetry,
+    ProviderPolicy,
+};
 use spaas_protocol::workload::*;
 use tempfile::tempdir;
 use uuid::Uuid;
@@ -48,7 +51,10 @@ async fn test_control_plane_durable_restart_recovery() {
             is_simulated: false,
         };
 
-        storage.append_event(WalEvent::UpsertNode { node }).await.unwrap();
+        storage
+            .append_event(WalEvent::UpsertNode { node })
+            .await
+            .unwrap();
 
         let spec = WorkloadSpec {
             workload_id: job_id,
@@ -87,8 +93,14 @@ async fn test_control_plane_durable_restart_recovery() {
         };
         job.current_lease = Some(lease.clone());
 
-        storage.append_event(WalEvent::UpsertJob { job: job.clone() }).await.unwrap();
-        storage.append_event(WalEvent::GrantLease { lease }).await.unwrap();
+        storage
+            .append_event(WalEvent::UpsertJob { job: job.clone() })
+            .await
+            .unwrap();
+        storage
+            .append_event(WalEvent::GrantLease { lease })
+            .await
+            .unwrap();
 
         let usage = ResourceUsage {
             fuel_consumed: 150_000,
@@ -109,7 +121,12 @@ async fn test_control_plane_durable_restart_recovery() {
             true,
         );
 
-        storage.append_event(WalEvent::AppendMetering { record: metering_record.clone() }).await.unwrap();
+        storage
+            .append_event(WalEvent::AppendMetering {
+                record: metering_record.clone(),
+            })
+            .await
+            .unwrap();
 
         let audit = AuditRecord {
             timestamp_ms: 2500,
@@ -117,7 +134,10 @@ async fn test_control_plane_durable_restart_recovery() {
             entity_id: job_id.to_string(),
             details: format!("Lease granted to node {node_id}"),
         };
-        storage.append_event(WalEvent::AppendAudit { record: audit }).await.unwrap();
+        storage
+            .append_event(WalEvent::AppendAudit { record: audit })
+            .await
+            .unwrap();
 
         // Perform checkpoint snapshot
         storage.checkpoint_snapshot().await.unwrap();
@@ -129,7 +149,12 @@ async fn test_control_plane_durable_restart_recovery() {
             entity_id: "system".into(),
             details: "Event recorded after snapshot".into(),
         };
-        storage.append_event(WalEvent::AppendAudit { record: post_snap_audit }).await.unwrap();
+        storage
+            .append_event(WalEvent::AppendAudit {
+                record: post_snap_audit,
+            })
+            .await
+            .unwrap();
 
         // Dropping storage simulates immediate crash/kill
     }
@@ -151,7 +176,10 @@ async fn test_control_plane_durable_restart_recovery() {
         assert_eq!(recovered_job.spec.name, "matrix_computation");
         assert_eq!(recovered_job.state, JobState::Scheduled);
         assert!(recovered_job.current_lease.is_some());
-        assert_eq!(recovered_job.current_lease.as_ref().unwrap().lease_id, lease_id);
+        assert_eq!(
+            recovered_job.current_lease.as_ref().unwrap().lease_id,
+            lease_id
+        );
 
         // Verify Metering recovered
         assert_eq!(initial_state.metering_records.len(), 1);
@@ -177,7 +205,9 @@ async fn test_control_plane_durable_restart_recovery() {
             );
             assert!(res.is_ok());
         }
-        let account = ledger.get_account("node_pubkey_hex_12345").expect("Account must exist");
+        let account = ledger
+            .get_account("node_pubkey_hex_12345")
+            .expect("Account must exist");
         assert!(account.balance_credits > 0);
     }
 }
