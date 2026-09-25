@@ -1146,14 +1146,34 @@
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.78rem;">
               <div style="background: rgba(6, 182, 212, 0.08); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(6, 182, 212, 0.2);">
-                <strong style="color: #06B6D4;">Physical Phone on Wi-Fi:</strong>
-                <div class="text-sub font-mono" id="label-physical-target">http://192.168.0.111:8080</div>
-                <div class="text-sub" style="font-size: 0.72rem;">Ensure phone is connected to the same Wi-Fi SSID.</div>
+                <strong style="color: #06B6D4;">📱 Physical Phone on Wi-Fi:</strong>
+                <div class="text-sub font-mono font-bold" id="label-physical-target" style="color: #38bdf8;">http://192.168.0.111:8080</div>
+                <div class="text-sub" style="font-size: 0.72rem; margin-top: 0.2rem;">
+                  <strong>Quick Test:</strong> Open Chrome on your phone and browse to this URL. If it loads, pairing will succeed!
+                </div>
               </div>
               <div style="background: rgba(168, 85, 247, 0.08); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(168, 85, 247, 0.2);">
-                <strong style="color: #A855F7;">Android Studio Emulator:</strong>
-                <div class="text-sub font-mono">http://10.0.2.2:8080</div>
-                <div class="text-sub" style="font-size: 0.72rem;">QEMU default virtual gateway aliases PC localhost.</div>
+                <strong style="color: #A855F7;">💻 Android Studio Emulator:</strong>
+                <div class="text-sub font-mono font-bold" style="color: #c084fc;">http://10.0.2.2:8080</div>
+                <div class="text-sub" style="font-size: 0.72rem; margin-top: 0.2rem;">
+                  QEMU default virtual gateway aliases PC localhost directly.
+                </div>
+              </div>
+            </div>
+
+            <!-- Wi-Fi & Firewall Diagnostics Callout -->
+            <div class="mt-2 p-2" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 6px; font-size: 0.75rem; color: #fbbf24;">
+              <div style="display: flex; align-items: flex-start; gap: 0.4rem;">
+                <span style="font-size: 1rem;">⚠️</span>
+                <div>
+                  <strong>Guest Wi-Fi &amp; Firewall Notice:</strong>
+                  <ul style="margin: 0.25rem 0 0.25rem 1rem; padding: 0; line-height: 1.4;">
+                    <li><strong>Avoid "Guest" Wi-Fi networks (e.g. <code>TP-Link_Guest</code>):</strong> Routers isolate devices on guest Wi-Fi (AP Isolation), blocking phone-to-PC communication. Connect both PC and phone to your <strong>primary home Wi-Fi</strong> (e.g. <code>TP-Link_BEC7</code>) or turn on <strong>Mobile Hotspot</strong> on Windows.</li>
+                    <li><strong>Windows Firewall:</strong> If your connection is blocked, allow port 8080 in an Administrator PowerShell:
+                      <code style="background: rgba(0,0,0,0.4); padding: 2px 4px; border-radius: 3px; font-size: 0.72rem; display: block; margin-top: 2px;">netsh advfirewall firewall add rule name="SPaaS Port 8080" dir=in action=allow protocol=TCP localport=8080</code>
+                    </li>
+                  </ul>
+                </div>
               </div>
             </div>
 

@@ -673,10 +673,11 @@ fun PairingCard(
 
             if (!statusMsg.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
+                val isSuccess = statusMsg.startsWith("Paired successfully", ignoreCase = true)
                 Text(
                     text = statusMsg,
                     fontSize = 12.sp,
-                    color = if (statusMsg.startsWith("Error") || statusMsg.startsWith("Pairing rejected")) Color(0xFFE57373) else Color(0xFF81C784)
+                    color = if (isSuccess) Color(0xFF81C784) else Color(0xFFE57373)
                 )
             }
         }
