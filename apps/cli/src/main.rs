@@ -181,13 +181,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Workload { cmd } => match cmd {
             WorkloadCommands::Validate { path } => {
-                let bytes = std::fs::read(&path)?;
-                let hash = sha256_hex(&bytes);
-                println!("{}", style("Validating WebAssembly Artifact...").bold());
-                println!("  File Path:   {}", path.display());
-                println!("  Size:        {} bytes", bytes.len());
-                println!("  SHA-256:     {}", style(hash).cyan());
-                println!("{}", style("Status: VALID WASM").bold().green());
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if ext == "yaml" || ext == "yml" {
+                    let content = std::fs::read_to_string(&path)?;
+                    let manifest = DeveloperWorkloadManifest::from_yaml_str(&content)?;
+                    println!("{}", style("Validating Workload Manifest (spaas.io/v1)...").bold());
+                    println!("  Workload Name: {}", style(&manifest.metadata.name).cyan());
+                    println!("  Version:       {}", manifest.metadata.version);
+                    println!("  Runtime:       {:?}", manifest.spec.runtime);
+                    println!("  WASI Version:  {}", manifest.spec.wasi_version);
+                    println!("  Entrypoint:    {}", manifest.spec.entrypoint);
+                    println!("  Binary Ref:    {}", manifest.spec.binary);
+                    println!("  Max Fuel:      {}", manifest.spec.limits.max_fuel);
+                    println!("  Timeout:       {} ms", manifest.spec.limits.timeout_ms);
+                    println!("  Verification:  {:?}", manifest.spec.verification);
+                    println!("{}", style("Status: VALID MANIFEST (spaas.io/v1)").bold().green());
+                } else if ext == "json" {
+                    let content = std::fs::read_to_string(&path)?;
+                    let manifest = DeveloperWorkloadManifest::from_json_str(&content)?;
+                    println!("{}", style("Validating Workload Manifest (spaas.io/v1 JSON)...").bold());
+                    println!("  Workload Name: {}", style(&manifest.metadata.name).cyan());
+                    println!("  Version:       {}", manifest.metadata.version);
+                    println!("{}", style("Status: VALID MANIFEST (spaas.io/v1)").bold().green());
+                } else {
+                    let bytes = std::fs::read(&path)?;
+                    let hash = sha256_hex(&bytes);
+                    println!("{}", style("Validating WebAssembly Artifact...").bold());
+                    println!("  File Path:   {}", path.display());
+                    println!("  Size:        {} bytes", bytes.len());
+                    println!("  SHA-256:     {}", style(hash).cyan());
+                    println!("{}", style("Status: VALID WASM").bold().green());
+                }
             }
             WorkloadCommands::Submit {
                 path,
@@ -196,46 +220,116 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 timeout_ms,
                 entrypoint,
             } => {
-                let bytes = std::fs::read(&path)?;
-                let hash = sha256_hex(&bytes);
-                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
-                let workload_name = name.unwrap_or_else(|| {
-                    path.file_stem()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "workload".into())
-                });
-
-                let dev_key = KeyPair::generate();
-                let mut spec = WorkloadSpec {
-                    workload_id: Uuid::new_v4(),
-                    spec_version: "1.0.0".into(),
-                    name: workload_name,
-                    runtime: RuntimeType::WasmWasi,
-                    artifact_sha256: hash.clone(),
-                    artifact_size_bytes: bytes.len() as u64,
-                    artifact_uri: format!("inline://{}", hash),
-                    entrypoint,
-                    args: vec![],
-                    env_vars: vec![],
-                    limits: ResourceLimits {
-                        max_fuel,
-                        max_memory_bytes: 64 * 1024 * 1024,
-                        max_storage_bytes: 10 * 1024 * 1024,
-                        timeout_ms,
-                        max_output_bytes: 1024 * 1024,
-                    },
-                    network_policy: NetworkPolicy::None,
-                    required_capabilities: RequiredCapabilities::default(),
-                    retry_policy: RetryPolicy::default(),
-                    verification_policy: VerificationPolicy::SingleNode,
-                    priority: WorkloadPriority::Normal,
-                    submitter_signature: String::new(),
-                    submitter_pubkey: String::new(),
-                    created_at_ms: chrono::Utc::now().timestamp_millis(),
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                let (spec, wasm_bytes) = if ext == "yaml" || ext == "yml" {
+                    let content = std::fs::read_to_string(&path)?;
+                    let manifest = DeveloperWorkloadManifest::from_yaml_str(&content)?;
+                    let binary_path = if std::path::Path::new(&manifest.spec.binary).is_absolute() {
+                        PathBuf::from(&manifest.spec.binary)
+                    } else {
+                        path.parent().unwrap_or(std::path::Path::new(".")).join(&manifest.spec.binary)
+                    };
+                    let bytes = std::fs::read(&binary_path)
+                        .map_err(|e| format!("Failed to read WASM binary at {}: {e}", binary_path.display()))?;
+                    let hash = sha256_hex(&bytes);
+                    let s = WorkloadSpec {
+                        workload_id: Uuid::new_v4(),
+                        spec_version: manifest.metadata.version,
+                        name: manifest.metadata.name,
+                        runtime: manifest.spec.runtime,
+                        artifact_sha256: hash.clone(),
+                        artifact_size_bytes: bytes.len() as u64,
+                        artifact_uri: format!("inline://{}", hash),
+                        entrypoint: manifest.spec.entrypoint,
+                        args: manifest.spec.args,
+                        env_vars: manifest.spec.env_vars,
+                        limits: manifest.spec.limits,
+                        network_policy: manifest.spec.network_policy,
+                        required_capabilities: manifest.spec.capabilities,
+                        retry_policy: manifest.spec.retry,
+                        verification_policy: manifest.spec.verification,
+                        priority: manifest.spec.priority,
+                        submitter_signature: String::new(),
+                        submitter_pubkey: String::new(),
+                        created_at_ms: chrono::Utc::now().timestamp_millis(),
+                    };
+                    (s, bytes)
+                } else if ext == "json" {
+                    let content = std::fs::read_to_string(&path)?;
+                    let manifest = DeveloperWorkloadManifest::from_json_str(&content)?;
+                    let binary_path = if std::path::Path::new(&manifest.spec.binary).is_absolute() {
+                        PathBuf::from(&manifest.spec.binary)
+                    } else {
+                        path.parent().unwrap_or(std::path::Path::new(".")).join(&manifest.spec.binary)
+                    };
+                    let bytes = std::fs::read(&binary_path)
+                        .map_err(|e| format!("Failed to read WASM binary at {}: {e}", binary_path.display()))?;
+                    let hash = sha256_hex(&bytes);
+                    let s = WorkloadSpec {
+                        workload_id: Uuid::new_v4(),
+                        spec_version: manifest.metadata.version,
+                        name: manifest.metadata.name,
+                        runtime: manifest.spec.runtime,
+                        artifact_sha256: hash.clone(),
+                        artifact_size_bytes: bytes.len() as u64,
+                        artifact_uri: format!("inline://{}", hash),
+                        entrypoint: manifest.spec.entrypoint,
+                        args: manifest.spec.args,
+                        env_vars: manifest.spec.env_vars,
+                        limits: manifest.spec.limits,
+                        network_policy: manifest.spec.network_policy,
+                        required_capabilities: manifest.spec.capabilities,
+                        retry_policy: manifest.spec.retry,
+                        verification_policy: manifest.spec.verification,
+                        priority: manifest.spec.priority,
+                        submitter_signature: String::new(),
+                        submitter_pubkey: String::new(),
+                        created_at_ms: chrono::Utc::now().timestamp_millis(),
+                    };
+                    (s, bytes)
+                } else {
+                    let bytes = std::fs::read(&path)?;
+                    let hash = sha256_hex(&bytes);
+                    let workload_name = name.unwrap_or_else(|| {
+                        path.file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "workload".into())
+                    });
+                    let s = WorkloadSpec {
+                        workload_id: Uuid::new_v4(),
+                        spec_version: "1.0.0".into(),
+                        name: workload_name,
+                        runtime: RuntimeType::WasmWasi,
+                        artifact_sha256: hash.clone(),
+                        artifact_size_bytes: bytes.len() as u64,
+                        artifact_uri: format!("inline://{}", hash),
+                        entrypoint,
+                        args: vec![],
+                        env_vars: vec![],
+                        limits: ResourceLimits {
+                            max_fuel,
+                            max_memory_bytes: 64 * 1024 * 1024,
+                            max_storage_bytes: 10 * 1024 * 1024,
+                            timeout_ms,
+                            max_output_bytes: 1024 * 1024,
+                        },
+                        network_policy: NetworkPolicy::None,
+                        required_capabilities: RequiredCapabilities::default(),
+                        retry_policy: RetryPolicy::default(),
+                        verification_policy: VerificationPolicy::SingleNode,
+                        priority: WorkloadPriority::Normal,
+                        submitter_signature: String::new(),
+                        submitter_pubkey: String::new(),
+                        created_at_ms: chrono::Utc::now().timestamp_millis(),
+                    };
+                    (s, bytes)
                 };
 
+                let mut spec = spec;
+                let dev_key = KeyPair::generate();
                 sign_workload(&dev_key, &mut spec);
 
+                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &wasm_bytes);
                 let req = SubmitJobRequest {
                     spec,
                     wasm_binary_base64: Some(b64),

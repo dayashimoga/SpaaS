@@ -24,6 +24,7 @@ pub struct NodeAgent {
     pub history: LocalJobHistoryStore,
     pub runtime: WasmWasiRuntime,
     pub is_simulated: bool,
+    pub qualification: Option<spaas_protocol::node::NodeQualificationProfile>,
 }
 
 impl NodeAgent {
@@ -46,11 +47,26 @@ impl NodeAgent {
             history: LocalJobHistoryStore::new(),
             runtime: WasmWasiRuntime::new(),
             is_simulated,
+            qualification: None,
         }
     }
 
     pub fn public_key_hex(&self) -> String {
         self.keypair.public_key_hex()
+    }
+
+    /// Runs local empirical sandbox microbenchmark and populates qualification profile
+    pub async fn run_qualification(
+        &mut self,
+    ) -> Result<spaas_protocol::node::NodeQualificationProfile, Box<dyn std::error::Error>> {
+        let profile = crate::qualification::NodeQualificationEngine::run_qualification(
+            &self.runtime,
+            self.node_id,
+            &self.keypair,
+        )
+        .await?;
+        self.qualification = Some(profile.clone());
+        Ok(profile)
     }
 
     /// Creates current NodeRecord snapshot for control plane registration and heartbeats
@@ -68,6 +84,7 @@ impl NodeAgent {
             capabilities: self.capabilities.clone(),
             telemetry: self.telemetry.clone(),
             policy: self.policy.clone(),
+            qualification: self.qualification.clone(),
             enrolled_at_ms: chrono::Utc::now().timestamp_millis(),
             last_heartbeat_ms: chrono::Utc::now().timestamp_millis(),
             region: "local".into(),
@@ -230,6 +247,8 @@ mod tests {
 
         let dispatch = JobDispatchMessage {
             job_id: spec.workload_id,
+            lease_id: Uuid::new_v4(),
+            lease_expires_at_ms: chrono::Utc::now().timestamp_millis() + 30_000,
             spec,
             wasm_bytes: Some(wasm),
             dispatched_at_ms: chrono::Utc::now().timestamp_millis(),

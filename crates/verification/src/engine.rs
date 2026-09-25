@@ -67,6 +67,27 @@ impl VerificationEngine {
 
         Ok(outcome)
     }
+
+    /// Verifies that the result digest matches an expected pre-computed hash
+    pub fn verify_hash_match(
+        &self,
+        result: &JobResult,
+        expected_digest: &str,
+    ) -> Result<(), ProtocolError> {
+        if result.result_digest != expected_digest {
+            warn!(
+                expected = expected_digest,
+                actual = %result.result_digest,
+                "Result digest did not match expected hash"
+            );
+            return Err(ProtocolError::HashMismatch {
+                expected: expected_digest.to_string(),
+                actual: result.result_digest.clone(),
+            });
+        }
+        info!(job_id = %result.job_id, "Hash match verification succeeded");
+        Ok(())
+    }
 }
 
 impl Default for VerificationEngine {

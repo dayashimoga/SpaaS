@@ -203,6 +203,18 @@ impl Default for ProviderPolicy {
     }
 }
 
+/// Empirical qualification results produced by edge node sandbox microbenchmarks
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeQualificationProfile {
+    pub qualified_at_ms: i64,
+    pub wasm_conformance_passed: bool,
+    pub wasi_preview1_passed: bool,
+    pub measured_fuel_mips: f64,
+    pub measured_memory_max_pages: u32,
+    pub qualification_hash: String,
+    pub qualification_signature: String,
+}
+
 /// Complete node record maintained by Control Plane
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeRecord {
@@ -214,6 +226,7 @@ pub struct NodeRecord {
     pub capabilities: NodeHardwareCapabilities,
     pub telemetry: NodeTelemetry,
     pub policy: ProviderPolicy,
+    pub qualification: Option<NodeQualificationProfile>,
     pub enrolled_at_ms: i64,
     pub last_heartbeat_ms: i64,
     pub region: String,
@@ -266,6 +279,7 @@ mod tests {
             capabilities: NodeHardwareCapabilities::default(),
             telemetry: NodeTelemetry::default(),
             policy: ProviderPolicy::default(),
+            qualification: None,
             enrolled_at_ms: 1000,
             last_heartbeat_ms: 1000,
             region: "us-east".into(),

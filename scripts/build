@@ -17,6 +17,7 @@ cp -f target/release/spaas dist/bin/ 2>/dev/null || true
 cp -f target/release/spaas-control-plane dist/bin/ 2>/dev/null || true
 cp -f target/release/spaas-gateway dist/bin/ 2>/dev/null || true
 cp -f target/release/spaas-node-simulator dist/bin/ 2>/dev/null || true
+cp -f apps/android-node/app/build/outputs/apk/debug/app-debug.apk dist/bin/spaas-android-node.apk 2>/dev/null || true
 
 echo "=========================================================="
 echo " Build Completed Successfully! Artifacts in dist/"

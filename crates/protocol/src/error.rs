@@ -37,4 +37,10 @@ pub enum ProtocolError {
 
     #[error("Internal protocol error: {0}")]
     Internal(String),
+
+    #[error("Serialization or parsing error: {0}")]
+    SerializationError(String),
+
+    #[error("Job lease expired or invalid: {0}")]
+    LeaseExpired(String),
 }

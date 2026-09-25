@@ -57,6 +57,7 @@ fn make_base_node(id: Uuid) -> NodeRecord {
             ..Default::default()
         },
         policy: ProviderPolicy::default(),
+        qualification: None,
         enrolled_at_ms: 0,
         last_heartbeat_ms: 0,
         region: "us".into(),

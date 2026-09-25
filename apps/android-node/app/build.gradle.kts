@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "dev.spaas.node"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "dev.spaas.node"
         minSdk = 29
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
 

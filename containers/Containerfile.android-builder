@@ -1,0 +1,13 @@
+# Multi-stage Containerfile for SPaaS Android Node Builder
+FROM ghcr.io/cirruslabs/flutter:3.24.3
+
+WORKDIR /app
+ENV ANDROID_HOME=/opt/android-sdk-linux
+
+# Unzip local Gradle 8.7 distribution
+COPY apps/android-node/gradle-8.7-bin.zip /opt/gradle-8.7-bin.zip
+RUN unzip -q -o /opt/gradle-8.7-bin.zip -d /opt && rm /opt/gradle-8.7-bin.zip
+ENV PATH="/opt/gradle-8.7/bin:${PATH}"
+
+ENTRYPOINT ["gradle"]
+CMD ["assembleDebug"]

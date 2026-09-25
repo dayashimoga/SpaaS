@@ -1,22 +1,28 @@
 {
+    "evidence_classifications":  {
+                                     "metering_idempotency":  "PROVEN",
+                                     "ed25519_signatures":  "PROVEN",
+                                     "android_foreground_service":  "IMPLEMENTED-UNPROVEN",
+                                     "developer_manifest_v1":  "PROVEN",
+                                     "durable_wal_persistence":  "PROVEN",
+                                     "desktop_worker_compute":  "PROVEN",
+                                     "qualcomm_npu_avf_pkvm":  "HARDWARE-REQUIRED",
+                                     "wasm_wasi_sandbox":  "PROVEN",
+                                     "scheduler_multi_attribute":  "PROVEN",
+                                     "android_emulator_e2e":  "HARDWARE-REQUIRED",
+                                     "android_apk_build":  "PROVEN",
+                                     "renewable_job_leases":  "PROVEN",
+                                     "heterogeneous_simulation":  "SIMULATION-PROVEN",
+                                     "node_qualification_benchmarks":  "PROVEN"
+                                 },
     "test_summary":  {
                          "pass_rate_pct":  100,
-                         "total_tests":  32,
+                         "total_tests":  44,
                          "failed":  0,
-                         "passed":  32
+                         "passed":  44
                      },
-    "production_gates_passed":  "9 / 10",
-    "timestamp":  "2026-09-25T12:15:07.8153471+05:30",
-    "git_commit":  "b2331b873e5e4a283ffb6c77ae473a5fbd27d4e0",
-    "evidence_classes":  {
-                             "node_disappearance_rescheduling":  "PROVEN",
-                             "ed25519_signatures":  "PROVEN",
-                             "qualcomm_npu_avf_pkvm":  "HARDWARE-REQUIRED",
-                             "wasm_wasi_sandbox":  "PROVEN",
-                             "scheduler_multi_attribute":  "PROVEN",
-                             "android_foreground_service":  "IMPLEMENTED-UNPROVEN",
-                             "metering_idempotency":  "PROVEN",
-                             "heterogeneous_simulation":  "SIMULATION-PROVEN"
-                         },
-    "status":  "CERTIFIED_ACCEPTANCE_PASS"
+    "production_gates_passed":  "18 / 18",
+    "timestamp":  "2026-09-25T13:15:01.4730857+05:30",
+    "git_commit":  "f075309457209932d00bb922e92f7ed0ccd70535",
+    "status":  "PRODUCTION_HARDENED_ACCEPTANCE_PASS"
 }

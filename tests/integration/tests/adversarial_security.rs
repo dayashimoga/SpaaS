@@ -65,6 +65,8 @@ async fn test_adversarial_infinite_loop_mitigation() {
 
     let dispatch = JobDispatchMessage {
         job_id: spec.workload_id,
+        lease_id: Uuid::new_v4(),
+        lease_expires_at_ms: chrono::Utc::now().timestamp_millis() + 30_000,
         spec,
         wasm_bytes: Some(wasm),
         dispatched_at_ms: chrono::Utc::now().timestamp_millis(),

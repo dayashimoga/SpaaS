@@ -113,19 +113,36 @@ impl Default for RetryPolicy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum VerificationPolicy {
+    /// Zero verification overhead for best-effort / low-cost jobs
+    None,
     /// Single node execution, trusts signature and hash
     SingleNode,
-    /// Redundant execution with consensus quorum across multiple untrusted nodes
-    RedundantQuorum {
-        /// Number of distinct nodes executing the workload
+    /// Compares output digest against a known expected SHA-256 digest
+    HashMatch {
+        expected_digest: String,
+    },
+    /// Redundant execution with consensus quorum across multiple untrusted nodes.
+    /// Invariant: M-of-N protects against non-colluding nodes; it DOES NOT protect against colluding groups.
+    MOfN {
         replicas: u32,
-        /// Minimum matching result hashes required to accept result
-        min_matching: u32,
+        threshold: u32,
+    },
+    /// Spot check by re-executing on a deterministic verification node
+    DeterministicReplay,
+    /// Restricts execution only to nodes with high historical reputation
+    TrustedNode {
+        min_reputation: u32,
+    },
+    /// Delegated verification via custom external verifier
+    CustomVerifier {
+        verifier_endpoint: String,
     },
     /// Random spot check (probabilistic second execution)
     SpotCheck {
         probability_pct: u8,
     },
+    /// Reserved for hardware TEE/AVF pKVM attestation (currently UNSUPPORTED on non-TEE devices)
+    TeeAttested,
 }
 
 impl Default for VerificationPolicy {
@@ -205,6 +222,98 @@ impl WorkloadSpec {
             self.created_at_ms
         )
         .into_bytes()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestMetadata {
+    pub name: String,
+    #[serde(default = "default_manifest_version")]
+    pub version: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+fn default_manifest_version() -> String {
+    "1.0.0".to_string()
+}
+
+fn default_wasi_version() -> String {
+    "preview1".to_string()
+}
+
+fn default_entrypoint() -> String {
+    "_start".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManifestSpec {
+    #[serde(default)]
+    pub runtime: RuntimeType,
+    #[serde(default = "default_wasi_version")]
+    pub wasi_version: String,
+    #[serde(default = "default_entrypoint")]
+    pub entrypoint: String,
+    pub binary: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env_vars: Vec<(String, String)>,
+    #[serde(default)]
+    pub limits: ResourceLimits,
+    #[serde(default)]
+    pub network_policy: NetworkPolicy,
+    #[serde(default)]
+    pub capabilities: RequiredCapabilities,
+    #[serde(default)]
+    pub retry: RetryPolicy,
+    #[serde(default)]
+    pub verification: VerificationPolicy,
+    #[serde(default)]
+    pub priority: WorkloadPriority,
+}
+
+/// Versioned developer manifest: `spaas.io/v1`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeveloperWorkloadManifest {
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+    pub kind: String,
+    pub metadata: ManifestMetadata,
+    pub spec: ManifestSpec,
+}
+
+impl DeveloperWorkloadManifest {
+    pub fn from_yaml_str(yaml: &str) -> Result<Self, crate::error::ProtocolError> {
+        let manifest: Self = serde_yaml::from_str(yaml).map_err(|e| {
+            crate::error::ProtocolError::SerializationError(format!("Invalid YAML manifest: {e}"))
+        })?;
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    pub fn from_json_str(json: &str) -> Result<Self, crate::error::ProtocolError> {
+        let manifest: Self = serde_json::from_str(json).map_err(|e| {
+            crate::error::ProtocolError::SerializationError(format!("Invalid JSON manifest: {e}"))
+        })?;
+        manifest.validate()?;
+        Ok(manifest)
+    }
+
+    pub fn validate(&self) -> Result<(), crate::error::ProtocolError> {
+        if self.api_version != "spaas.io/v1" {
+            return Err(crate::error::ProtocolError::InvalidStateTransition {
+                from: self.api_version.clone(),
+                to: "Unsupported apiVersion (expected 'spaas.io/v1')".into(),
+            });
+        }
+        if self.kind != "Workload" {
+            return Err(crate::error::ProtocolError::InvalidStateTransition {
+                from: self.kind.clone(),
+                to: "Unsupported kind (expected 'Workload')".into(),
+            });
+        }
+        Ok(())
     }
 }
 

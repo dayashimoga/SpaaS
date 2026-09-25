@@ -12,6 +12,7 @@ spaas-scheduler-core = { workspace = true }
 spaas-verification = { workspace = true }
 spaas-metering = { workspace = true }
 spaas-telemetry = { workspace = true }
+spaas-persistence = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }

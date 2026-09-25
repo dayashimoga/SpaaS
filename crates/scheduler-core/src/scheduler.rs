@@ -11,6 +11,7 @@ use uuid::Uuid;
 pub struct ScoredCandidate {
     pub node_id: Uuid,
     pub score: f64,
+    pub reliability_score: f32,
 }
 
 pub struct EdgeScheduler {
@@ -41,6 +42,7 @@ impl EdgeScheduler {
                 candidates.push(ScoredCandidate {
                     node_id: node.node_id,
                     score,
+                    reliability_score: node.telemetry.reliability_score,
                 });
             }
         }
@@ -55,9 +57,18 @@ impl EdgeScheduler {
 
         // Determine how many nodes are needed based on verification policy
         let required_nodes_count = match &spec.verification_policy {
+            VerificationPolicy::None => 1,
             VerificationPolicy::SingleNode => 1,
-            VerificationPolicy::RedundantQuorum { replicas, .. } => *replicas as usize,
+            VerificationPolicy::HashMatch { .. } => 1,
+            VerificationPolicy::MOfN { replicas, .. } => *replicas as usize,
+            VerificationPolicy::DeterministicReplay => 2,
+            VerificationPolicy::TrustedNode { min_reputation } => {
+                candidates.retain(|c| (c.reliability_score * 100.0) >= *min_reputation as f32);
+                1
+            }
+            VerificationPolicy::CustomVerifier { .. } => 1,
             VerificationPolicy::SpotCheck { .. } => 1,
+            VerificationPolicy::TeeAttested => 1,
         };
 
         if candidates.len() < required_nodes_count {
@@ -125,6 +136,7 @@ mod tests {
                 ..Default::default()
             },
             policy: ProviderPolicy::default(),
+            qualification: None,
             enrolled_at_ms: 0,
             last_heartbeat_ms: 0,
             region: "us".into(),
@@ -145,6 +157,7 @@ mod tests {
                 ..Default::default()
             },
             policy: ProviderPolicy::default(),
+            qualification: None,
             enrolled_at_ms: 0,
             last_heartbeat_ms: 0,
             region: "us".into(),

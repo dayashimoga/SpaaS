@@ -14,12 +14,15 @@ spaas-verification = { workspace = true }
 spaas-metering = { workspace = true }
 spaas-telemetry = { workspace = true }
 spaas-node-agent = { workspace = true }
+spaas-persistence = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 rand = { workspace = true }
+tempfile = { workspace = true }
 wat = "1.218.0"
 
 [dev-dependencies]

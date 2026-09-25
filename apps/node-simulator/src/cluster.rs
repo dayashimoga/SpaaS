@@ -133,6 +133,7 @@ impl SimulatorCluster {
                         if let Some(dispatch) = poll_res.job {
                             info!(node_id = %agent.node_id, job_id = %dispatch.job_id, "Simulated node received job dispatch");
 
+                            let lease_id = dispatch.lease_id;
                             let exec_result = agent.execute_dispatched_job(dispatch).await;
                             if let Ok(mut job_result) = exec_result {
                                 if is_adversarial {
@@ -144,6 +145,7 @@ impl SimulatorCluster {
                                 let res_url = format!("{}/api/v1/nodes/results", self.control_plane_url);
                                 let submit_req = SubmitJobResultRequest {
                                     node_id: agent.node_id,
+                                    lease_id: Some(lease_id),
                                     result: job_result,
                                 };
                                 let _ = client.post(&res_url).json(&submit_req).send().await;

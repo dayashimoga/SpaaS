@@ -17,6 +17,9 @@ struct Args {
 
     #[arg(short, long, default_value_t = 8080)]
     port: u16,
+
+    #[arg(long, default_value = "./data/control-plane")]
+    data_dir: String,
 }
 
 #[tokio::main]
@@ -26,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let addr = format!("{}:{}", args.host, args.port);
 
-    let state = AppState::new();
+    let state = AppState::new(&args.data_dir);
 
     // Spawn autonomous recovery reconciler loop
     let reconciler_state = state.clone();

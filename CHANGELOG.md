@@ -32,3 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive test suite with 32 passing unit, integration, and security adversarial tests.
 - Containerfiles and Podman Compose deployment definitions (`deploy/podman-compose.yml`).
 - Single-command acceptance gate (`scripts/acceptance.ps1`, `scripts/acceptance`).
+
+## [0.1.0-prod.1] - 2026-09-25
+
+### Added
+- Pure-Rust durable persistence engine (`crates/persistence`) featuring append-only Write-Ahead Log (`spaas.wal`), CRC32 checksum validation, atomic state snapshots (`spaas.snapshot.json`), and ACID crash recovery.
+- Renewable Job Lease protocol (`JobLease`) with term tracking, expiration enforcement, background reconciler requeuing, and strict rejection of late/stale execution results.
+- Node qualification subsystem (`NodeQualificationEngine`) executing synthetic WASM microbenchmarks to measure fuel MIPS and verify WASI Preview 1 profile compliance prior to workload dispatch.
+- Developer workload manifest (`spaas.io/v1`) supporting YAML/JSON formats, parsed and validated via CLI commands `spaas workload validate` and `spaas workload submit`.
+- Extended verification policies: `None`, `SingleNode`, `HashMatch`, `MOfN`, `DeterministicReplay`, `TrustedNode`, `CustomVerifier`, `SpotCheck`, and `TeeAttested`.
+- Local desktop physical worker integration test (`desktop_worker_compute`) proving heterogeneous compute without mobile-only assumptions.
+- Production Android APK build via containerized Gradle 8.7 + OpenJDK 17 + Android SDK 34 (`app-debug.apk`, 23.04 MB, SHA256 `47BD8E0B2D8A21527475E592ED7826704C24A697C3BE34AD6DFD1599ADF1F22C`).
+- Web management console overhaul (`apps/web-console`) featuring 11 responsive views, live telemetry binding, interactive manifest studio, and dark mode high contrast.
+- 18 behavioral production acceptance gates (G01–G18) automated in `scripts/acceptance.ps1` and `scripts/acceptance` with 100% automated pass.
+- Comprehensive forensic gap analysis matrix (`docs/GAP_ANALYSIS.md`) and Android background service compatibility matrix (`docs/ANDROID_COMPATIBILITY.md`).

@@ -80,6 +80,8 @@ pub struct PollJobResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobDispatchMessage {
     pub job_id: Uuid,
+    pub lease_id: Uuid,
+    pub lease_expires_at_ms: i64,
     pub spec: WorkloadSpec,
     /// Directly embedded wasm binary if inline, or URL
     pub wasm_bytes: Option<Vec<u8>>,
@@ -87,8 +89,24 @@ pub struct JobDispatchMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenewLeaseRequest {
+    pub job_id: Uuid,
+    pub node_id: Uuid,
+    pub lease_id: Uuid,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenewLeaseResponse {
+    pub renewed: bool,
+    pub lease_id: Uuid,
+    pub expires_at_ms: i64,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubmitJobResultRequest {
     pub node_id: Uuid,
+    pub lease_id: Option<Uuid>,
     pub result: JobResult,
 }
 

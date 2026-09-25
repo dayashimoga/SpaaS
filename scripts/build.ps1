@@ -22,6 +22,7 @@ Copy-Item "target/release/spaas.exe" -Destination "dist/bin/" -ErrorAction Silen
 Copy-Item "target/release/spaas-control-plane.exe" -Destination "dist/bin/" -ErrorAction SilentlyContinue
 Copy-Item "target/release/spaas-gateway.exe" -Destination "dist/bin/" -ErrorAction SilentlyContinue
 Copy-Item "target/release/spaas-node-simulator.exe" -Destination "dist/bin/" -ErrorAction SilentlyContinue
+Copy-Item "apps/android-node/app/build/outputs/apk/debug/app-debug.apk" -Destination "dist/bin/spaas-android-node.apk" -ErrorAction SilentlyContinue
 
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host " Build Completed Successfully! Artifacts in dist/" -ForegroundColor Green

@@ -98,6 +98,8 @@ async fn test_full_e2e_workload_lifecycle() {
     // 6. Dispatch message constructed and sent to NodeAgent
     let dispatch = JobDispatchMessage {
         job_id: spec.workload_id,
+        lease_id: Uuid::new_v4(),
+        lease_expires_at_ms: chrono::Utc::now().timestamp_millis() + 30_000,
         spec: spec.clone(),
         wasm_bytes: Some(wasm_bytes),
         dispatched_at_ms: chrono::Utc::now().timestamp_millis(),

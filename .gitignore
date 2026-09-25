@@ -17,6 +17,7 @@ build/
 app/build/
 *.apk
 *.aab
+*.zip
 *.keystore
 local.properties
 .idea/

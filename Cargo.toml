@@ -8,6 +8,7 @@ members = [
     "crates/metering",
     "crates/verification",
     "crates/telemetry",
+    "crates/persistence",
     "crates/node-agent",
     "apps/control-plane",
     "apps/scheduler",
@@ -33,11 +34,14 @@ spaas-scheduler-core = { path = "crates/scheduler-core" }
 spaas-metering = { path = "crates/metering" }
 spaas-verification = { path = "crates/verification" }
 spaas-telemetry = { path = "crates/telemetry" }
+spaas-persistence = { path = "crates/persistence" }
 spaas-node-agent = { path = "crates/node-agent" }
 
 # Serialization & Core Utilities
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = "1.0.128"
+serde_yaml = "0.9.34"
+tempfile = "3.13.0"
 chrono = { version = "0.4.38", features = ["serde"] }
 uuid = { version = "1.10.0", features = ["v4", "serde"] }
 thiserror = "1.0.64"
@@ -64,6 +68,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
 
 # WebAssembly Engine
 wasmi = "0.40.0"
+wat = "1.218.0"
 
 # CLI
 clap = { version = "4.5.20", features = ["derive", "env"] }

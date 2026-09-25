@@ -93,6 +93,8 @@ async fn test_node_disappearance_and_autonomous_reschedule() {
     // 5. Node B executes the recovered job to completion
     let dispatch = JobDispatchMessage {
         job_id: job.job_id,
+        lease_id: Uuid::new_v4(),
+        lease_expires_at_ms: chrono::Utc::now().timestamp_millis() + 30_000,
         spec,
         wasm_bytes: Some(wasm),
         dispatched_at_ms: chrono::Utc::now().timestamp_millis(),

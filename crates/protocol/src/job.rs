@@ -118,6 +118,48 @@ impl JobResult {
     }
 }
 
+/// Explicit renewable job lease contract between Control Plane and Worker Node
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobLease {
+    pub lease_id: Uuid,
+    pub job_id: Uuid,
+    pub node_id: Uuid,
+    pub issued_at_ms: i64,
+    pub expires_at_ms: i64,
+    pub renewed_at_ms: i64,
+    pub term: u32,
+}
+
+impl JobLease {
+    pub fn new(job_id: Uuid, node_id: Uuid, duration_ms: u64) -> Self {
+        let now = chrono::Utc::now().timestamp_millis();
+        Self {
+            lease_id: Uuid::new_v4(),
+            job_id,
+            node_id,
+            issued_at_ms: now,
+            expires_at_ms: now + duration_ms as i64,
+            renewed_at_ms: now,
+            term: 1,
+        }
+    }
+
+    pub fn is_expired(&self, current_time_ms: i64) -> bool {
+        current_time_ms > self.expires_at_ms
+    }
+
+    pub fn renew(&mut self, extension_ms: u64) {
+        let now = chrono::Utc::now().timestamp_millis();
+        self.renew_at(now, extension_ms);
+    }
+
+    pub fn renew_at(&mut self, now_ms: i64, extension_ms: u64) {
+        self.renewed_at_ms = now_ms;
+        self.expires_at_ms = now_ms + extension_ms as i64;
+        self.term += 1;
+    }
+}
+
 /// Full tracking record of a distributed job in the control plane
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JobRecord {
@@ -125,6 +167,7 @@ pub struct JobRecord {
     pub spec: WorkloadSpec,
     pub state: JobState,
     pub assigned_node_id: Option<Uuid>,
+    pub current_lease: Option<JobLease>,
     pub retry_count: u32,
     pub created_at_ms: i64,
     pub scheduled_at_ms: Option<i64>,
@@ -139,10 +182,11 @@ impl JobRecord {
     pub fn new(spec: WorkloadSpec) -> Self {
         let now = chrono::Utc::now().timestamp_millis();
         Self {
-            job_id: Uuid::new_v4(),
+            job_id: spec.workload_id,
             spec,
             state: JobState::Queued,
             assigned_node_id: None,
+            current_lease: None,
             retry_count: 0,
             created_at_ms: now,
             scheduled_at_ms: None,
@@ -168,10 +212,12 @@ impl JobRecord {
             JobState::Running => self.started_at_ms = Some(now),
             JobState::Completed | JobState::Failed | JobState::Cancelled => {
                 self.completed_at_ms = Some(now);
+                self.current_lease = None;
             }
             JobState::Retrying => {
                 self.retry_count += 1;
                 self.assigned_node_id = None;
+                self.current_lease = None;
             }
             _ => {}
         }
