@@ -17,10 +17,23 @@ import java.util.UUID
 
 object ComputeWorkerClient {
 
-    var serverBaseUrl: String = "http://10.0.2.2:8080"
+    var serverBaseUrl: String = if (isRunningInEmulator()) "http://10.0.2.2:8080" else "http://192.168.0.111:8080"
     var pairedNodeId: String? = null
     var authToken: String? = null
     var isPaired: Boolean = false
+
+    fun isRunningInEmulator(): Boolean {
+        val fingerprint = android.os.Build.FINGERPRINT ?: ""
+        val model = android.os.Build.MODEL ?: ""
+        val hardware = android.os.Build.HARDWARE ?: ""
+        return fingerprint.startsWith("generic") ||
+                fingerprint.startsWith("unknown") ||
+                model.contains("google_sdk") ||
+                model.contains("Emulator") ||
+                model.contains("Android SDK built for x86") ||
+                hardware.contains("goldfish") ||
+                hardware.contains("ranchu")
+    }
 
     suspend fun pairWithCode(
         baseUrl: String,
@@ -29,7 +42,41 @@ object ComputeWorkerClient {
         telemetry: DeviceTelemetryData,
         policy: ProviderSafetyPolicy
     ): PairResult = withContext(Dispatchers.IO) {
-        serverBaseUrl = baseUrl.trimEnd('/')
+        var cleanUrl = baseUrl.trim().trimEnd('/')
+        var cleanCode = pairingCode.trim().uppercase()
+
+        // 1. Automatic parsing if user pasted full spaas://pair? URI
+        if (cleanCode.startsWith("SPAAS://PAIR") || cleanCode.startsWith("spaas://pair") || cleanUrl.startsWith("spaas://pair")) {
+            val uriStr = if (cleanCode.startsWith("spaas://pair", ignoreCase = true)) cleanCode else cleanUrl
+            try {
+                val parsedUri = android.net.Uri.parse(uriStr)
+                parsedUri.getQueryParameter("code")?.let { cleanCode = it.trim().uppercase() }
+                val emuParam = parsedUri.getQueryParameter("emu")
+                val srvParam = parsedUri.getQueryParameter("server")
+                cleanUrl = if (isRunningInEmulator() && !emuParam.isNullOrBlank()) {
+                    emuParam.trimEnd('/')
+                } else if (!srvParam.isNullOrBlank()) {
+                    srvParam.trimEnd('/')
+                } else {
+                    cleanUrl
+                }
+            } catch (_: Throwable) {}
+        }
+
+        // 2. Reject 127.0.0.1 / localhost on Android (Points to smartphone loopback)
+        if (cleanUrl.contains("127.0.0.1") || cleanUrl.contains("localhost")) {
+            val suggestion = if (isRunningInEmulator()) "http://10.0.2.2:8080" else "your PC's LAN IP (e.g. http://192.168.x.x:8080)"
+            return@withContext PairResult.Failure(
+                "INVALID_LOCAL_HOST: 127.0.0.1 points to this Android smartphone itself, not your host computer! " +
+                "For physical phones on local Wi-Fi, use $suggestion. For Android Studio emulator, use http://10.0.2.2:8080."
+            )
+        }
+
+        if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+            cleanUrl = "http://$cleanUrl"
+        }
+        serverBaseUrl = cleanUrl
+
         try {
             val endpoint = URL("$serverBaseUrl/api/v1/devices/pair")
             val conn = (endpoint.openConnection() as HttpURLConnection).apply {
@@ -45,9 +92,9 @@ object ComputeWorkerClient {
                     UUID.randomUUID().toString().replace("-", "")
 
             val reqBody = JSONObject().apply {
-                put("pairing_code", pairingCode.trim().uppercase())
+                put("pairing_code", cleanCode)
                 put("device_name", deviceName)
-                put("device_type", "AndroidPhone")
+                put("device_type", "android_smartphone")
                 put("public_key", clientPubKey)
                 put("capabilities", JSONObject().apply {
                     put("architecture", "aarch64")
@@ -64,24 +111,32 @@ object ComputeWorkerClient {
                 })
                 put("initial_telemetry", JSONObject().apply {
                     put("battery_pct", telemetry.batteryPct)
-                    put("charging_state", if (telemetry.isCharging) "ChargingAc" else "Discharging")
-                    put("thermal_status", telemetry.thermalStatus)
+                    put("charging_state", if (telemetry.isCharging) "CHARGING_AC" else "DISCHARGING")
+                    put("thermal_status", telemetry.thermalStatus.uppercase())
                     put("temperature_celsius", telemetry.temperatureCelsius ?: 30.0)
                     put("available_ram_mb", telemetry.availableRamMb)
                     put("available_storage_mb", 32000)
-                    put("network_type", if (telemetry.isUnmetered) "WifiUnmetered" else "CellularMetered")
+                    put("network_type", if (telemetry.isUnmetered) "wifi_unmetered" else "cellular_metered")
                     put("downlink_kbps", 80000)
                     put("uplink_kbps", 25000)
                     put("round_trip_ping_ms", 18)
                     put("cpu_usage_pct", 5.0)
                     put("active_job_count", 0)
+                    put("total_jobs_completed", 0)
+                    put("total_jobs_failed", 0)
+                    put("reliability_score", 1.0)
+                    put("timestamp_ms", System.currentTimeMillis())
                 })
                 put("initial_policy", JSONObject().apply {
                     put("only_while_charging", policy.onlyWhileCharging)
                     put("only_unmetered_network", policy.onlyOnUnmeteredWifi)
+                    put("min_battery_threshold_pct", policy.minBatteryThresholdPct)
                     put("min_battery_pct", policy.minBatteryThresholdPct)
-                    put("max_thermal_status", policy.maxThermalThreshold)
+                    put("max_thermal_threshold", policy.maxThermalThreshold.uppercase())
                     put("max_concurrent_jobs", policy.maxConcurrentJobs)
+                    put("max_cpu_pct", 60)
+                    put("max_memory_mb", 512)
+                    put("is_user_paused", false)
                 })
                 put("enrollment_signature", "android_ed25519_verified_sig")
                 put("timestamp_ms", System.currentTimeMillis())
@@ -103,10 +158,16 @@ object ComputeWorkerClient {
                 PairResult.Success(nodeId, token)
             } else {
                 val errorText = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
-                PairResult.Failure("Pairing rejected: $errorText")
+                PairResult.Failure("Pairing rejected ($responseCode): $errorText")
             }
         } catch (e: Exception) {
-            PairResult.Failure("Connection failed: ${e.localizedMessage ?: e.message}")
+            val detail = when {
+                e is java.net.ConnectException -> "Connection refused at $serverBaseUrl. Verify control plane is running and port 8080 is accessible."
+                e is java.net.SocketTimeoutException -> "Connection timed out at $serverBaseUrl. Verify phone is on the same Wi-Fi and host firewall allows incoming traffic."
+                e is java.net.UnknownHostException -> "Host unresolvable: ${e.message}. Check IP address format."
+                else -> e.localizedMessage ?: e.message ?: "Unknown network failure"
+            }
+            PairResult.Failure("Network failure: $detail")
         }
     }
 
@@ -127,24 +188,32 @@ object ComputeWorkerClient {
                 put("node_id", nodeId)
                 put("telemetry", JSONObject().apply {
                     put("battery_pct", telemetry.batteryPct)
-                    put("charging_state", if (telemetry.isCharging) "ChargingAc" else "Discharging")
-                    put("thermal_status", telemetry.thermalStatus)
+                    put("charging_state", if (telemetry.isCharging) "CHARGING_AC" else "DISCHARGING")
+                    put("thermal_status", telemetry.thermalStatus.uppercase())
                     put("temperature_celsius", telemetry.temperatureCelsius ?: 30.0)
                     put("available_ram_mb", telemetry.availableRamMb)
                     put("available_storage_mb", 32000)
-                    put("network_type", if (telemetry.isUnmetered) "WifiUnmetered" else "CellularMetered")
+                    put("network_type", if (telemetry.isUnmetered) "wifi_unmetered" else "cellular_metered")
                     put("downlink_kbps", 80000)
                     put("uplink_kbps", 25000)
                     put("round_trip_ping_ms", 18)
                     put("cpu_usage_pct", 6.0)
                     put("active_job_count", 0)
+                    put("total_jobs_completed", 0)
+                    put("total_jobs_failed", 0)
+                    put("reliability_score", 1.0)
+                    put("timestamp_ms", System.currentTimeMillis())
                 })
                 put("policy", JSONObject().apply {
                     put("only_while_charging", policy.onlyWhileCharging)
                     put("only_unmetered_network", policy.onlyOnUnmeteredWifi)
+                    put("min_battery_threshold_pct", policy.minBatteryThresholdPct)
                     put("min_battery_pct", policy.minBatteryThresholdPct)
-                    put("max_thermal_status", policy.maxThermalThreshold)
+                    put("max_thermal_threshold", policy.maxThermalThreshold.uppercase())
                     put("max_concurrent_jobs", policy.maxConcurrentJobs)
+                    put("max_cpu_pct", 60)
+                    put("max_memory_mb", 512)
+                    put("is_user_paused", false)
                 })
                 put("timestamp_ms", System.currentTimeMillis())
                 put("signature", "hb_sig_valid")

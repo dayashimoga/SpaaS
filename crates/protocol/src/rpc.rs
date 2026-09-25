@@ -159,6 +159,8 @@ pub struct ListJobsResponse {
 pub struct CreatePairingTokenRequest {
     pub device_type: Option<crate::node::NodeDeviceType>,
     pub label: Option<String>,
+    #[serde(default)]
+    pub lan_ip_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,7 +169,13 @@ pub struct CreatePairingTokenResponse {
     pub pairing_token: String,
     pub expires_at_ms: i64,
     pub server_url: String,
+    #[serde(default)]
+    pub lan_url: Option<String>,
+    #[serde(default)]
+    pub emulator_url: Option<String>,
     pub qr_payload: String,
+    #[serde(default)]
+    pub server_public_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -372,7 +380,10 @@ mod tests {
             pairing_token: "tok-uuid".into(),
             expires_at_ms: 600000,
             server_url: "http://127.0.0.1:8080".into(),
+            lan_url: Some("http://192.168.1.50:8080".into()),
+            emulator_url: Some("http://10.0.2.2:8080".into()),
             qr_payload: "spaas://pair?code=SP-8492".into(),
+            server_public_key: Some("abcdef0123456789".into()),
         };
         assert!(serde_json::to_string(&pair_resp).unwrap().contains("SP-8492"));
 

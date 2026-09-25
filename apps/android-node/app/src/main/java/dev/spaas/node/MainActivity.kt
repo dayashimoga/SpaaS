@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -131,7 +132,25 @@ fun SpaasNodeDashboard(
         item {
             PairingCard(
                 pairingCode = pairingCodeInput,
-                onPairingCodeChange = { pairingCodeInput = it },
+                onPairingCodeChange = { input ->
+                    if (input.startsWith("spaas://pair", ignoreCase = true)) {
+                        try {
+                            val uri = android.net.Uri.parse(input)
+                            val code = uri.getQueryParameter("code")
+                            val emu = uri.getQueryParameter("emu")
+                            val srv = uri.getQueryParameter("server")
+                            pairingCodeInput = code ?: input
+                            val target = if (ComputeWorkerClient.isRunningInEmulator() && !emu.isNullOrBlank()) emu else srv
+                            if (!target.isNullOrBlank()) {
+                                serverUrlInput = target
+                            }
+                        } catch (_: Throwable) {
+                            pairingCodeInput = input
+                        }
+                    } else {
+                        pairingCodeInput = input
+                    }
+                },
                 serverUrl = serverUrlInput,
                 onServerUrlChange = { serverUrlInput = it },
                 isPaired = ComputeWorkerClient.isPaired,
@@ -564,11 +583,38 @@ fun PairingCard(
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Control Plane Endpoint URL:",
-                    fontSize = 12.sp,
-                    color = Color.Gray
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Control Plane Endpoint URL:",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "Emulator",
+                            fontSize = 10.sp,
+                            color = Color(0xFF64B5F6),
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { onServerUrlChange("http://10.0.2.2:8080") }
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                        Text(text = "|", fontSize = 10.sp, color = Color.Gray)
+                        Text(
+                            text = "Wi-Fi LAN IP",
+                            fontSize = 10.sp,
+                            color = Color(0xFF81C784),
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { onServerUrlChange("http://192.168.0.111:8080") }
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 OutlinedTextField(
                     value = serverUrl,
@@ -582,6 +628,16 @@ fun PairingCard(
                         unfocusedBorderColor = Color.Gray
                     )
                 )
+
+                if (serverUrl.contains("127.0.0.1") || serverUrl.contains("localhost")) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "⚠️ 127.0.0.1 points to this Android phone itself! Use host Wi-Fi LAN IP or 10.0.2.2 (Emulator).",
+                        fontSize = 11.sp,
+                        color = Color(0xFFFFB74D),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(

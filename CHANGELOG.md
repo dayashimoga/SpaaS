@@ -95,6 +95,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Standalone Desktop Worker Runner (`dist/bin/spaas-desktop-worker.ps1`): Pre-packaged PowerShell worker script enabling immediate compute participation on Windows/Linux host machines with a one-line command (`irm http://127.0.0.1:8080/downloads/spaas-desktop-worker.ps1 | iex`) without requiring local Rust/Cargo toolchains.
 - Multi-Device Fleet Enrollment: Added Fleet Group dropdown (`Phones`, `Desktops`, `Emulators`, `Trusted`, `Custom`) and `[➕ Enroll Another Device]` button in Add Device modal for rapid multi-device onboarding.
 
+## [0.1.0-prod.6] - 2026-09-25
+
+### Added
+- Protocol Schema Hardening & Serde Aliasing: Added bidirectional `#[serde(alias = ...)]` and `#[serde(default)]` in `crates/protocol/src/node.rs` and `rpc.rs` across `NodeDeviceType`, `ChargingState`, `ThermalStatus`, `NetworkType`, `NodeTelemetry`, and `ProviderPolicy`. Eliminates Axum JSON deserialization rejections (HTTP 422) during real Android device enrollment.
+- Control Plane Host Network Discovery: Implemented UDP socket route resolution (`detect_host_lan_ip`) in `apps/control-plane/src/handlers.rs` and `/api/v1/system/network` endpoint, discovering outbound Wi-Fi/LAN IP (e.g. `192.168.0.111`) and returning reachability endpoints (`lan_url`, `emulator_url`, `localhost_url`).
+- Host Reachability Card & Dynamic QR Generator in Web Console: Add Device modal features a live Host Network Reachability card showing auto-detected host IP, override input, one-click copy buttons (`Copy URL`, `Copy Pairing URI`), and dynamic SVG QR code encoding the unified `spaas://pair` URI scheme.
+- Android Client Networking & Pairing Overhaul: Enhanced `ComputeWorkerClient.kt` and `MainActivity.kt` with immediate rejection of `127.0.0.1`/`localhost` with an actionable error modal, automatic AVD emulator detection (`10.0.2.2:8080`), smart `spaas://pair` URI parsing from QR scanner/clipboard, quick endpoint presets (`Wi-Fi LAN IP` vs `Emulator`), and exact protocol JSON serialization.
+- Simulation Truthfulness & Capacity Disaggregation: Added prominent amber "SIMULATION MODE ACTIVE" banner with a toggle to exclude synthetic nodes from platform metrics. Disaggregated Overview KPI cards into distinct `Physical`, `Emulator`, `Desktop`, and `Simulated` pill badges.
+- Provider & Consumer Guided Workflow Architecture: Restructured Overview into clear **Provide Compute (Earn Credits)** (`Add Device` -> `Set Limits` -> `Start Providing` -> `Earnings`) and **Use Compute (Dispatch Workloads)** (`Select Workload` -> `Configure Resources` -> `Run` -> `Result`) cards, abstracting low-level engineering jargon under the Advanced tab.
+- 22-Gate Acceptance Architecture: Split Gate 14 into Gate 14A (Android AVD Emulator Runtime Verification, `HARDWARE-REQUIRED`) and Gate 14B (Physical Android Hardware Onboarding & Runtime Execution, `HARDWARE-REQUIRED`). Verified all 22 production acceptance gates (19 PROVEN, 1 SIMULATION-PROVEN, 2 HARDWARE-REQUIRED, 0 FAILED) in 157s.
+
+
 
 
 

@@ -23,25 +23,40 @@ pub enum NodeState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeDeviceType {
+    #[serde(alias = "AndroidPhone", alias = "AndroidSmartphone", alias = "android_phone")]
     AndroidSmartphone,
+    #[serde(alias = "AndroidTablet", alias = "android_tablet")]
     AndroidTablet,
+    #[serde(alias = "LinuxDesktop", alias = "linux_desktop")]
     LinuxDesktop,
+    #[serde(alias = "ServerEdge", alias = "server_edge")]
     ServerEdge,
+    #[serde(alias = "MacDesktop", alias = "mac_desktop")]
     MacDesktop,
+    #[serde(alias = "WindowsDesktop", alias = "windows_desktop")]
     WindowsDesktop,
+    #[serde(alias = "RaspberryPi", alias = "raspberry_pi")]
     RaspberryPi,
+    #[serde(alias = "SimulatedNode", alias = "simulated_node")]
     SimulatedNode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ChargingState {
+    #[serde(alias = "Discharging", alias = "discharging")]
     Discharging,
+    #[serde(alias = "ChargingAc", alias = "charging_ac")]
     ChargingAc,
+    #[serde(alias = "ChargingUsb", alias = "charging_usb")]
     ChargingUsb,
+    #[serde(alias = "ChargingWireless", alias = "charging_wireless")]
     ChargingWireless,
+    #[serde(alias = "Full", alias = "full")]
     Full,
+    #[serde(alias = "NotCharging", alias = "not_charging")]
     NotCharging,
+    #[serde(alias = "Unknown", alias = "unknown")]
     Unknown,
 }
 
@@ -58,12 +73,19 @@ impl ChargingState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ThermalStatus {
+    #[serde(alias = "None", alias = "none")]
     None = 0,
+    #[serde(alias = "Light", alias = "light")]
     Light = 1,
+    #[serde(alias = "Moderate", alias = "moderate")]
     Moderate = 2,
+    #[serde(alias = "Severe", alias = "severe")]
     Severe = 3,
+    #[serde(alias = "Critical", alias = "critical")]
     Critical = 4,
+    #[serde(alias = "Emergency", alias = "emergency")]
     Emergency = 5,
+    #[serde(alias = "Shutdown", alias = "shutdown")]
     Shutdown = 6,
 }
 
@@ -76,11 +98,17 @@ impl ThermalStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NetworkType {
+    #[serde(alias = "WifiUnmetered", alias = "WIFI_UNMETERED")]
     WifiUnmetered,
+    #[serde(alias = "Ethernet", alias = "ETHERNET")]
     Ethernet,
+    #[serde(alias = "CellularMetered", alias = "CELLULAR_METERED")]
     CellularMetered,
+    #[serde(alias = "Vpn", alias = "VPN")]
     Vpn,
+    #[serde(alias = "Offline", alias = "OFFLINE")]
     Offline,
+    #[serde(alias = "Unknown", alias = "UNKNOWN")]
     Unknown,
 }
 
@@ -139,10 +167,27 @@ pub struct NodeTelemetry {
     pub round_trip_ping_ms: Option<u32>,
     pub cpu_usage_pct: f32,
     pub active_job_count: u32,
+    #[serde(default)]
     pub total_jobs_completed: u64,
+    #[serde(default)]
     pub total_jobs_failed: u64,
+    #[serde(default = "default_reliability_score")]
     pub reliability_score: f32, // 0.0 to 1.0 (decayed historical success rate)
+    #[serde(default)]
     pub timestamp_ms: i64,
+}
+
+fn default_reliability_score() -> f32 {
+    1.0
+}
+fn default_max_concurrent_jobs() -> u32 {
+    1
+}
+fn default_max_cpu_pct() -> u8 {
+    60
+}
+fn default_max_memory_mb() -> u64 {
+    512
 }
 
 impl Default for NodeTelemetry {
@@ -176,16 +221,21 @@ pub struct ProviderPolicy {
     /// Only accept workloads on unmetered Wi-Fi / Ethernet connections
     pub only_on_unmetered_network: bool,
     /// Minimum battery percentage required to accept work (e.g. 50%)
+    #[serde(alias = "min_battery_pct")]
     pub min_battery_threshold_pct: u8,
     /// Cutoff thermal status; auto-pause if temperature exceeds this level
     pub max_thermal_threshold: ThermalStatus,
     /// Maximum concurrent jobs allowed on this device (default 1 for phones)
+    #[serde(default = "default_max_concurrent_jobs")]
     pub max_concurrent_jobs: u32,
     /// Maximum percentage of CPU allowed for workloads (e.g. 50%)
+    #[serde(default = "default_max_cpu_pct")]
     pub max_cpu_pct: u8,
     /// Maximum RAM allocated to workloads in MB (e.g. 512 MB)
+    #[serde(default = "default_max_memory_mb")]
     pub max_memory_mb: u64,
     /// User explicit pause switch
+    #[serde(default)]
     pub is_user_paused: bool,
 }
 

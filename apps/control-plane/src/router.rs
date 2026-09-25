@@ -40,6 +40,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/jobs/:job_id/cancel", post(cancel_job))
         // System Observability, Live Events & Ledger
         .route("/api/v1/system/health", get(get_health))
+        .route("/api/v1/system/network", get(get_system_network))
         .route("/api/v1/events", get(get_events))
         .route("/api/v1/metering", get(get_metering))
         .route("/api/v1/audit", get(get_audit_log))

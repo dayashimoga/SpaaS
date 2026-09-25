@@ -25,11 +25,11 @@ START_TIME=$(date +%s)
 echo "================================================================="
 echo " SPaaS Universal Edge Compute Fabric - Acceptance Gate Runner"
 echo " Specification Version: 0.1.0-prod"
-echo " Total Behavioral Gates: 21 (G01 - G21)"
+echo " Total Behavioral Gates: 22 (G01 - G21, G14A/B)"
 echo " Allowed Classifications: PROVEN | EMULATOR-PROVEN | SIMULATION-PROVEN | PHYSICAL-DEVICE-PROVEN | IMPLEMENTED-UNPROVEN | HARDWARE-REQUIRED | UNSUPPORTED"
 echo "================================================================="
 
-TOTAL_GATES=21
+TOTAL_GATES=22
 PROVEN_GATES=0
 SIMULATION_GATES=0
 HARDWARE_REQUIRED_GATES=0
@@ -150,13 +150,23 @@ report_gate 13 "G13" "Android Node APK Production Compilation" "PROVEN" bash -c 
     fi
 "
 
-# G14: Android Device & Emulator Connectivity
-report_gate 14 "G14" "Android Device / Emulator Runtime Verification" "HARDWARE-REQUIRED" bash -c "
-    echo 'Checking connected Android emulators and physical devices...'
-    if command -v adb >/dev/null 2>&1 && adb devices 2>/dev/null | grep -E '\b(emulator-[0-9]+|[a-zA-Z0-9]+)\s+device\b'; then
-        echo 'Active device or emulator found'
+# G14A: Android AVD Emulator Runtime Verification
+report_gate "14A" "G14A" "Android AVD Emulator Runtime Verification" "HARDWARE-REQUIRED" bash -c "
+    echo 'Probing for active Android Virtual Device (AVD) emulator processes...'
+    if command -v adb >/dev/null 2>&1 && adb devices 2>/dev/null | grep -E '\bemulator-[0-9]+\s+device\b'; then
+        echo 'Active AVD emulator detected.'
     else
-        echo 'No physical device or hardware emulator attached on host. Certified as HARDWARE-REQUIRED.'
+        echo 'No active AVD emulator attached on host. Certified as HARDWARE-REQUIRED.'
+    fi
+"
+
+# G14B: Physical Android Hardware Onboarding & Runtime Execution
+report_gate "14B" "G14B" "Physical Android Hardware Onboarding & Runtime Execution" "HARDWARE-REQUIRED" bash -c "
+    echo 'Probing for physical Android smartphone hardware...'
+    if command -v adb >/dev/null 2>&1 && adb devices 2>/dev/null | grep -E '\b[a-zA-Z0-9]{6,}\s+device\b' | grep -v 'emulator-'; then
+        echo 'Active physical Android device detected.'
+    else
+        echo 'No physical Android device connected via ADB. Certified as HARDWARE-REQUIRED.'
     fi
 "
 

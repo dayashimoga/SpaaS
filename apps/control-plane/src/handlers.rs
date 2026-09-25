@@ -1,7 +1,7 @@
 use crate::state::AppState;
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
@@ -12,7 +12,7 @@ use futures_util::stream::Stream;
 use spaas_persistence::{AuditRecord, WalEvent};
 use spaas_protocol::job::{JobLease, JobRecord, JobState};
 use spaas_protocol::metering::ResourceUsage;
-use spaas_protocol::node::{EnrollmentStatus, NodeQualificationProfile, NodeRecord, NodeState, ProviderPolicy, ThermalStatus};
+use spaas_protocol::node::{EnrollmentStatus, NodeQualificationProfile, NodeRecord, NodeState, ThermalStatus};
 use spaas_protocol::rpc::*;
 use spaas_security::hash::verify_sha256;
 use spaas_security::signing::verify_workload;
@@ -679,8 +679,63 @@ pub async fn get_audit_log(
     Ok(Json(log.clone()))
 }
 
+pub fn detect_host_lan_ip() -> Option<String> {
+    if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        if socket.connect("8.8.8.8:80").is_ok() {
+            if let Ok(local_addr) = socket.local_addr() {
+                let ip = local_addr.ip();
+                if !ip.is_loopback() && !ip.is_unspecified() {
+                    return Some(ip.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SystemNetworkInfo {
+    pub primary_lan_ip: Option<String>,
+    pub lan_url: Option<String>,
+    pub emulator_url: String,
+    pub localhost_url: String,
+    pub listen_port: u16,
+}
+
+pub async fn get_system_network(
+    headers: HeaderMap,
+) -> Result<Json<SystemNetworkInfo>, (StatusCode, String)> {
+    let host_header_ip = headers
+        .get(axum::http::header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| {
+            let host_only = h.split(':').next().unwrap_or("").trim();
+            if !host_only.is_empty()
+                && host_only != "127.0.0.1"
+                && host_only != "localhost"
+                && host_only != "0.0.0.0"
+            {
+                Some(host_only.to_string())
+            } else {
+                None
+            }
+        });
+
+    let detected_ip = host_header_ip.or_else(detect_host_lan_ip);
+    let lan_url = detected_ip.as_ref().map(|ip| format!("http://{}:8080", ip));
+
+    Ok(Json(SystemNetworkInfo {
+        primary_lan_ip: detected_ip,
+        lan_url,
+        emulator_url: "http://10.0.2.2:8080".to_string(),
+        localhost_url: "http://127.0.0.1:8080".to_string(),
+        listen_port: 8080,
+    }))
+}
+
 pub async fn create_pairing_token(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<CreatePairingTokenRequest>,
 ) -> Result<Json<CreatePairingTokenResponse>, (StatusCode, String)> {
     let code_num = rand::random::<u32>() % 9000 + 1000;
@@ -707,15 +762,56 @@ pub async fn create_pairing_token(
         )
         .await;
 
-    let server_url = "http://127.0.0.1:8080".to_string();
-    let qr_payload = format!("spaas://pair?code={}&server={}", pairing_code, server_url);
+    // Resolve network reachability for physical Android phones on Wi-Fi and emulators
+    let host_header_ip = headers
+        .get(axum::http::header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| {
+            let host_only = h.split(':').next().unwrap_or("").trim();
+            if !host_only.is_empty()
+                && host_only != "127.0.0.1"
+                && host_only != "localhost"
+                && host_only != "0.0.0.0"
+            {
+                Some(host_only.to_string())
+            } else {
+                None
+            }
+        });
+
+    let resolved_lan_ip = payload
+        .lan_ip_override
+        .filter(|s| !s.trim().is_empty())
+        .or(host_header_ip)
+        .or_else(detect_host_lan_ip);
+
+    let (server_url, lan_url, emulator_url) = match resolved_lan_ip {
+        Some(ref ip) => {
+            let lan = format!("http://{}:8080", ip);
+            (lan.clone(), Some(lan), Some("http://10.0.2.2:8080".to_string()))
+        }
+        None => (
+            "http://127.0.0.1:8080".to_string(),
+            None,
+            Some("http://10.0.2.2:8080".to_string()),
+        ),
+    };
+
+    let server_pubkey = state.server_keypair.public_key_hex();
+    let qr_payload = format!(
+        "spaas://pair?code={}&server={}&emu=http://10.0.2.2:8080&exp={}&srv={}",
+        pairing_code, server_url, expires_at_ms, server_pubkey
+    );
 
     Ok(Json(CreatePairingTokenResponse {
         pairing_code,
         pairing_token: token,
         expires_at_ms,
         server_url,
+        lan_url,
+        emulator_url,
         qr_payload,
+        server_public_key: Some(server_pubkey),
     }))
 }
 
@@ -1255,13 +1351,16 @@ mod tests {
         let pair_req = CreatePairingTokenRequest {
             device_type: Some(NodeDeviceType::AndroidSmartphone),
             label: Some("My Phone".into()),
+            lan_ip_override: Some("192.168.1.100".into()),
         };
-        let token_resp = create_pairing_token(State(state.clone()), Json(pair_req))
+        let token_resp = create_pairing_token(State(state.clone()), HeaderMap::new(), Json(pair_req))
             .await
             .unwrap()
             .0;
         assert!(token_resp.pairing_code.starts_with("SP-"));
         assert!(token_resp.qr_payload.contains(&token_resp.pairing_code));
+        assert!(token_resp.qr_payload.contains("192.168.1.100"));
+        assert_eq!(token_resp.lan_url, Some("http://192.168.1.100:8080".into()));
 
         // 2. Pair device with valid pairing code
         let dev_key = spaas_security::keys::KeyPair::generate();

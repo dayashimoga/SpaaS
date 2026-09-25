@@ -962,10 +962,67 @@ async function fetchNodes() {
 
     document.getElementById('node-list-count').textContent = cachedNodes.length;
 
-    // Calculate fleet capacity
+    // Categorize nodes by real-world nature
+    let physicalCount = 0;
+    let emulatorCount = 0;
+    let desktopCount = 0;
+    let simulatedCount = 0;
+
+    cachedNodes.forEach(n => {
+      const isSim = n.is_simulated || n.device_type === 'simulated_node';
+      const model = (n.capabilities?.device_model || '').toLowerCase();
+      const isEmu = !isSim && (
+        model.includes('emulator') ||
+        model.includes('sdk_gphone') ||
+        model.includes('generic') ||
+        model.includes('goldfish') ||
+        model.includes('ranchu') ||
+        (n.node_id || '').includes('avd')
+      );
+      const isDesk = !isSim && !isEmu && (
+        n.device_type === 'windows_desktop' ||
+        n.device_type === 'linux_desktop' ||
+        n.device_type === 'mac_desktop' ||
+        (n.device_type || '').includes('desktop')
+      );
+
+      if (isSim) simulatedCount++;
+      else if (isEmu) emulatorCount++;
+      else if (isDesk) desktopCount++;
+      else physicalCount++;
+    });
+
+    const elPhys = document.getElementById('metric-count-physical');
+    if (elPhys) elPhys.textContent = physicalCount;
+    const elEmu = document.getElementById('metric-count-emulator');
+    if (elEmu) elEmu.textContent = emulatorCount;
+    const elDesk = document.getElementById('metric-count-desktop');
+    if (elDesk) elDesk.textContent = desktopCount;
+    const elSim = document.getElementById('metric-count-simulated');
+    if (elSim) elSim.textContent = simulatedCount;
+
+    // Simulation Warning Banner
+    const simBanner = document.getElementById('simulation-warning-banner');
+    const simCountText = document.getElementById('simulated-count-text');
+    if (simBanner) {
+      if (simulatedCount > 0) {
+        simBanner.classList.remove('hidden');
+        if (simCountText) {
+          simCountText.textContent = `${simulatedCount} simulated worker node${simulatedCount > 1 ? 's' : ''}`;
+        }
+      } else {
+        simBanner.classList.add('hidden');
+      }
+    }
+
+    // Calculate fleet capacity (honor excludeSimulated if active)
     let totalCores = 0;
     let totalRamMb = 0;
-    cachedNodes.forEach(n => {
+    const effectiveNodes = window.excludeSimulated
+      ? cachedNodes.filter(n => !n.is_simulated && n.device_type !== 'simulated_node')
+      : cachedNodes;
+
+    effectiveNodes.forEach(n => {
       totalCores += n.capabilities?.cpu_cores || 0;
       totalRamMb += n.capabilities?.total_ram_mb || 0;
     });
@@ -2032,6 +2089,82 @@ function initModals() {
       if (firstTab) firstTab.click();
     });
   }
+
+  // Copy buttons & LAN update
+  const btnCopyLan = document.getElementById('btn-copy-lan-url');
+  if (btnCopyLan) {
+    btnCopyLan.addEventListener('click', () => {
+      const val = document.getElementById('input-host-lan-ip')?.value;
+      if (val) {
+        navigator.clipboard.writeText(val);
+        btnCopyLan.textContent = '✓ Copied!';
+        setTimeout(() => { btnCopyLan.textContent = '📋 Copy URL'; }, 2000);
+      }
+    });
+  }
+
+  const btnCopyUri = document.getElementById('btn-copy-pairing-uri');
+  if (btnCopyUri) {
+    btnCopyUri.addEventListener('click', () => {
+      if (currentPairingUri) {
+        navigator.clipboard.writeText(currentPairingUri);
+        btnCopyUri.textContent = '✓ Copied URI!';
+        setTimeout(() => { btnCopyUri.textContent = '📋 Copy Pairing URI'; }, 2000);
+      }
+    });
+  }
+
+  const btnUpdateIp = document.getElementById('btn-update-qr-ip');
+  if (btnUpdateIp) {
+    btnUpdateIp.addEventListener('click', () => {
+      const val = document.getElementById('input-host-lan-ip')?.value;
+      if (val) fetchPairingCode(val);
+    });
+  }
+
+  // Guided workflows buttons
+  const btnWfAddDevice = document.getElementById('btn-wf-add-device');
+  if (btnWfAddDevice) {
+    btnWfAddDevice.addEventListener('click', openAddModal);
+  }
+
+  const btnWfViewEarnings = document.getElementById('btn-wf-view-earnings');
+  if (btnWfViewEarnings) {
+    btnWfViewEarnings.addEventListener('click', () => {
+      const navUsage = document.getElementById('nav-usage');
+      if (navUsage) navUsage.click();
+    });
+  }
+
+  const btnWfSubmitWorkload = document.getElementById('btn-wf-submit-workload');
+  if (btnWfSubmitWorkload) {
+    btnWfSubmitWorkload.addEventListener('click', () => {
+      const btnTopSubmit = document.getElementById('btn-submit-workload');
+      if (btnTopSubmit) btnTopSubmit.click();
+    });
+  }
+
+  const btnWfViewJobs = document.getElementById('btn-wf-view-jobs');
+  if (btnWfViewJobs) {
+    btnWfViewJobs.addEventListener('click', () => {
+      const navJobs = document.getElementById('nav-jobs');
+      if (navJobs) navJobs.click();
+    });
+  }
+
+  // Toggle exclude simulation
+  const btnToggleExcludeSim = document.getElementById('btn-toggle-exclude-sim');
+  if (btnToggleExcludeSim) {
+    btnToggleExcludeSim.addEventListener('click', () => {
+      window.excludeSimulated = !window.excludeSimulated;
+      btnToggleExcludeSim.textContent = window.excludeSimulated
+        ? 'Include Simulated Compute'
+        : 'Exclude Simulated Compute';
+      btnToggleExcludeSim.classList.toggle('btn-primary', window.excludeSimulated);
+      btnToggleExcludeSim.classList.toggle('btn-outline-cyan', !window.excludeSimulated);
+      fetchNodes();
+    });
+  }
 }
 
 async function openAddDeviceModal() {
@@ -2061,12 +2194,64 @@ async function fetchApkMetadata() {
   }
 }
 
-async function fetchPairingCode() {
+let currentPairingUri = '';
+
+function renderPairingQr(text) {
+  const container = document.getElementById('modal-qr-container');
+  if (!container) return;
+  // Deterministic SVG QR representation
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(i);
+    hash |= 0;
+  }
+  const cells = [];
+  const size = 15;
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      const inFinder1 = (r < 4 && c < 4);
+      const inFinder2 = (r < 4 && c >= size - 4);
+      const inFinder3 = (r >= size - 4 && c < 4);
+      if (inFinder1 || inFinder2 || inFinder3) {
+        cells.push(`<rect x="${c * 8}" y="${r * 8}" width="8" height="8" fill="#06B6D4" rx="1" />`);
+      } else {
+        const bit = ((hash ^ (r * 31 + c * 17)) & (1 << ((r + c) % 16))) !== 0;
+        if (bit) {
+          cells.push(`<rect x="${c * 8}" y="${r * 8}" width="7" height="7" fill="#F8FAFC" opacity="0.85" rx="1" />`);
+        }
+      }
+    }
+  }
+  container.innerHTML = `<svg viewBox="0 0 ${size * 8} ${size * 8}" width="120" height="120">${cells.join('')}</svg>`;
+}
+
+async function fetchPairingCode(overrideIp = null) {
   try {
+    let lanOverride = overrideIp;
+    if (!lanOverride) {
+      const netInput = document.getElementById('input-host-lan-ip');
+      if (netInput && netInput.value.trim()) {
+        try {
+          const urlObj = new URL(netInput.value.trim());
+          lanOverride = urlObj.hostname;
+        } catch (_) {
+          lanOverride = netInput.value.trim();
+        }
+      }
+    }
+
+    const payload = {
+      device_type: 'android_smartphone',
+      label: 'Web Console'
+    };
+    if (lanOverride && lanOverride !== '127.0.0.1' && lanOverride !== 'localhost') {
+      payload.lan_ip_override = lanOverride;
+    }
+
     const res = await fetch(`${API_BASE}/api/v1/devices/pairing-token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_type: 'android_smartphone', label: 'Web Console' })
+      body: JSON.stringify(payload)
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -2074,6 +2259,22 @@ async function fetchPairingCode() {
     document.getElementById('modal-pairing-code').textContent = data.pairing_code;
     const codeStep = document.getElementById('modal-code-display-step');
     if (codeStep) codeStep.textContent = data.pairing_code;
+
+    currentPairingUri = data.qr_payload || `spaas://pair?code=${data.pairing_code}&server=${data.server_url}`;
+    const uriCaption = document.getElementById('modal-qr-uri-caption');
+    if (uriCaption) uriCaption.textContent = currentPairingUri;
+
+    if (data.lan_url) {
+      const lanInput = document.getElementById('input-host-lan-ip');
+      if (lanInput) lanInput.value = data.lan_url;
+      const targetLabel = document.getElementById('label-physical-target');
+      if (targetLabel) targetLabel.textContent = data.lan_url;
+      const detectStatus = document.getElementById('lan-detect-status');
+      if (detectStatus) detectStatus.textContent = 'Active LAN: ' + (data.lan_url.replace('http://', ''));
+    }
+
+    // Dynamic QR generation
+    renderPairingQr(currentPairingUri);
 
     // Start 10 minute countdown timer
     let remainingSec = Math.max(0, Math.floor((data.expires_at_ms - Date.now()) / 1000));

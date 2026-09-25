@@ -11,11 +11,11 @@ Write-Host "=================================================================" -
 Write-Host " SPaaS Universal Edge Compute Fabric - Acceptance Gate Runner" -ForegroundColor Cyan
 Write-Host " Specification Version: 0.1.0-prod" -ForegroundColor Cyan
 Write-Host " Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
-Write-Host " Total Behavioral Gates: 21 (G01 - G21)" -ForegroundColor Cyan
+Write-Host " Total Behavioral Gates: 22 (G01 - G21 with G14A/B split)" -ForegroundColor Cyan
 Write-Host " Allowed Classifications: PROVEN | EMULATOR-PROVEN | SIMULATION-PROVEN | PHYSICAL-DEVICE-PROVEN | IMPLEMENTED-UNPROVEN | HARDWARE-REQUIRED | UNSUPPORTED" -ForegroundColor Cyan
 Write-Host "=================================================================" -ForegroundColor Cyan
 
-$TotalGates = 21
+$TotalGates = 22
 $ProvenGates = 0
 $SimulationProvenGates = 0
 $HardwareRequiredGates = 0
@@ -260,50 +260,64 @@ Report-Gate 13 "G13" "Android Node APK Delivery, AAPT & Signature Scheme v2" "Ve
     "PROVEN"
 }
 
-# G14: Android Device & Emulator Connectivity
-Report-Gate 14 "G14" "Android Device / Emulator Runtime Verification" "podman run adb devices" {
-    Write-Host "Checking for active Android emulator / physical device via ADB container..."
+# G14A: Android AVD Emulator Runtime Verification
+Report-Gate 14 "G14A" "Android AVD Emulator Runtime Verification" "podman run adb devices (checking for emulator-*)" {
+    Write-Host "Checking for active Android emulator (AVD) via ADB container..."
     $devicesOutput = podman run --rm -e ANDROID_HOME=/opt/android-sdk-linux ghcr.io/cirruslabs/flutter:3.24.3 /opt/android-sdk-linux/platform-tools/adb devices
     Write-Host $devicesOutput
-    if ($devicesOutput -match "\b(emulator-\d+|[a-zA-Z0-9]+)\s+device\b") {
-        Write-Host "Active Android device or emulator detected: EMULATOR-PROVEN" -ForegroundColor Green
+    if ($devicesOutput -match "\b(emulator-\d+)\s+device\b") {
+        Write-Host "Active Android Studio AVD emulator detected: EMULATOR-PROVEN" -ForegroundColor Green
         "EMULATOR-PROVEN"
     } else {
-        Write-Host "No active Android device or emulator connected on host. Gate certified: HARDWARE-REQUIRED (Requires physical device or KVM emulator; APK and JNI bridge implemented and compiled)." -ForegroundColor Yellow
+        Write-Host "No active Android Studio AVD emulator running on host. Gate certified: HARDWARE-REQUIRED (Requires running Android AVD emulator instance; APK and JNI bridge implemented and compiled)." -ForegroundColor Yellow
+        "HARDWARE-REQUIRED"
+    }
+}
+
+# G14B: Physical Android Hardware Onboarding & Runtime Execution
+Report-Gate 15 "G14B" "Physical Android Hardware Onboarding & Runtime Execution" "podman run adb devices (checking for physical USB/Wi-Fi devices)" {
+    Write-Host "Checking for active physical Android smartphone via ADB container..."
+    $devicesOutput = podman run --rm -e ANDROID_HOME=/opt/android-sdk-linux ghcr.io/cirruslabs/flutter:3.24.3 /opt/android-sdk-linux/platform-tools/adb devices
+    Write-Host $devicesOutput
+    if ($devicesOutput -match "(?m)^(?!emulator-)([a-zA-Z0-9]+)\s+device$") {
+        Write-Host "Active physical Android smartphone detected: PHYSICAL-DEVICE-PROVEN" -ForegroundColor Green
+        "PHYSICAL-DEVICE-PROVEN"
+    } else {
+        Write-Host "No physical Android smartphone connected via ADB USB/Wi-Fi. Gate certified: HARDWARE-REQUIRED (Production harness scripts/physical-android-acceptance.ps1 ready; awaiting physical device attach)." -ForegroundColor Yellow
         "HARDWARE-REQUIRED"
     }
 }
 
 # G15: Android Single-Use Pairing Workflow
-Report-Gate 15 "G15" "Android Single-Use Pairing Token & Outbound Mutual Auth" "cargo test -p spaas-control-plane -- test_pairing_token" {
+Report-Gate 16 "G15" "Android Single-Use Pairing Token & Outbound Mutual Auth" "cargo test -p spaas-control-plane -- test_pairing_token" {
     cargo test -p spaas-control-plane test_pairing_token -- --nocapture
     if ($LASTEXITCODE -ne 0) { throw "Pairing token verification failed" }
     "PROVEN"
 }
 
 # G16: Android Real WASM E2E Execution & Result Sealing
-Report-Gate 16 "G16" "Android WASM Execution, Result Sealing & Integrity Verification" "cargo test -p spaas-control-plane test_demo_cluster_and_auto_sign_workload_lifecycle" {
+Report-Gate 17 "G16" "Android WASM Execution, Result Sealing & Integrity Verification" "cargo test -p spaas-control-plane test_demo_cluster_and_auto_sign_workload_lifecycle" {
     cargo test -p spaas-control-plane test_demo_cluster_and_auto_sign_workload_lifecycle -- --nocapture
     if ($LASTEXITCODE -ne 0) { throw "Android WASM execution lifecycle verification failed" }
     "PROVEN"
 }
 
 # G17: Android Failure Injection, Kill & Reconnect
-Report-Gate 17 "G17" "Android Resource Safety Policy, Yield Conditions & Disconnection Defense" "cargo test -p spaas-node-agent test_resource_safety_yield_reasons" {
+Report-Gate 18 "G17" "Android Resource Safety Policy, Yield Conditions & Disconnection Defense" "cargo test -p spaas-node-agent test_resource_safety_yield_reasons" {
     cargo test -p spaas-node-agent test_resource_safety_yield_reasons -- --nocapture
     if ($LASTEXITCODE -ne 0) { throw "Android resource safety yield tests failed" }
     "PROVEN"
 }
 
 # G18: Desktop Edge Worker Physical Compute
-Report-Gate 18 "G18" "Heterogeneous Desktop Worker Physical Compute Qualification" "cargo test -p spaas-integration-tests --test desktop_worker_compute" {
+Report-Gate 19 "G18" "Heterogeneous Desktop Worker Physical Compute Qualification" "cargo test -p spaas-integration-tests --test desktop_worker_compute" {
     cargo test -p spaas-integration-tests --test desktop_worker_compute -- --nocapture
     if ($LASTEXITCODE -ne 0) { throw "Desktop worker compute test failed" }
     "PROVEN"
 }
 
 # G19: Scale, Scheduling Latency & Throughput Benchmark
-Report-Gate 19 "G19" "Scheduler Multi-Attribute Scoring & Benchmark Latency" "cargo test -p spaas-integration-tests --test scheduler_multi_attribute; cargo test -p spaas-integration-tests --test node_qualification_benchmarks" {
+Report-Gate 20 "G19" "Scheduler Multi-Attribute Scoring & Benchmark Latency" "cargo test -p spaas-integration-tests --test scheduler_multi_attribute; cargo test -p spaas-integration-tests --test node_qualification_benchmarks" {
     cargo test -p spaas-integration-tests --test scheduler_multi_attribute -- --nocapture
     cargo test -p spaas-integration-tests --test node_qualification_benchmarks -- --nocapture
     if ($LASTEXITCODE -ne 0) { throw "Scheduler benchmark tests failed" }
@@ -311,7 +325,7 @@ Report-Gate 19 "G19" "Scheduler Multi-Attribute Scoring & Benchmark Latency" "ca
 }
 
 # G20: System Teardown & Residual Verification
-Report-Gate 20 "G20" "System Teardown & Residual Verification" "Stop-Process on spaas* processes and verify clean state" {
+Report-Gate 21 "G20" "System Teardown & Residual Verification" "Stop-Process on spaas* processes and verify clean state" {
     Get-Process -Name "spaas*", "spaas-control-plane*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
     $lingering = Get-Process -Name "spaas*", "spaas-control-plane*" -ErrorAction SilentlyContinue
@@ -323,7 +337,7 @@ Report-Gate 20 "G20" "System Teardown & Residual Verification" "Stop-Process on 
 }
 
 # G21: Release Artifacts, Checksums & CI Package Verification
-Report-Gate 21 "G21" "Release Artifacts, Checksums & Distribution Packaging" "Generate SHA256 checksums for release artifacts" {
+Report-Gate 22 "G21" "Release Artifacts, Checksums & Distribution Packaging" "Generate SHA256 checksums for release artifacts" {
     New-Item -ItemType Directory -Path "dist/bin" -Force | Out-Null
     Copy-Item "apps/android-node/app/build/outputs/apk/debug/app-debug.apk" "dist/bin/spaas-android-node.apk" -Force -ErrorAction SilentlyContinue
     
@@ -346,7 +360,7 @@ $CommitHash = git rev-parse HEAD
 $report = @{
     git_commit = $CommitHash
     timestamp = (Get-Date).ToString("o")
-    total_behavioral_gates = 21
+    total_behavioral_gates = 22
     evidence_classifications = @{
         wasm_wasi_sandbox = "PROVEN"
         ed25519_signatures = "PROVEN"
@@ -364,7 +378,8 @@ $report = @{
         podman_fullstack_e2e = "PROVEN"
         web_console_visual_ux = "PROVEN"
         heterogeneous_simulation = "SIMULATION-PROVEN"
-        android_emulator_connectivity = if ($script:GateResults["G14"] -eq "EMULATOR-PROVEN") { "EMULATOR-PROVEN" } else { "HARDWARE-REQUIRED" }
+        android_avd_emulator_runtime = if ($script:GateResults["G14A"] -eq "EMULATOR-PROVEN") { "EMULATOR-PROVEN" } else { "HARDWARE-REQUIRED" }
+        android_physical_hardware = if ($script:GateResults["G14B"] -eq "PHYSICAL-DEVICE-PROVEN") { "PHYSICAL-DEVICE-PROVEN" } else { "HARDWARE-REQUIRED" }
         qualcomm_npu_avf_pkvm = "HARDWARE-REQUIRED"
     }
     test_summary = @{
@@ -390,7 +405,7 @@ $report = @{
 
 $reportJson = $report | ConvertTo-Json -Depth 6
 Set-Content -Path "acceptance-report.json" -Value $reportJson
-Write-Host "`nGenerated updated acceptance-report.json with 21 behavioral gate records."
+Write-Host "`nGenerated updated acceptance-report.json with 22 behavioral gate records."
 
 $Duration = (Get-Date) - $StartTime
 Write-Host "`n=================================================================" -ForegroundColor Green

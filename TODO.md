@@ -157,6 +157,16 @@
 - [x] Standalone Desktop Worker Runner (`dist/bin/spaas-desktop-worker.ps1`): Pre-packaged PowerShell worker script enabling immediate compute participation on Windows/Linux host machines with a one-line command (`irm http://127.0.0.1:8080/downloads/spaas-desktop-worker.ps1 | iex`) without local Rust/Cargo toolchains [PROVEN, 2026-09-25]
 - [x] Multi-Device Fleet Enrollment: Added Fleet Group dropdown (`Phones`, `Desktops`, `Emulators`, `Trusted`, `Custom`) and `[➕ Enroll Another Device]` button in Add Device modal for rapid multi-device onboarding [PROVEN, 2026-09-25]
 
+## [Phase 16: UX Refactoring, Real Android Pairing Hardening & 22-Gate Acceptance]
+- [x] Forensic Diagnosis & Resolution of Android Pairing Deserialization: Fixed protocol schema mismatches causing Axum HTTP 422 errors during real Android enrollment by adding `#[serde(alias = ...)]` and `#[serde(default)]` across `crates/protocol/src/node.rs` and `rpc.rs` (`NodeDeviceType`, `ChargingState`, `ThermalStatus`, `NetworkType`, `NodeTelemetry`, `ProviderPolicy`), and aligning Kotlin `ComputeWorkerClient.kt` serialization [PROVEN, 2026-09-25]
+- [x] Host LAN IP Discovery & Routing Architecture: Implemented `detect_host_lan_ip()` in control plane, exposed `/api/v1/system/network`, prohibited instructing Android devices to use `127.0.0.1`, provided automatic LAN IP discovery for physical phones and `10.0.2.2:8080` alias routing for Android Studio AVD emulators [PROVEN, 2026-09-25]
+- [x] Android Client Network Hardening: Enhanced Kotlin Android app with pre-flight URL validation rejecting `127.0.0.1`/`localhost`, automatic emulator detection, smart `spaas://pair` URI parsing from QR codes/clipboard, and endpoint preset switches (`Wi-Fi LAN IP` vs `Emulator 10.0.2.2`) [PROVEN, 2026-09-25]
+- [x] Simulation Truthfulness & Metric Disaggregation: Explicitly separated fleet capacity into `Physical`, `Emulator`, `Desktop`, and `Simulated` pill badges; added a prominent "SIMULATION MODE ACTIVE" warning banner with a toggle to exclude synthetic nodes from platform metrics [PROVEN, 2026-09-25]
+- [x] Provide Compute & Use Compute Guided Workflows: Refactored console Overview with distinct cards for providers (**Provide Compute / Earn Credits**: Add Device -> Set Limits -> Start Providing -> Earnings) and consumers (**Use Compute / Dispatch Workloads**: Select Workload -> Configure Resources -> Run -> Result), demoting low-level engineering jargon under Advanced [PROVEN, 2026-09-25]
+- [x] Add Device Modal Reachability & QR Overhaul: Embedded Host Network Reachability card displaying auto-detected host LAN IP, editable override field, quick copy buttons, dynamic SVG QR code encoding the unified `spaas://pair` URI, and direct browser download of `SPaaS-Node-v0.1.0.apk` [PROVEN, 2026-09-25]
+- [x] Acceptance Gate Architecture Split (22 Behavioral Gates): Split Gate 14 into G14A (Android AVD Emulator Runtime Verification, `HARDWARE-REQUIRED`) and G14B (Physical Android Hardware Onboarding & Runtime Execution, `HARDWARE-REQUIRED`), achieving 19 PROVEN, 1 SIMULATION-PROVEN, 2 HARDWARE-REQUIRED, 0 FAILED across 22 gates in 157s [PROVEN, 2026-09-25]
+
+
 
 
 
