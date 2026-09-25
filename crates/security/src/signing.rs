@@ -157,4 +157,22 @@ mod tests {
         res.stdout = "tampered text".into();
         assert!(verify_job_result(&res, &node_key.public_key_hex()).is_err());
     }
+
+    #[test]
+    fn test_signature_decoding_and_length_validation() {
+        let key = KeyPair::generate();
+        let pubkey = PublicKey::from_hex(&key.public_key_hex()).unwrap();
+        let msg = b"test message";
+
+        // Invalid base64
+        assert!(verify_signature(&pubkey, msg, "!invalid_base64!").is_err());
+
+        // Invalid length (base64 of 32 bytes instead of 64 bytes)
+        let short_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 32]);
+        assert!(verify_signature(&pubkey, msg, &short_b64).is_err());
+
+        // Corrupted 64-byte signature
+        let corrupt_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [0u8; 64]);
+        assert!(verify_signature(&pubkey, msg, &corrupt_b64).is_err());
+    }
 }

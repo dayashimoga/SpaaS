@@ -111,4 +111,16 @@ mod tests {
         let public_key = PublicKey::from_hex(&pub_hex).unwrap();
         assert_eq!(public_key.to_hex(), pub_hex);
     }
+
+    #[test]
+    fn test_invalid_keys() {
+        assert!(KeyPair::from_secret_hex("invalid_hex").is_err());
+        assert!(KeyPair::from_secret_hex("aabb").is_err());
+        assert!(KeyPair::from_secret_hex(&"00".repeat(31)).is_err());
+        assert!(KeyPair::from_secret_hex(&"00".repeat(33)).is_err());
+        assert!(PublicKey::from_hex("invalid_hex").is_err());
+        assert!(PublicKey::from_hex("aabb").is_err());
+        assert!(PublicKey::from_hex(&"00".repeat(31)).is_err());
+        assert!(PublicKey::from_hex(&"00".repeat(33)).is_err());
+    }
 }

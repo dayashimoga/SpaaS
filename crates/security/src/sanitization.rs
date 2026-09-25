@@ -61,6 +61,9 @@ mod tests {
     fn test_identifier_validation() {
         assert!(validate_identifier("node-uuid-1234").is_ok());
         assert!(validate_identifier("workload_v1.0").is_ok());
+        assert!(validate_identifier("").is_err());
+        assert!(validate_identifier(&"a".repeat(129)).is_err());
+        assert!(validate_identifier("bad..name").is_err());
         assert!(validate_identifier("../etc/passwd").is_err());
         assert!(validate_identifier("bad;command").is_err());
         assert!(validate_identifier("bad`whoami`").is_err());
@@ -73,5 +76,6 @@ mod tests {
         assert!(sanitize_sandboxed_path(&base, "sub/file.txt").is_ok());
         assert!(sanitize_sandboxed_path(&base, "../escape.txt").is_err());
         assert!(sanitize_sandboxed_path(&base, "/absolute/path").is_err());
+        assert!(sanitize_sandboxed_path(&base, "\\windows\\abs").is_err());
     }
 }

@@ -225,6 +225,32 @@ impl WorkloadSpec {
     }
 }
 
+impl Default for WorkloadSpec {
+    fn default() -> Self {
+        Self {
+            workload_id: Uuid::new_v4(),
+            spec_version: "1.0.0".into(),
+            name: "default_workload".into(),
+            runtime: RuntimeType::WasmWasi,
+            artifact_sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into(),
+            artifact_size_bytes: 0,
+            artifact_uri: "inline://".into(),
+            entrypoint: "_start".into(),
+            args: vec![],
+            env_vars: vec![],
+            limits: ResourceLimits::default(),
+            network_policy: NetworkPolicy::None,
+            required_capabilities: RequiredCapabilities::default(),
+            retry_policy: RetryPolicy::default(),
+            verification_policy: VerificationPolicy::SingleNode,
+            priority: WorkloadPriority::Normal,
+            submitter_signature: "".into(),
+            submitter_pubkey: "".into(),
+            created_at_ms: 1000,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManifestMetadata {
     pub name: String,
@@ -350,5 +376,73 @@ mod tests {
         assert_eq!(spec.workload_id, decoded.workload_id);
         assert_eq!(spec.limits.max_fuel, decoded.limits.max_fuel);
         assert_eq!(spec.canonical_bytes_for_signing(), decoded.canonical_bytes_for_signing());
+    }
+
+    #[test]
+    fn test_developer_manifest_parsing_and_validation() {
+        let yaml_content = r#"
+apiVersion: spaas.io/v1
+kind: Workload
+metadata:
+  name: test-wasm-workload
+spec:
+  runtime: wasm_wasi
+  entrypoint: _start
+  binary: inline://AGFzbQEAAAABBwFgAn9/AX8DAgEABwcBA2FkZAAACgkBBwAgACABags=
+  limits:
+    max_fuel: 10000000
+    max_memory_bytes: 67108864
+    max_storage_bytes: 10485760
+    timeout_ms: 5000
+    max_output_bytes: 1048576
+"#;
+        let manifest = DeveloperWorkloadManifest::from_yaml_str(yaml_content).unwrap();
+        assert_eq!(manifest.metadata.name, "test-wasm-workload");
+        assert_eq!(manifest.spec.limits.max_fuel, 10_000_000);
+
+        let json_content = serde_json::to_string(&manifest).unwrap();
+        let deser_json = DeveloperWorkloadManifest::from_json_str(&json_content).unwrap();
+        assert_eq!(deser_json.metadata.name, manifest.metadata.name);
+
+        // Invalid apiVersion
+        let bad_api = yaml_content.replace("apiVersion: spaas.io/v1", "apiVersion: v2");
+        assert!(DeveloperWorkloadManifest::from_yaml_str(&bad_api).is_err());
+
+        // Invalid kind
+        let bad_kind = yaml_content.replace("kind: Workload", "kind: Pod");
+        assert!(DeveloperWorkloadManifest::from_yaml_str(&bad_kind).is_err());
+    }
+
+    #[test]
+    fn test_policy_variants_serde() {
+        let policies = vec![
+            VerificationPolicy::None,
+            VerificationPolicy::SingleNode,
+            VerificationPolicy::HashMatch { expected_digest: "hash_abc".into() },
+            VerificationPolicy::MOfN { replicas: 5, threshold: 3 },
+            VerificationPolicy::DeterministicReplay,
+            VerificationPolicy::TrustedNode { min_reputation: 90 },
+            VerificationPolicy::SpotCheck { probability_pct: 10 },
+            VerificationPolicy::CustomVerifier { verifier_endpoint: "https://verifier.spaas.dev".into() },
+            VerificationPolicy::TeeAttested,
+        ];
+
+        for pol in policies {
+            let s = serde_json::to_string(&pol).unwrap();
+            let d: VerificationPolicy = serde_json::from_str(&s).unwrap();
+            assert_eq!(pol, d);
+        }
+
+        let priorities = vec![
+            WorkloadPriority::Low,
+            WorkloadPriority::Normal,
+            WorkloadPriority::High,
+            WorkloadPriority::Critical,
+        ];
+        for prio in priorities {
+            let s = serde_json::to_string(&prio).unwrap();
+            let d: WorkloadPriority = serde_json::from_str(&s).unwrap();
+            assert_eq!(prio, d);
+        }
     }
 }

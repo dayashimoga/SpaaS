@@ -46,3 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Web management console overhaul (`apps/web-console`) featuring 11 responsive views, live telemetry binding, interactive manifest studio, and dark mode high contrast.
 - 18 behavioral production acceptance gates (G01–G18) automated in `scripts/acceptance.ps1` and `scripts/acceptance` with 100% automated pass.
 - Comprehensive forensic gap analysis matrix (`docs/GAP_ANALYSIS.md`) and Android background service compatibility matrix (`docs/ANDROID_COMPATIBILITY.md`).
+
+## [0.1.0-prod.2] - 2026-09-25
+
+### Added
+- Measured LLVM line coverage of 91.34% across core workspace crates (`spaas-protocol`, `spaas-security`, `spaas-runtime`, `spaas-scheduler-core`, `spaas-persistence`, `spaas-verification`, `spaas-metering`, `spaas-node-agent`) via containerized `cargo tarpaulin --engine Llvm`, generating detailed HTML and JSON coverage reports in `target/coverage/`.
+- Full-stack Podman containerization end-to-end automation scripts (`scripts/podman-e2e.ps1` and `scripts/podman-e2e.sh`) verifying isolated bridge networking, multi-service lifecycle, CLI workload submission (`fixtures/workload.yaml` and `fixtures/hello.wasm`), and crash recovery with durable WAL replay.
+- High-scale scheduler throughput and latency benchmarks (`test_scheduler_high_scale_latency_and_throughput_benchmarks` in `tests/integration/tests/scheduler_multi_attribute.rs`) proving 1,000 node p50 dispatch latency of 137 µs and 5,000 node evaluation in sub-millisecond time.
+- Automated end-to-end browser verification of the Web Management Console across 11 views, live metric visualizers, workload manifest modal, and dark mode contrast toggles, captured in `web_console_e2e_1790325769074.webp`.
+- Forensic production certification runner hardening in `scripts/acceptance.ps1` and `scripts/acceptance` with strict classification enforcement (16 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED).
+

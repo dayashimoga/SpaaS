@@ -314,6 +314,48 @@ mod tests {
         assert!(!node.is_ready_for_workload());
         node.telemetry.thermal_status = ThermalStatus::None;
 
-        assert!(node.is_ready_for_workload());
+        // Test 6: Non-enrolled statuses
+        node.enrollment = EnrollmentStatus::PendingApproval;
+        assert!(!node.is_ready_for_workload());
+        node.enrollment = EnrollmentStatus::Suspended;
+        assert!(!node.is_ready_for_workload());
+        node.enrollment = EnrollmentStatus::Unenrolled;
+        assert!(!node.is_ready_for_workload());
+        node.enrollment = EnrollmentStatus::Enrolled;
+
+        // Test 7: Non-active states
+        node.state = NodeState::Offline;
+        assert!(!node.is_ready_for_workload());
+        node.state = NodeState::Paused;
+        assert!(!node.is_ready_for_workload());
+        node.state = NodeState::Idle;
+
+        // Test 8: Concurrency limit reached
+        node.telemetry.active_job_count = 1;
+        node.policy.max_concurrent_jobs = 1;
+        assert!(!node.is_ready_for_workload());
+
+        // Test 9: Network & charging variants
+        assert!(ChargingState::ChargingWireless.is_charging());
+        assert!(ChargingState::Full.is_charging());
+        assert!(!ChargingState::NotCharging.is_charging());
+        assert!(NetworkType::Ethernet.is_unmetered());
+        assert!(!NetworkType::CellularMetered.is_unmetered());
+        assert!(!NetworkType::Offline.is_unmetered());
+
+        // Test 10: Qualification profile serde
+        let q = NodeQualificationProfile {
+            qualified_at_ms: 1000,
+            wasm_conformance_passed: true,
+            wasi_preview1_passed: true,
+            measured_fuel_mips: 250.5,
+            measured_memory_max_pages: 512,
+            qualification_hash: "hash_qual".into(),
+            qualification_signature: "sig_qual".into(),
+        };
+        let q_json = serde_json::to_string(&q).unwrap();
+        let q_deser: NodeQualificationProfile = serde_json::from_str(&q_json).unwrap();
+        assert_eq!(q_deser.qualification_hash, "hash_qual");
+        assert_eq!(q_deser.measured_fuel_mips, 250.5);
     }
 }

@@ -55,3 +55,18 @@ impl Default for SchedulerConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_scheduler_config_serde() {
+        let cfg = SchedulerConfig::default();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let deser: SchedulerConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(cfg, deser);
+        assert_eq!(deser.max_queue_capacity, 10_000);
+    }
+}
+

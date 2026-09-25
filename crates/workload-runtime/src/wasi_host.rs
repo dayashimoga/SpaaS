@@ -309,3 +309,85 @@ pub fn link_sandboxed_wasi(linker: &mut Linker<HostState>) -> Result<(), wasmi::
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wasmi::{Engine, Module, Store};
+
+    #[test]
+    fn test_host_state_buffer_bounds() {
+        let mut state = HostState::new(10, 100, vec!["arg1".into()], vec![("K".into(), "V".into())]);
+        assert!(state.append_stdout(b"hello").is_ok());
+        assert_eq!(state.stdout, b"hello");
+        // Exceeds quota (10 bytes total)
+        assert!(state.append_stdout(b"world123").is_err());
+        assert_eq!(state.stdout.len(), 10);
+
+        assert!(state.append_stderr(b"err").is_ok());
+        assert!(state.append_stderr(b"very_long_error_message").is_err());
+    }
+
+    #[test]
+    fn test_wasi_host_functions_direct_invocation() {
+        let engine = Engine::default();
+        let mut linker = Linker::new(&engine);
+        link_sandboxed_wasi(&mut linker).expect("link must succeed");
+
+        let wat = r#"
+            (module
+                (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
+                (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "fd_read" (func $fd_read (param i32 i32 i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "fd_close" (func $fd_close (param i32) (result i32)))
+                (import "wasi_snapshot_preview1" "fd_seek" (func $fd_seek (param i32 i64 i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "fd_fdstat_get" (func $fd_fdstat_get (param i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "environ_sizes_get" (func $environ_sizes_get (param i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "environ_get" (func $environ_get (param i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "args_sizes_get" (func $args_sizes_get (param i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "args_get" (func $args_get (param i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "clock_time_get" (func $clock_time_get (param i32 i64 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "random_get" (func $random_get (param i32 i32) (result i32)))
+                (memory (export "memory") 1)
+                (func (export "_start")
+                    ;; fd_write to fd 1 (stdout)
+                    (drop (call $fd_write (i32.const 1) (i32.const 200) (i32.const 1) (i32.const 210)))
+                    ;; fd_write to fd 2 (stderr)
+                    (drop (call $fd_write (i32.const 2) (i32.const 200) (i32.const 1) (i32.const 210)))
+                    ;; fd_write to invalid fd 99 (EBADF)
+                    (drop (call $fd_write (i32.const 99) (i32.const 200) (i32.const 1) (i32.const 210)))
+                    (drop (call $fd_close (i32.const 3)))
+                    (drop (call $fd_seek (i32.const 1) (i64.const 0) (i32.const 0) (i32.const 0)))
+                    (drop (call $fd_fdstat_get (i32.const 1) (i32.const 0)))
+                    (drop (call $fd_fdstat_get (i32.const 2) (i32.const 0)))
+                    (drop (call $fd_read (i32.const 0) (i32.const 0) (i32.const 0) (i32.const 100)))
+                    (drop (call $environ_sizes_get (i32.const 0) (i32.const 4)))
+                    (drop (call $environ_get (i32.const 8) (i32.const 16)))
+                    (drop (call $args_sizes_get (i32.const 0) (i32.const 4)))
+                    (drop (call $args_get (i32.const 8) (i32.const 16)))
+                    (drop (call $clock_time_get (i32.const 0) (i64.const 0) (i32.const 0)))
+                    (drop (call $random_get (i32.const 0) (i32.const 16)))
+                    (call $proc_exit (i32.const 0))
+                )
+            )
+        "#;
+        let wasm = wat::parse_str(wat).expect("parse WAT");
+        let module = Module::new(&engine, &wasm).expect("module compile");
+        let host_state = HostState::new(1024, 100000, vec!["arg0".into()], vec![("ENV_KEY".into(), "VAL".into())]);
+        let mut store = Store::new(&engine, host_state);
+        let instance = linker.instantiate(&mut store, &module).unwrap().start(&mut store).unwrap();
+
+        // Write iovec at offset 200 pointing to offset 300 with len 5 ("hello")
+        let memory = instance.get_memory(&store, "memory").unwrap();
+        let iov = [300u32.to_le_bytes(), 5u32.to_le_bytes()].concat();
+        memory.write(&mut store, 200, &iov).unwrap();
+        memory.write(&mut store, 300, b"hello").unwrap();
+
+        let start = instance.get_typed_func::<(), ()>(&store, "_start").unwrap();
+        let _ = start.call(&mut store, ());
+        assert_eq!(store.data().exit_code, Some(0));
+        assert_eq!(store.data().stdout, b"hello");
+        assert_eq!(store.data().stderr, b"hello");
+    }
+}
+

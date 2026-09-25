@@ -95,3 +95,64 @@ impl Default for VerificationEngine {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spaas_security::keys::KeyPair;
+    use spaas_security::signing::sign_job_result;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_verification_engine_single_and_hash_match() {
+        let engine = VerificationEngine::new();
+        let keys = KeyPair::generate();
+        let node_id = Uuid::new_v4();
+        let job_id = Uuid::new_v4();
+
+        let digest = JobResult::compute_digest(0, "success", "", 100);
+        let mut res = JobResult {
+            result_id: Uuid::new_v4(),
+            job_id,
+            node_id,
+            exit_code: 0,
+            stdout: "success".into(),
+            stderr: "".into(),
+            result_digest: digest.clone(),
+            fuel_consumed: 100,
+            wall_time_ms: 5,
+            peak_memory_bytes: 1024,
+            node_signature: "".into(),
+            completed_at_ms: 1000,
+        };
+
+        // Sign with node private key
+        sign_job_result(&keys, &mut res);
+
+        // 1. Verify signature success
+        assert!(engine.verify_single_result(&res, &keys.public_key_hex()).is_ok());
+
+        // 2. Verify signature failure (wrong pubkey)
+        let other_keys = KeyPair::generate();
+        assert!(engine.verify_single_result(&res, &other_keys.public_key_hex()).is_err());
+
+        // 3. Hash match
+        assert!(engine.verify_hash_match(&res, &digest).is_ok());
+        assert!(engine.verify_hash_match(&res, "sha_mismatch").is_err());
+
+        // 4. Redundant quorum
+        assert!(matches!(engine.verify_redundant_quorum(&[], 2), Err(ProtocolError::ConsensusFailed { .. })));
+
+        let mut res2 = res.clone();
+        res2.result_id = Uuid::new_v4();
+        res2.node_id = Uuid::new_v4();
+
+        let outcome = engine.verify_redundant_quorum(&[res.clone(), res2], 2).unwrap();
+        assert!(outcome.is_consensus_reached);
+        assert_eq!(outcome.agreed_digest, digest);
+
+        // Insufficient matching (require 3 matching, only have 2)
+        assert!(matches!(engine.verify_redundant_quorum(&[res], 3), Err(ProtocolError::ConsensusFailed { .. })));
+    }
+}
+

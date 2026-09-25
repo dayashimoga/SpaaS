@@ -54,3 +54,62 @@ impl ResourceSafetyMonitor {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spaas_protocol::node::{ChargingState, NetworkType, ThermalStatus};
+
+    #[test]
+    fn test_resource_safety_yield_reasons() {
+        let mut policy = ProviderPolicy::default();
+        let mut telemetry = NodeTelemetry::default();
+
+        // 1. Normal state: no yield
+        assert_eq!(ResourceSafetyMonitor::check_safety_yield(&telemetry, &policy), None);
+
+        // 2. UserPaused
+        policy.is_user_paused = true;
+        assert_eq!(
+            ResourceSafetyMonitor::check_safety_yield(&telemetry, &policy),
+            Some(YieldReason::UserPaused)
+        );
+        policy.is_user_paused = false;
+
+        // 3. ThermalThresholdExceeded
+        policy.max_thermal_threshold = ThermalStatus::Moderate;
+        telemetry.thermal_status = ThermalStatus::Severe;
+        assert_eq!(
+            ResourceSafetyMonitor::check_safety_yield(&telemetry, &policy),
+            Some(YieldReason::ThermalThresholdExceeded)
+        );
+        telemetry.thermal_status = ThermalStatus::None;
+
+        // 4. BatteryTooLow
+        policy.min_battery_threshold_pct = 30;
+        telemetry.battery_pct = 20;
+        assert_eq!(
+            ResourceSafetyMonitor::check_safety_yield(&telemetry, &policy),
+            Some(YieldReason::BatteryTooLow)
+        );
+        telemetry.battery_pct = 80;
+
+        // 5. UnpluggedWhileChargingRequired
+        policy.only_while_charging = true;
+        telemetry.charging_state = ChargingState::Discharging;
+        assert_eq!(
+            ResourceSafetyMonitor::check_safety_yield(&telemetry, &policy),
+            Some(YieldReason::UnpluggedWhileChargingRequired)
+        );
+        telemetry.charging_state = ChargingState::ChargingAc;
+
+        // 6. SwitchedToMeteredNetwork
+        policy.only_on_unmetered_network = true;
+        telemetry.network_type = NetworkType::CellularMetered;
+        assert_eq!(
+            ResourceSafetyMonitor::check_safety_yield(&telemetry, &policy),
+            Some(YieldReason::SwitchedToMeteredNetwork)
+        );
+    }
+}
+

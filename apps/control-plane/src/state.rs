@@ -152,3 +152,63 @@ impl Default for AppState {
         Self::new("./data/control-plane")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spaas_protocol::workload::WorkloadSpec;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn test_app_state_crud_and_persistence() {
+        let dir = tempdir().unwrap();
+        let state = AppState::new(dir.path());
+
+        // 1. Audit log
+        state.log_audit("TEST_EVENT", "entity_1", "details_1").await;
+        assert_eq!(state.audit_log.read().await.len(), 1);
+
+        // 2. Upsert node
+        let node_id = Uuid::new_v4();
+        let node = NodeRecord {
+            node_id,
+            public_key: "pk_123".into(),
+            device_type: spaas_protocol::node::NodeDeviceType::SimulatedNode,
+            enrollment: spaas_protocol::node::EnrollmentStatus::Enrolled,
+            state: spaas_protocol::node::NodeState::Idle,
+            capabilities: Default::default(),
+            telemetry: Default::default(),
+            policy: Default::default(),
+            qualification: None,
+            enrolled_at_ms: 0,
+            last_heartbeat_ms: 0,
+            region: "us".into(),
+            is_simulated: true,
+        };
+        state.upsert_node(node).await;
+        assert_eq!(state.nodes.read().await.len(), 1);
+
+        // 3. Upsert job
+        let job = JobRecord::new(WorkloadSpec::default());
+        let job_id = job.job_id;
+        state.upsert_job(job).await;
+        assert_eq!(state.jobs.read().await.len(), 1);
+
+        // 4. Grant, renew, revoke lease
+        let mut lease = JobLease::new(job_id, node_id, 1000);
+        state.grant_lease(lease.clone()).await;
+        assert!(state.jobs.read().await.get(&job_id).unwrap().current_lease.is_some());
+
+        lease.renew(2000);
+        state.renew_lease(lease.clone()).await;
+        assert_eq!(state.jobs.read().await.get(&job_id).unwrap().current_lease.as_ref().unwrap().term, 2);
+
+        state.revoke_lease(job_id, lease.lease_id).await;
+        assert!(state.jobs.read().await.get(&job_id).unwrap().current_lease.is_none());
+
+        // 5. Store WASM artifact
+        state.store_wasm_artifact("sha_wasm".into(), vec![0x00, 0x61, 0x73, 0x6d]).await;
+        assert!(state.wasm_artifacts.read().await.contains_key("sha_wasm"));
+    }
+}
+

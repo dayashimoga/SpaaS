@@ -342,4 +342,126 @@ mod tests {
         assert!(recovered_job.current_lease.is_some());
         assert_eq!(recovered_job.current_lease.as_ref().unwrap().lease_id, lease.lease_id);
     }
+
+    #[tokio::test]
+    async fn test_corrupted_crc_wal_rejected() {
+        let dir = tempdir().unwrap();
+        let wal_path = dir.path().join("spaas.wal");
+
+        // Write an entry with forged/corrupted checksum
+        let event = WalEvent::UpsertJob { job: JobRecord::new(WorkloadSpec::default()) };
+        let entry = WalEntry {
+            seq: 1,
+            timestamp_ms: 1000,
+            event,
+            checksum: 999999, // Corrupted CRC
+        };
+        let line = serde_json::to_string(&entry).unwrap() + "\n";
+        fs::write(&wal_path, line).unwrap();
+
+        let res = DurableStorage::open(dir.path());
+        match res {
+            Err(PersistenceError::CorruptWal(1, _)) => {}
+            _ => panic!("Expected CorruptWal(1, _) error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_malformed_json_wal_rejected() {
+        let dir = tempdir().unwrap();
+        let wal_path = dir.path().join("spaas.wal");
+        fs::write(&wal_path, "{broken_json\n").unwrap();
+
+        let res = DurableStorage::open(dir.path());
+        match res {
+            Err(PersistenceError::CorruptWal(0, _)) => {}
+            _ => panic!("Expected CorruptWal(0, _) error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_checkpoint_and_recovery() {
+        let dir = tempdir().unwrap();
+        let storage = DurableStorage::open(dir.path()).unwrap();
+
+        let _job_id = Uuid::new_v4();
+        let job = JobRecord::new(WorkloadSpec::default());
+        storage.append_event(WalEvent::UpsertJob { job: job.clone() }).await.unwrap();
+
+        // Checkpoint snapshot
+        storage.checkpoint_snapshot().await.unwrap();
+        assert!(dir.path().join("spaas.snapshot.json").exists());
+
+        // Append more events after snapshot
+        let artifact_hash = "sha256_wasm_art".to_string();
+        storage.append_event(WalEvent::StoreArtifact {
+            sha256: artifact_hash.clone(),
+            bytes: vec![1, 2, 3, 4],
+        }).await.unwrap();
+
+        drop(storage);
+
+        // Reopen storage: should load snapshot and replay subsequent artifact event
+        let restored = DurableStorage::open(dir.path()).unwrap();
+        let state = restored.state().read().await.clone();
+        assert_eq!(state.jobs.len(), 1);
+        assert!(state.wasm_artifacts.contains_key(&artifact_hash));
+
+        // Test RemoveNode, RenewLease, and RevokeLease
+        let node_id = Uuid::new_v4();
+        let dummy_node = NodeRecord {
+            node_id,
+            public_key: "pk".into(),
+            device_type: spaas_protocol::node::NodeDeviceType::SimulatedNode,
+            enrollment: spaas_protocol::node::EnrollmentStatus::Enrolled,
+            state: spaas_protocol::node::NodeState::Idle,
+            capabilities: Default::default(),
+            telemetry: Default::default(),
+            policy: Default::default(),
+            qualification: None,
+            enrolled_at_ms: 0,
+            last_heartbeat_ms: 0,
+            region: "us".into(),
+            is_simulated: true,
+        };
+        restored.append_event(WalEvent::UpsertNode { node: dummy_node }).await.unwrap();
+        assert_eq!(restored.state().read().await.nodes.len(), 1);
+
+        restored.append_event(WalEvent::RemoveNode { node_id }).await.unwrap();
+        assert_eq!(restored.state().read().await.nodes.len(), 0);
+
+        let mut lease = JobLease::new(job.job_id, node_id, 1000);
+        restored.append_event(WalEvent::GrantLease { lease: lease.clone() }).await.unwrap();
+        lease.renew(2000);
+        restored.append_event(WalEvent::RenewLease { lease: lease.clone() }).await.unwrap();
+        assert_eq!(restored.state().read().await.jobs.get(&job.job_id).unwrap().current_lease.as_ref().unwrap().term, 2);
+
+        restored.append_event(WalEvent::RevokeLease { job_id: job.job_id, lease_id: lease.lease_id }).await.unwrap();
+        assert!(restored.state().read().await.jobs.get(&job.job_id).unwrap().current_lease.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_corrupted_snapshot_recovers_gracefully() {
+        let dir = tempdir().unwrap();
+        // Write invalid JSON snapshot
+        std::fs::write(dir.path().join("spaas.snapshot.json"), b"invalid json content").unwrap();
+
+        // Storage open should succeed and fall back to default state
+        let storage = DurableStorage::open(dir.path()).unwrap();
+        assert_eq!(storage.state().read().await.nodes.len(), 0);
+    }
+
+    #[test]
+    fn test_persistence_error_display() {
+        let errs = vec![
+            PersistenceError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found")),
+            PersistenceError::CorruptWal(42, "checksum error".into()),
+            PersistenceError::Serialization(serde_json::from_str::<String>("bad_json").unwrap_err()),
+            PersistenceError::LockError("lock poisoned".into()),
+        ];
+        for err in errs {
+            assert!(!format!("{}", err).is_empty());
+        }
+    }
 }
+

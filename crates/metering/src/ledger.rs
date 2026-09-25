@@ -130,6 +130,11 @@ impl MeteringLedger {
     pub fn all_records(&self) -> Vec<MeteringRecord> {
         self.records_by_idempotency_key.values().cloned().collect()
     }
+
+    /// Returns all provider and consumer accounts
+    pub fn all_accounts(&self) -> Vec<&AccountLedger> {
+        self.accounts_by_pubkey.values().collect()
+    }
 }
 
 impl Default for MeteringLedger {
@@ -180,7 +185,7 @@ mod tests {
                 "digest_xyz",
                 "node_provider_key",
                 "submitter_key",
-                usage,
+                usage.clone(),
                 true,
             )
             .unwrap();
@@ -190,5 +195,29 @@ mod tests {
         let second_provider_balance = ledger.get_account("node_provider_key").unwrap().balance_credits;
         assert_eq!(second_provider_balance, initial_provider_balance);
         assert_eq!(ledger.get_account("node_provider_key").unwrap().total_jobs_executed, 1);
+
+        // all_records and all_accounts
+        assert_eq!(ledger.all_records().len(), 1);
+        assert_eq!(ledger.all_accounts().len(), 2);
+
+        // Unverified execution should award 0 credits
+        let unverified_rec = ledger
+            .record_job_execution(
+                Uuid::new_v4(),
+                node_id,
+                "digest_unverified",
+                "node_provider_key",
+                "submitter_key",
+                usage,
+                false, // verified = false
+            )
+            .unwrap();
+        assert_eq!(unverified_rec.credits_earned_by_node, 0);
+
+        // Test deposit credits
+        ledger.deposit_credits("test_topup_account", 500);
+        let topup_acc = ledger.get_account("test_topup_account").unwrap();
+        assert_eq!(topup_acc.balance_credits, 500);
     }
 }
+

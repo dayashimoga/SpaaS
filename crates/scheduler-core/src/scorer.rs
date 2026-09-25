@@ -101,5 +101,24 @@ mod tests {
 
         assert!(score_exc > score_med, "Excellent node must outscore mediocre node");
         assert!(score_exc >= 80.0);
+
+        // Test other charging, thermal, and network variants
+        let mut variant_node = node_excellent.clone();
+        variant_node.telemetry.charging_state = ChargingState::ChargingUsb;
+        variant_node.telemetry.thermal_status = ThermalStatus::Light;
+        variant_node.telemetry.network_type = NetworkType::Ethernet;
+        let score_var1 = score_node(&variant_node, &weights);
+        assert!(score_var1 > 0.0);
+
+        variant_node.telemetry.charging_state = ChargingState::NotCharging;
+        variant_node.telemetry.thermal_status = ThermalStatus::Severe;
+        variant_node.telemetry.network_type = NetworkType::Vpn;
+        let score_var2 = score_node(&variant_node, &weights);
+        assert!(score_var2 < score_var1);
+
+        variant_node.telemetry.thermal_status = ThermalStatus::Critical;
+        variant_node.telemetry.network_type = NetworkType::Unknown;
+        let score_var3 = score_node(&variant_node, &weights);
+        assert!(score_var3 <= score_var2);
     }
 }

@@ -44,3 +44,34 @@ pub enum ProtocolError {
     #[error("Job lease expired or invalid: {0}")]
     LeaseExpired(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_protocol_error_formatting() {
+        let errs = vec![
+            ProtocolError::InvalidStateTransition { from: "A".into(), to: "B".into() },
+            ProtocolError::SignatureVerificationFailed("bad sig".into()),
+            ProtocolError::HashMismatch { expected: "1".into(), actual: "2".into() },
+            ProtocolError::ResourceExhausted("mem".into()),
+            ProtocolError::Timeout { timeout_ms: 1000 },
+            ProtocolError::NoEligibleNodeFound,
+            ProtocolError::NodeUnavailable { node_id: "node_1".into() },
+            ProtocolError::Unauthorized("denied".into()),
+            ProtocolError::WorkloadValidationFailed("invalid".into()),
+            ProtocolError::IdempotencyConflict("idem_key".into()),
+            ProtocolError::ConsensusFailed { agreed: 1, total: 3 },
+            ProtocolError::Internal("crash".into()),
+            ProtocolError::SerializationError("bad json".into()),
+            ProtocolError::LeaseExpired("lease_1".into()),
+        ];
+
+        for err in errs {
+            let s = format!("{}", err);
+            assert!(!s.is_empty());
+        }
+    }
+}
+

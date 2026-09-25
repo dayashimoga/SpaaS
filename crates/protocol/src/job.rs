@@ -263,6 +263,28 @@ mod tests {
 
         // Terminal state should disallow any further transition
         assert!(job.transition_to(JobState::Running).is_err());
+
+        // Cancelled transition
+        let mut job2 = JobRecord::new(job.spec.clone());
+        assert!(job2.transition_to(JobState::Cancelled).is_ok());
+        assert_eq!(job2.state, JobState::Cancelled);
+
+        // Failed transition
+        let mut job3 = JobRecord::new(job.spec.clone());
+        assert!(job3.transition_to(JobState::Scheduled).is_ok());
+        assert!(job3.transition_to(JobState::Failed).is_ok());
+        assert_eq!(job3.state, JobState::Failed);
+
+        // TimedOut transition
+        let mut job4 = JobRecord::new(job.spec.clone());
+        assert!(job4.transition_to(JobState::Scheduled).is_ok());
+        assert!(job4.transition_to(JobState::Running).is_ok());
+        assert!(job4.transition_to(JobState::TimedOut).is_ok());
+        assert_eq!(job4.state, JobState::TimedOut);
+
+        // JobResult digest computation
+        let digest = JobResult::compute_digest(0, "stdout", "stderr", 500);
+        assert_eq!(digest.len(), 64);
     }
 
     #[test]
@@ -294,5 +316,53 @@ mod tests {
         assert_eq!(job.retry_count, 1);
         job.transition_to(JobState::Queued).unwrap();
         assert_eq!(job.state, JobState::Queued);
+    }
+
+    #[test]
+    fn test_job_state_properties_and_display() {
+        assert!(JobState::Completed.is_terminal());
+        assert!(JobState::Failed.is_terminal());
+        assert!(JobState::Cancelled.is_terminal());
+        assert!(!JobState::Queued.is_terminal());
+        assert!(!JobState::Running.is_terminal());
+        assert!(!JobState::Verifying.is_terminal());
+        assert!(!JobState::Scheduled.is_terminal());
+        assert!(!JobState::Retrying.is_terminal());
+        assert!(!JobState::TimedOut.is_terminal());
+
+        assert_eq!(format!("{}", JobState::Running), "Running");
+        assert_eq!(format!("{}", JobState::Completed), "Completed");
+
+        // Self-transition (idempotent)
+        assert!(JobState::Running.can_transition_to(JobState::Running));
+
+        // Invalid transitions
+        assert!(!JobState::Queued.can_transition_to(JobState::Completed));
+        assert!(!JobState::Completed.can_transition_to(JobState::Running));
+        assert!(!JobState::Failed.can_transition_to(JobState::Queued));
+
+        // TimedOut transitions
+        assert!(JobState::TimedOut.can_transition_to(JobState::Retrying));
+        assert!(JobState::TimedOut.can_transition_to(JobState::Failed));
+        assert!(JobState::TimedOut.can_transition_to(JobState::Cancelled));
+        assert!(!JobState::TimedOut.can_transition_to(JobState::Running));
+    }
+
+    #[test]
+    fn test_job_lease_lifecycle() {
+        let job_id = Uuid::new_v4();
+        let node_id = Uuid::new_v4();
+        let mut lease = JobLease::new(job_id, node_id, 5000);
+
+        assert_eq!(lease.job_id, job_id);
+        assert_eq!(lease.node_id, node_id);
+        assert_eq!(lease.term, 1);
+        assert!(!lease.is_expired(lease.issued_at_ms + 1000));
+        assert!(lease.is_expired(lease.expires_at_ms + 1));
+
+        let old_expiry = lease.expires_at_ms;
+        lease.renew(10000);
+        assert_eq!(lease.term, 2);
+        assert!(lease.expires_at_ms > old_expiry);
     }
 }

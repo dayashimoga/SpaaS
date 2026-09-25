@@ -152,7 +152,7 @@ mod tests {
             capabilities: NodeHardwareCapabilities::default(),
             telemetry: NodeTelemetry {
                 battery_pct: 45,
-                charging_state: ChargingState::Discharging,
+                charging_state: ChargingState::ChargingUsb,
                 thermal_status: ThermalStatus::Moderate,
                 ..Default::default()
             },
@@ -168,5 +168,53 @@ mod tests {
         let selected = scheduler.schedule_workload(&spec, &nodes).unwrap();
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0], node1.node_id);
+
+        assert_eq!(scheduler.config().max_queue_capacity, 10_000);
+
+        // Test 1: Empty nodes list
+        assert!(matches!(scheduler.schedule_workload(&spec, &[]), Err(ProtocolError::NoEligibleNodeFound)));
+
+        // Test 2: MOfN selection
+        let mut m_of_n_spec = spec.clone();
+        m_of_n_spec.verification_policy = VerificationPolicy::MOfN { replicas: 2, threshold: 2 };
+        let m_selected = scheduler.schedule_workload(&m_of_n_spec, &nodes).unwrap();
+        assert_eq!(m_selected.len(), 2);
+
+        // Test 3: DeterministicReplay selection
+        let mut replay_spec = spec.clone();
+        replay_spec.verification_policy = VerificationPolicy::DeterministicReplay;
+        let replay_selected = scheduler.schedule_workload(&replay_spec, &nodes).unwrap();
+        assert_eq!(replay_selected.len(), 2);
+
+        // Test 4: TrustedNode filtering
+        let mut trusted_spec = spec.clone();
+        trusted_spec.verification_policy = VerificationPolicy::TrustedNode { min_reputation: 90 };
+        let mut low_nodes = nodes.clone();
+        low_nodes[0].telemetry.reliability_score = 0.4;
+        low_nodes[1].telemetry.reliability_score = 0.4;
+        assert!(matches!(scheduler.schedule_workload(&trusted_spec, &low_nodes), Err(ProtocolError::NoEligibleNodeFound)));
+
+        // If at least one node has high reputation, scheduling succeeds
+        low_nodes[0].telemetry.reliability_score = 0.95;
+        let trusted_selected = scheduler.schedule_workload(&trusted_spec, &low_nodes).unwrap();
+        assert_eq!(trusted_selected, vec![low_nodes[0].node_id]);
+
+        // Test other verification policies: None, HashMatch, CustomVerifier, SpotCheck, TeeAttested
+        let mut policy_spec = spec.clone();
+        policy_spec.verification_policy = VerificationPolicy::None;
+        assert_eq!(scheduler.schedule_workload(&policy_spec, &nodes).unwrap().len(), 1);
+
+        policy_spec.verification_policy = VerificationPolicy::HashMatch { expected_digest: "hash".into() };
+        assert_eq!(scheduler.schedule_workload(&policy_spec, &nodes).unwrap().len(), 1);
+
+        policy_spec.verification_policy = VerificationPolicy::CustomVerifier { verifier_endpoint: "http://endpoint".into() };
+        assert_eq!(scheduler.schedule_workload(&policy_spec, &nodes).unwrap().len(), 1);
+
+        policy_spec.verification_policy = VerificationPolicy::SpotCheck { probability_pct: 10 };
+        assert_eq!(scheduler.schedule_workload(&policy_spec, &nodes).unwrap().len(), 1);
+
+        policy_spec.verification_policy = VerificationPolicy::TeeAttested;
+        assert_eq!(scheduler.schedule_workload(&policy_spec, &nodes).unwrap().len(), 1);
     }
 }
+

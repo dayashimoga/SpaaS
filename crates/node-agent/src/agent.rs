@@ -258,5 +258,137 @@ mod tests {
         assert_eq!(result.exit_code, 0);
         assert_eq!(agent.history.total_jobs_recorded(), 1);
         assert_eq!(agent.telemetry.total_jobs_completed, 1);
+
+        // Test to_record
+        let rec = agent.to_record();
+        assert_eq!(rec.device_type, spaas_protocol::node::NodeDeviceType::SimulatedNode);
+        assert_eq!(rec.state, NodeState::Idle);
+
+        let agent_physical = NodeAgent::new(
+            NodeHardwareCapabilities::default(),
+            ProviderPolicy::default(),
+            false,
+        );
+        assert_eq!(agent_physical.to_record().device_type, spaas_protocol::node::NodeDeviceType::AndroidSmartphone);
+
+        // Test pause and resume
+        agent.pause();
+        assert_eq!(agent.state, NodeState::Paused);
+        assert!(agent.policy.is_user_paused);
+        agent.resume();
+        assert_eq!(agent.state, NodeState::Idle);
+        assert!(!agent.policy.is_user_paused);
+
+        // Test telemetry update with safety yield
+        let mut tel = NodeTelemetry::default();
+        tel.battery_pct = 5; // below 20% default threshold
+        let reason = agent.update_telemetry(tel.clone());
+        assert_eq!(reason, Some(YieldReason::BatteryTooLow));
+        assert_eq!(agent.state, NodeState::Paused);
+
+        // Revert telemetry back to safe
+        tel.battery_pct = 90;
+        let reason2 = agent.update_telemetry(tel);
+        assert_eq!(reason2, None);
+        assert_eq!(agent.state, NodeState::Idle);
+    }
+
+    #[tokio::test]
+    async fn test_node_agent_execution_error_paths() {
+        let mut agent = NodeAgent::new(
+            NodeHardwareCapabilities::default(),
+            ProviderPolicy::default(),
+            true,
+        );
+
+        let wasm = make_test_wasm();
+        let submitter_key = KeyPair::generate();
+        let mut spec = WorkloadSpec {
+            workload_id: Uuid::new_v4(),
+            spec_version: "1.0.0".into(),
+            name: "test_job".into(),
+            runtime: RuntimeType::WasmWasi,
+            artifact_sha256: sha256_hex(&wasm),
+            artifact_size_bytes: wasm.len() as u64,
+            artifact_uri: "memory://test.wasm".into(),
+            entrypoint: "_start".into(),
+            args: vec![],
+            env_vars: vec![],
+            limits: ResourceLimits::default(),
+            network_policy: NetworkPolicy::None,
+            required_capabilities: RequiredCapabilities::default(),
+            retry_policy: RetryPolicy::default(),
+            verification_policy: VerificationPolicy::SingleNode,
+            priority: WorkloadPriority::Normal,
+            submitter_signature: String::new(),
+            submitter_pubkey: String::new(),
+            created_at_ms: 1000,
+        };
+        sign_workload(&submitter_key, &mut spec);
+
+        // 1. Safety yield error
+        agent.policy.is_user_paused = true;
+        let dispatch1 = JobDispatchMessage {
+            job_id: spec.workload_id,
+            lease_id: Uuid::new_v4(),
+            lease_expires_at_ms: chrono::Utc::now().timestamp_millis() + 30_000,
+            spec: spec.clone(),
+            wasm_bytes: Some(wasm.clone()),
+            dispatched_at_ms: chrono::Utc::now().timestamp_millis(),
+        };
+        let err1 = agent.execute_dispatched_job(dispatch1).await.unwrap_err();
+        assert!(matches!(err1, RuntimeError::Internal(_)));
+        agent.policy.is_user_paused = false;
+
+        // 2. Tampered signature error
+        let mut tampered_spec = spec.clone();
+        tampered_spec.submitter_signature = "bad_signature".into();
+        let dispatch2 = JobDispatchMessage {
+            job_id: spec.workload_id,
+            lease_id: Uuid::new_v4(),
+            lease_expires_at_ms: chrono::Utc::now().timestamp_millis() + 30_000,
+            spec: tampered_spec,
+            wasm_bytes: Some(wasm.clone()),
+            dispatched_at_ms: chrono::Utc::now().timestamp_millis(),
+        };
+        let err2 = agent.execute_dispatched_job(dispatch2).await.unwrap_err();
+        assert!(matches!(err2, RuntimeError::ArtifactVerificationFailed(_)));
+
+        // 3. Missing wasm bytecode payload
+        let dispatch3 = JobDispatchMessage {
+            job_id: spec.workload_id,
+            lease_id: Uuid::new_v4(),
+            lease_expires_at_ms: chrono::Utc::now().timestamp_millis() + 30_000,
+            spec: spec.clone(),
+            wasm_bytes: None,
+            dispatched_at_ms: chrono::Utc::now().timestamp_millis(),
+        };
+        let err3 = agent.execute_dispatched_job(dispatch3).await.unwrap_err();
+        assert!(matches!(err3, RuntimeError::CompilationFailed(_)));
+
+        // 4. Trap execution registers failed job
+        let trap_wat = r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "_start") (unreachable))
+            )
+        "#;
+        let trap_wasm = wat::parse_str(trap_wat).unwrap();
+        let mut trap_spec = spec.clone();
+        trap_spec.artifact_sha256 = sha256_hex(&trap_wasm);
+        trap_spec.artifact_size_bytes = trap_wasm.len() as u64;
+        sign_workload(&submitter_key, &mut trap_spec);
+
+        let dispatch4 = JobDispatchMessage {
+            job_id: trap_spec.workload_id,
+            lease_id: Uuid::new_v4(),
+            lease_expires_at_ms: chrono::Utc::now().timestamp_millis() + 30_000,
+            spec: trap_spec,
+            wasm_bytes: Some(trap_wasm),
+            dispatched_at_ms: chrono::Utc::now().timestamp_millis(),
+        };
+        let err4 = agent.execute_dispatched_job(dispatch4).await.unwrap_err();
+        assert!(matches!(err4, RuntimeError::Trap(_)));
+        assert_eq!(agent.telemetry.total_jobs_failed, 1);
     }
 }

@@ -91,3 +91,26 @@ impl NodeQualificationEngine {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_qualification_engine_execution() {
+        let runtime = WasmWasiRuntime::new();
+        let keypair = KeyPair::generate();
+        let node_id = Uuid::new_v4();
+
+        let qual = NodeQualificationEngine::run_qualification(&runtime, node_id, &keypair)
+            .await
+            .expect("qualification run must succeed");
+
+        assert!(qual.wasm_conformance_passed);
+        assert!(qual.wasi_preview1_passed);
+        assert!(qual.measured_fuel_mips > 0.0);
+        assert!(!qual.qualification_hash.is_empty());
+        assert!(!qual.qualification_signature.is_empty());
+    }
+}
+

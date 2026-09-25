@@ -60,3 +60,38 @@ impl LocalJobHistoryStore {
         self.entries.lock().unwrap().len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_local_job_history_store() {
+        let store = LocalJobHistoryStore::new();
+        assert_eq!(store.total_jobs_recorded(), 0);
+        assert!(store.get_recent_entries(10).is_empty());
+
+        let res = JobResult {
+            result_id: Uuid::new_v4(),
+            job_id: Uuid::new_v4(),
+            node_id: Uuid::new_v4(),
+            exit_code: 0,
+            stdout: "ok".into(),
+            stderr: String::new(),
+            result_digest: "digest".into(),
+            fuel_consumed: 100,
+            wall_time_ms: 10,
+            peak_memory_bytes: 65536,
+            node_signature: "sig".into(),
+            completed_at_ms: 2000,
+        };
+
+        store.record_execution(res.job_id, "test_job".into(), 1000, &res);
+        assert_eq!(store.total_jobs_recorded(), 1);
+        let recent = store.get_recent_entries(5);
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].job_id, res.job_id);
+        assert!(recent[0].success);
+    }
+}
+

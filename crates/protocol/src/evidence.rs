@@ -66,6 +66,16 @@ mod tests {
         assert!(VerificationEvidenceClass::SimulationProven.is_test_verified());
         assert!(VerificationEvidenceClass::EmulatorProven.is_test_verified());
         assert!(!VerificationEvidenceClass::ImplementedUnproven.is_test_verified());
+        assert!(!VerificationEvidenceClass::HardwareRequired.is_test_verified());
+        assert!(!VerificationEvidenceClass::Unsupported.is_test_verified());
+
+        // Labels and Display
+        assert_eq!(format!("{}", VerificationEvidenceClass::Proven), "PROVEN");
+        assert_eq!(format!("{}", VerificationEvidenceClass::EmulatorProven), "EMULATOR-PROVEN");
+        assert_eq!(format!("{}", VerificationEvidenceClass::SimulationProven), "SIMULATION-PROVEN");
+        assert_eq!(format!("{}", VerificationEvidenceClass::ImplementedUnproven), "IMPLEMENTED-UNPROVEN");
+        assert_eq!(format!("{}", VerificationEvidenceClass::HardwareRequired), "HARDWARE-REQUIRED");
+        assert_eq!(format!("{}", VerificationEvidenceClass::Unsupported), "UNSUPPORTED");
     }
 
     #[test]

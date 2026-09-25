@@ -298,4 +298,149 @@ mod tests {
         let err = runtime.execute(ctx).await.unwrap_err();
         assert!(matches!(err, RuntimeError::OutOfFuel { .. }));
     }
+
+    #[tokio::test]
+    async fn test_wasm_runtime_validation_failures() {
+        let runtime = WasmWasiRuntime::new();
+        let wasm = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+        let sha = sha256_hex(&wasm);
+
+        // 1. Zero fuel
+        let mut spec = WorkloadSpec::default();
+        spec.artifact_sha256 = sha.clone();
+        spec.limits.max_fuel = 0;
+        spec.limits.timeout_ms = 1000;
+        let node_keys = KeyPair::generate();
+        let ctx = ExecutionContext {
+            spec: &spec,
+            wasm_bytes: &wasm,
+            node_id: Uuid::new_v4(),
+            node_keypair: &node_keys,
+        };
+        assert!(matches!(runtime.execute(ctx).await.unwrap_err(), RuntimeError::OutOfFuel { .. }));
+
+        // 2. Zero timeout
+        spec.limits.max_fuel = 1000;
+        spec.limits.timeout_ms = 0;
+        let ctx2 = ExecutionContext {
+            spec: &spec,
+            wasm_bytes: &wasm,
+            node_id: Uuid::new_v4(),
+            node_keypair: &node_keys,
+        };
+        assert!(matches!(runtime.execute(ctx2).await.unwrap_err(), RuntimeError::Timeout { .. }));
+
+        // 3. Artifact verification failed (tampered sha)
+        spec.limits.timeout_ms = 1000;
+        spec.artifact_sha256 = "invalid_hash_123".into();
+        let ctx3 = ExecutionContext {
+            spec: &spec,
+            wasm_bytes: &wasm,
+            node_id: Uuid::new_v4(),
+            node_keypair: &node_keys,
+        };
+        assert!(matches!(runtime.execute(ctx3).await.unwrap_err(), RuntimeError::ArtifactVerificationFailed(_)));
+
+        // 4. Missing entrypoint
+        spec.artifact_sha256 = sha.clone();
+        spec.entrypoint = "non_existent_fn".into();
+        let ctx4 = ExecutionContext {
+            spec: &spec,
+            wasm_bytes: &wasm,
+            node_id: Uuid::new_v4(),
+            node_keypair: &node_keys,
+        };
+        assert!(matches!(runtime.execute(ctx4).await.unwrap_err(), RuntimeError::EntrypointNotFound(_)));
+
+        // 5. Unsupported runtime type
+        spec.entrypoint = "_start".into();
+        spec.runtime = RuntimeType::NativeSandbox;
+        let ctx5 = ExecutionContext {
+            spec: &spec,
+            wasm_bytes: &wasm,
+            node_id: Uuid::new_v4(),
+            node_keypair: &node_keys,
+        };
+        assert!(matches!(runtime.execute(ctx5).await.unwrap_err(), RuntimeError::CompilationFailed(_)));
+
+        // 6. Malformed bytecode
+        spec.runtime = RuntimeType::WasmWasi;
+        let bad_wasm = vec![0x00, 0x61, 0x73, 0x6d, 0xff, 0xff, 0xff, 0xff];
+        spec.artifact_sha256 = sha256_hex(&bad_wasm);
+        let ctx6 = ExecutionContext {
+            spec: &spec,
+            wasm_bytes: &bad_wasm,
+            node_id: Uuid::new_v4(),
+            node_keypair: &node_keys,
+        };
+        assert!(matches!(runtime.execute(ctx6).await.unwrap_err(), RuntimeError::CompilationFailed(_)));
+    }
+
+    #[tokio::test]
+    async fn test_wasm_trap_execution() {
+        let wat = r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "_start")
+                    (unreachable)
+                )
+            )
+        "#;
+        let wasm = wat::parse_str(wat).expect("parse WAT");
+        let sha = sha256_hex(&wasm);
+
+        let spec = WorkloadSpec {
+            workload_id: Uuid::new_v4(),
+            spec_version: "1.0.0".into(),
+            name: "trap_job".into(),
+            runtime: RuntimeType::WasmWasi,
+            artifact_sha256: sha,
+            artifact_size_bytes: wasm.len() as u64,
+            artifact_uri: "memory://trap.wasm".into(),
+            entrypoint: "_start".into(),
+            args: vec![],
+            env_vars: vec![],
+            limits: ResourceLimits::default(),
+            network_policy: NetworkPolicy::None,
+            required_capabilities: RequiredCapabilities::default(),
+            retry_policy: RetryPolicy::default(),
+            verification_policy: VerificationPolicy::SingleNode,
+            priority: WorkloadPriority::Normal,
+            submitter_signature: "sig".into(),
+            submitter_pubkey: "pub".into(),
+            created_at_ms: 1000,
+        };
+
+        let node_keys = KeyPair::generate();
+        let runtime = WasmWasiRuntime::new();
+        let ctx = ExecutionContext {
+            spec: &spec,
+            wasm_bytes: &wasm,
+            node_id: Uuid::new_v4(),
+            node_keypair: &node_keys,
+        };
+
+        let err = runtime.execute(ctx).await.unwrap_err();
+        assert!(matches!(err, RuntimeError::Trap(_)));
+    }
+
+    #[test]
+    fn test_runtime_error_formatting() {
+        let errs = vec![
+            RuntimeError::OutOfFuel { fuel_limit: 100 },
+            RuntimeError::Timeout { timeout_ms: 50 },
+            RuntimeError::MemoryLimitExceeded { requested_bytes: 200, max_bytes: 100 },
+            RuntimeError::OutputBufferExceeded { max_bytes: 512 },
+            RuntimeError::ArtifactVerificationFailed("bad hash".into()),
+            RuntimeError::CompilationFailed("bad wasm".into()),
+            RuntimeError::Trap("unreachable".into()),
+            RuntimeError::EntrypointNotFound("_start".into()),
+            RuntimeError::SyscallDenied("open".into()),
+            RuntimeError::Internal("crash".into()),
+        ];
+        for err in errs {
+            assert!(!format!("{}", err).is_empty());
+        }
+    }
 }
+

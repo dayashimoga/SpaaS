@@ -1,0 +1,33 @@
+apiVersion: spaas.io/v1
+kind: Workload
+metadata:
+  name: container-e2e-workload
+  version: 1.0.0
+  description: E2E Podman full stack test workload
+spec:
+  runtime: wasm_wasi
+  wasi_version: preview1
+  entrypoint: _start
+  binary: ./hello.wasm
+  args: []
+  env_vars: []
+  limits:
+    max_fuel: 1000000
+    max_memory_bytes: 16777216
+    max_storage_bytes: 1048576
+    timeout_ms: 10000
+    max_output_bytes: 65536
+  network_policy: none
+  capabilities:
+    architectures: ["x86_64", "aarch64"]
+    min_ram_mb: 128
+    min_battery_pct: 10
+    require_charging: false
+    require_unmetered_network: false
+    max_thermal_level: MODERATE
+  retry:
+    max_retries: 2
+    initial_backoff_ms: 500
+  verification:
+    type: single_node
+  priority: Normal

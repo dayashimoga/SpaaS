@@ -29,6 +29,7 @@ clap = { workspace = true }
 [dev-dependencies]
 reqwest = { workspace = true }
 wat = "1.218.0"
+tempfile = { workspace = true }
 
 [[bin]]
 name = "spaas-control-plane"
