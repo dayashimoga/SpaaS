@@ -1,0 +1,301 @@
+use spaas_protocol::node::{
+    ChargingState, NetworkType, NodeHardwareCapabilities, NodeTelemetry, ProviderPolicy, ThermalStatus,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum SimulatorArchetype {
+    FlagshipAcCharging,    // Pixel 8 Pro / Galaxy S24 Ultra
+    MidrangeWifi,          // Galaxy A54
+    BudgetCellular,        // Budget Android phone
+    OverheatingPhone,      // Thermal throttle testing
+    LowBatteryPhone,       // Battery threshold testing
+    AdversarialNode,       // Malicious node returning forged results
+    FlakyDisconnecting,    // Intermittent dropouts
+}
+
+#[allow(dead_code)]
+pub struct SimulatedDeviceProfile {
+    pub archetype: SimulatorArchetype,
+    pub capabilities: NodeHardwareCapabilities,
+    pub initial_telemetry: NodeTelemetry,
+    pub policy: ProviderPolicy,
+    pub is_adversarial: bool,
+    pub drop_probability_pct: u8,
+}
+
+pub fn generate_device_profile(archetype: SimulatorArchetype, index: usize) -> SimulatedDeviceProfile {
+    match archetype {
+        SimulatorArchetype::FlagshipAcCharging => SimulatedDeviceProfile {
+            archetype,
+            capabilities: NodeHardwareCapabilities {
+                architecture: "aarch64".into(),
+                cpu_cores: 8,
+                total_ram_mb: 12288,
+                total_storage_mb: 256000,
+                device_model: format!("Pixel 8 Pro (Sim #{index})"),
+                os_name: "Android".into(),
+                os_version: "15 (API 35)".into(),
+                has_npu: true,
+                has_gpu_vulkan: true,
+                agent_version: "0.1.0-sim".into(),
+                supported_runtimes: vec!["wasm_wasi".into()],
+            },
+            initial_telemetry: NodeTelemetry {
+                battery_pct: 95,
+                charging_state: ChargingState::ChargingAc,
+                thermal_status: ThermalStatus::None,
+                temperature_celsius: Some(30.2),
+                available_ram_mb: 8192,
+                available_storage_mb: 150000,
+                network_type: NetworkType::WifiUnmetered,
+                downlink_kbps: Some(150_000),
+                uplink_kbps: Some(50_000),
+                round_trip_ping_ms: Some(12),
+                cpu_usage_pct: 4.0,
+                active_job_count: 0,
+                total_jobs_completed: 0,
+                total_jobs_failed: 0,
+                reliability_score: 0.99,
+                timestamp_ms: 0,
+            },
+            policy: ProviderPolicy {
+                only_while_charging: true,
+                only_on_unmetered_network: true,
+                min_battery_threshold_pct: 50,
+                max_thermal_threshold: ThermalStatus::Light,
+                max_concurrent_jobs: 1,
+                max_cpu_pct: 70,
+                max_memory_mb: 1024,
+                is_user_paused: false,
+            },
+            is_adversarial: false,
+            drop_probability_pct: 0,
+        },
+        SimulatorArchetype::MidrangeWifi => SimulatedDeviceProfile {
+            archetype,
+            capabilities: NodeHardwareCapabilities {
+                architecture: "aarch64".into(),
+                cpu_cores: 8,
+                total_ram_mb: 6144,
+                total_storage_mb: 128000,
+                device_model: format!("Galaxy A54 (Sim #{index})"),
+                os_name: "Android".into(),
+                os_version: "14 (API 34)".into(),
+                has_npu: false,
+                has_gpu_vulkan: true,
+                agent_version: "0.1.0-sim".into(),
+                supported_runtimes: vec!["wasm_wasi".into()],
+            },
+            initial_telemetry: NodeTelemetry {
+                battery_pct: 78,
+                charging_state: ChargingState::ChargingUsb,
+                thermal_status: ThermalStatus::Light,
+                temperature_celsius: Some(34.5),
+                available_ram_mb: 3500,
+                available_storage_mb: 60000,
+                network_type: NetworkType::WifiUnmetered,
+                downlink_kbps: Some(60_000),
+                uplink_kbps: Some(20_000),
+                round_trip_ping_ms: Some(25),
+                cpu_usage_pct: 8.5,
+                active_job_count: 0,
+                total_jobs_completed: 0,
+                total_jobs_failed: 0,
+                reliability_score: 0.95,
+                timestamp_ms: 0,
+            },
+            policy: ProviderPolicy {
+                only_while_charging: false,
+                only_on_unmetered_network: true,
+                min_battery_threshold_pct: 40,
+                max_thermal_threshold: ThermalStatus::Moderate,
+                max_concurrent_jobs: 1,
+                max_cpu_pct: 50,
+                max_memory_mb: 512,
+                is_user_paused: false,
+            },
+            is_adversarial: false,
+            drop_probability_pct: 0,
+        },
+        SimulatorArchetype::BudgetCellular => SimulatedDeviceProfile {
+            archetype,
+            capabilities: NodeHardwareCapabilities {
+                architecture: "aarch64".into(),
+                cpu_cores: 4,
+                total_ram_mb: 3072,
+                total_storage_mb: 32000,
+                device_model: format!("Moto G (Sim #{index})"),
+                os_name: "Android".into(),
+                os_version: "13".into(),
+                has_npu: false,
+                has_gpu_vulkan: false,
+                agent_version: "0.1.0-sim".into(),
+                supported_runtimes: vec!["wasm_wasi".into()],
+            },
+            initial_telemetry: NodeTelemetry {
+                battery_pct: 45,
+                charging_state: ChargingState::Discharging,
+                thermal_status: ThermalStatus::Moderate,
+                temperature_celsius: Some(37.0),
+                available_ram_mb: 1200,
+                available_storage_mb: 8000,
+                network_type: NetworkType::CellularMetered,
+                downlink_kbps: Some(15_000),
+                uplink_kbps: Some(5_000),
+                round_trip_ping_ms: Some(85),
+                cpu_usage_pct: 22.0,
+                active_job_count: 0,
+                total_jobs_completed: 0,
+                total_jobs_failed: 0,
+                reliability_score: 0.88,
+                timestamp_ms: 0,
+            },
+            policy: ProviderPolicy {
+                only_while_charging: false,
+                only_on_unmetered_network: true, // Should reject metered cellular
+                min_battery_threshold_pct: 30,
+                max_thermal_threshold: ThermalStatus::Moderate,
+                max_concurrent_jobs: 1,
+                max_cpu_pct: 40,
+                max_memory_mb: 256,
+                is_user_paused: false,
+            },
+            is_adversarial: false,
+            drop_probability_pct: 5,
+        },
+        SimulatorArchetype::OverheatingPhone => SimulatedDeviceProfile {
+            archetype,
+            capabilities: NodeHardwareCapabilities {
+                architecture: "aarch64".into(),
+                cpu_cores: 8,
+                total_ram_mb: 8192,
+                total_storage_mb: 64000,
+                device_model: format!("ThermalTest Phone #{index}"),
+                os_name: "Android".into(),
+                os_version: "14".into(),
+                has_npu: false,
+                has_gpu_vulkan: true,
+                agent_version: "0.1.0-sim".into(),
+                supported_runtimes: vec!["wasm_wasi".into()],
+            },
+            initial_telemetry: NodeTelemetry {
+                battery_pct: 60,
+                charging_state: ChargingState::ChargingAc,
+                thermal_status: ThermalStatus::Severe, // Hot!
+                temperature_celsius: Some(48.5),
+                available_ram_mb: 4000,
+                available_storage_mb: 20000,
+                network_type: NetworkType::WifiUnmetered,
+                downlink_kbps: Some(40_000),
+                uplink_kbps: Some(15_000),
+                round_trip_ping_ms: Some(30),
+                cpu_usage_pct: 88.0,
+                active_job_count: 0,
+                total_jobs_completed: 0,
+                total_jobs_failed: 0,
+                reliability_score: 0.80,
+                timestamp_ms: 0,
+            },
+            policy: ProviderPolicy {
+                only_while_charging: false,
+                only_on_unmetered_network: false,
+                min_battery_threshold_pct: 20,
+                max_thermal_threshold: ThermalStatus::Moderate, // Must yield due to Severe
+                max_concurrent_jobs: 1,
+                max_cpu_pct: 50,
+                max_memory_mb: 512,
+                is_user_paused: false,
+            },
+            is_adversarial: false,
+            drop_probability_pct: 0,
+        },
+        SimulatorArchetype::LowBatteryPhone => SimulatedDeviceProfile {
+            archetype,
+            capabilities: NodeHardwareCapabilities::default(),
+            initial_telemetry: NodeTelemetry {
+                battery_pct: 12, // Critically low battery
+                charging_state: ChargingState::Discharging,
+                thermal_status: ThermalStatus::None,
+                available_ram_mb: 2000,
+                available_storage_mb: 10000,
+                network_type: NetworkType::WifiUnmetered,
+                cpu_usage_pct: 5.0,
+                active_job_count: 0,
+                total_jobs_completed: 0,
+                total_jobs_failed: 0,
+                reliability_score: 0.75,
+                ..Default::default()
+            },
+            policy: ProviderPolicy {
+                min_battery_threshold_pct: 35, // Must reject / yield
+                ..Default::default()
+            },
+            is_adversarial: false,
+            drop_probability_pct: 0,
+        },
+        SimulatorArchetype::AdversarialNode => SimulatedDeviceProfile {
+            archetype,
+            capabilities: NodeHardwareCapabilities {
+                architecture: "aarch64".into(),
+                cpu_cores: 8,
+                total_ram_mb: 16384,
+                total_storage_mb: 512000,
+                device_model: format!("Sybil/Attacker #{index}"),
+                os_name: "Linux".into(),
+                os_version: "Attacker-OS".into(),
+                has_npu: true,
+                has_gpu_vulkan: true,
+                agent_version: "0.1.0-sim".into(),
+                supported_runtimes: vec!["wasm_wasi".into()],
+            },
+            initial_telemetry: NodeTelemetry {
+                battery_pct: 100,
+                charging_state: ChargingState::ChargingAc,
+                thermal_status: ThermalStatus::None,
+                available_ram_mb: 14000,
+                available_storage_mb: 400000,
+                network_type: NetworkType::Ethernet,
+                cpu_usage_pct: 1.0,
+                active_job_count: 0,
+                total_jobs_completed: 100,
+                total_jobs_failed: 0,
+                reliability_score: 1.0,
+                ..Default::default()
+            },
+            policy: ProviderPolicy {
+                only_while_charging: false,
+                only_on_unmetered_network: false,
+                min_battery_threshold_pct: 10,
+                max_thermal_threshold: ThermalStatus::Critical,
+                max_concurrent_jobs: 4,
+                max_cpu_pct: 100,
+                max_memory_mb: 4096,
+                is_user_paused: false,
+            },
+            is_adversarial: true, // Deliberately returns forged result digest
+            drop_probability_pct: 0,
+        },
+        SimulatorArchetype::FlakyDisconnecting => SimulatedDeviceProfile {
+            archetype,
+            capabilities: NodeHardwareCapabilities::default(),
+            initial_telemetry: NodeTelemetry {
+                battery_pct: 65,
+                charging_state: ChargingState::ChargingAc,
+                thermal_status: ThermalStatus::None,
+                available_ram_mb: 4000,
+                available_storage_mb: 20000,
+                network_type: NetworkType::WifiUnmetered,
+                cpu_usage_pct: 10.0,
+                active_job_count: 0,
+                total_jobs_completed: 10,
+                total_jobs_failed: 5,
+                reliability_score: 0.65,
+                ..Default::default()
+            },
+            policy: ProviderPolicy::default(),
+            is_adversarial: false,
+            drop_probability_pct: 40, // 40% chance of sudden network drop
+        },
+    }
+}

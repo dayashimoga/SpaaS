@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+echo ">>> Stopping SPaaS Environment..."
+podman compose -f deploy/podman-compose.yml down --remove-orphans 2>/dev/null || true
+pkill -f "spaas-control-plane" || true
+pkill -f "spaas-gateway" || true
+pkill -f "spaas-node-simulator" || true
+pkill -f "spaas-scheduler-daemon" || true
+echo ">>> SPaaS Environment stopped successfully."

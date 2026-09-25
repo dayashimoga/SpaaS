@@ -1,0 +1,26 @@
+[package]
+name = "spaas-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+spaas-protocol = { workspace = true }
+spaas-security = { workspace = true }
+spaas-runtime = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+base64 = { workspace = true }
+tabled = { workspace = true }
+console = { workspace = true }
+indicatif = { workspace = true }
+
+[[bin]]
+name = "spaas"
+path = "src/main.rs"

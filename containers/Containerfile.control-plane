@@ -1,0 +1,19 @@
+# Multi-stage Containerfile for SPaaS Control Plane
+FROM docker.io/library/rust:1.80-slim-bullseye AS builder
+
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY apps ./apps
+COPY tests ./tests
+
+RUN cargo build --release -p spaas-control-plane
+
+FROM docker.io/library/debian:bullseye-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /app/target/release/spaas-control-plane /usr/local/bin/spaas-control-plane
+
+EXPOSE 8080
+ENV RUST_LOG=info
+ENTRYPOINT ["/usr/local/bin/spaas-control-plane"]

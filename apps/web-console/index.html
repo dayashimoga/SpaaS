@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SPaaS Management Console | Universal Edge Compute Fabric</title>
+    <meta name="description" content="Production edge orchestration console for Smartphone-as-a-Service (SPaaS) distributed compute fabric" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app" class="dashboard-layout">
+      <!-- Sidebar Navigation -->
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+              <line x1="12" y1="18" x2="12.01" y2="18"></line>
+              <path d="M9 6h6"></path>
+              <circle cx="12" cy="11" r="2"></circle>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <h2>SPaaS Edge</h2>
+            <span class="version-tag">v0.1.0-alpha</span>
+          </div>
+        </div>
+
+        <nav class="nav-links">
+          <button id="nav-overview" class="nav-item active" data-tab="overview">
+            <span class="icon">📊</span> Overview & Health
+          </button>
+          <button id="nav-nodes" class="nav-item" data-tab="nodes">
+            <span class="icon">📱</span> Edge Nodes <span id="badge-nodes" class="badge">0</span>
+          </button>
+          <button id="nav-jobs" class="nav-item" data-tab="jobs">
+            <span class="icon">⚡</span> Job Queue & Logs <span id="badge-jobs" class="badge">0</span>
+          </button>
+          <button id="nav-metering" class="nav-item" data-tab="metering">
+            <span class="icon">💳</span> Metering & Credits
+          </button>
+          <button id="nav-audit" class="nav-item" data-tab="audit">
+            <span class="icon">🛡️</span> Security & Audit
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="connection-status">
+            <div id="status-pulse" class="pulse-dot"></div>
+            <span id="connection-label">Control Plane Connected</span>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Content Area -->
+      <main class="main-content">
+        <!-- Top Action Bar -->
+        <header class="top-bar">
+          <div class="page-title">
+            <h1 id="tab-title">Cluster Overview</h1>
+            <p id="tab-subtitle">Real-time distributed edge compute metrics and node fleet health</p>
+          </div>
+          <div class="top-actions">
+            <button id="btn-refresh" class="btn btn-secondary">
+              <span class="icon">🔄</span> Refresh
+            </button>
+            <button id="btn-submit-workload" class="btn btn-primary">
+              <span class="icon">+</span> Submit Workload
+            </button>
+          </div>
+        </header>
+
+        <!-- Tab 1: Overview & Health -->
+        <section id="tab-view-overview" class="tab-pane active">
+          <!-- KPI Summary Cards -->
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span class="kpi-label">Active / Idle Nodes</span>
+                <span class="kpi-icon">📱</span>
+              </div>
+              <div class="kpi-value"><span id="metric-active-nodes">0</span> <span class="kpi-sub">/ <span id="metric-idle-nodes">0</span> idle</span></div>
+              <div class="kpi-footer text-emerald">Ready for compute</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span class="kpi-label">Queued & Running Jobs</span>
+                <span class="kpi-icon">⚡</span>
+              </div>
+              <div class="kpi-value"><span id="metric-queued-jobs">0</span> <span class="kpi-sub">/ <span id="metric-running-jobs">0</span> run</span></div>
+              <div class="kpi-footer text-cyan">Deterministic WASM runtime</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span class="kpi-label">Completed / Failed</span>
+                <span class="kpi-icon">✅</span>
+              </div>
+              <div class="kpi-value"><span id="metric-completed-jobs">0</span> <span class="kpi-sub">/ <span id="metric-failed-jobs">0</span> err</span></div>
+              <div class="kpi-footer text-emerald">100% Verified Outcomes</div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span class="kpi-label">Uptime & Latency</span>
+                <span class="kpi-icon">⏱️</span>
+              </div>
+              <div class="kpi-value"><span id="metric-uptime">0s</span> <span class="kpi-sub"><span id="metric-latency">1.4ms</span></span></div>
+              <div class="kpi-footer text-cyan">Cluster Status: <span id="metric-health-status" class="status-badge status-healthy">HEALTHY</span></div>
+            </div>
+          </div>
+
+          <!-- Architecture & Capability Banner -->
+          <div class="card banner-card">
+            <div class="banner-content">
+              <h3>Universal Edge Compute Fabric Architecture</h3>
+              <p>Heterogeneous voluntary smartphone nodes securely execute sandboxed WebAssembly/WASI workloads with cryptographic verification, automatic thermal yielding, and verifiable metering.</p>
+              <div class="evidence-pill">EVIDENCE: <span class="badge badge-proven">PROVEN</span> &amp; <span class="badge badge-sim">SIMULATION-PROVEN</span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab 2: Edge Nodes -->
+        <section id="tab-view-nodes" class="tab-pane">
+          <div class="card">
+            <div class="table-header">
+              <h3>Registered Edge Nodes (<span id="node-list-count">0</span>)</h3>
+              <div class="filter-group">
+                <input type="text" id="node-search" placeholder="Search by model, ID or arch..." class="input-search" />
+              </div>
+            </div>
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Node ID</th>
+                    <th>Device Model</th>
+                    <th>Arch / RAM</th>
+                    <th>Status</th>
+                    <th>Battery & Power</th>
+                    <th>Thermals</th>
+                    <th>Network</th>
+                    <th>Completed</th>
+                  </tr>
+                </thead>
+                <tbody id="nodes-table-body">
+                  <tr><td colspan="8" class="text-center text-muted">Loading registered nodes...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab 3: Job Queue & Logs -->
+        <section id="tab-view-jobs" class="tab-pane">
+          <div class="card">
+            <div class="table-header">
+              <h3>Distributed Execution Jobs (<span id="job-list-count">0</span>)</h3>
+            </div>
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Job ID</th>
+                    <th>Workload Name</th>
+                    <th>State</th>
+                    <th>Assigned Node</th>
+                    <th>Retries</th>
+                    <th>Wall Time</th>
+                    <th>Fuel Consumed</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="jobs-table-body">
+                  <tr><td colspan="8" class="text-center text-muted">No jobs submitted yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab 4: Metering & Credits -->
+        <section id="tab-view-metering" class="tab-pane">
+          <div class="card">
+            <div class="table-header">
+              <h3>Verifiable Credit Ledger & Usage Accounting</h3>
+            </div>
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Record ID</th>
+                    <th>Idempotency Key</th>
+                    <th>Job ID</th>
+                    <th>Credits Earned</th>
+                    <th>Fuel Used</th>
+                    <th>Duration</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="metering-table-body">
+                  <tr><td colspan="7" class="text-center text-muted">No metering records logged yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab 5: Security & Audit -->
+        <section id="tab-view-audit" class="tab-pane">
+          <div class="card">
+            <div class="table-header">
+              <h3>Security & Orchestration Audit Trail</h3>
+            </div>
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Event Type</th>
+                    <th>Entity ID</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-table-body">
+                  <tr><td colspan="4" class="text-center text-muted">No audit events recorded yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Submit Workload Modal -->
+    <div id="modal-submit" class="modal-overlay hidden">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h2>Submit Sandboxed Workload</h2>
+          <button id="modal-close" class="modal-close-btn">&times;</button>
+        </div>
+        <form id="form-submit-workload">
+          <div class="form-group">
+            <label for="workload-name">Workload Name</label>
+            <input type="text" id="workload-name" class="input-control" value="edge-matrix-multiplication" required />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="max-fuel">Max Fuel (Gas)</label>
+              <input type="number" id="max-fuel" class="input-control" value="10000000" required />
+            </div>
+            <div class="form-group">
+              <label for="timeout-ms">Timeout (ms)</label>
+              <input type="number" id="timeout-ms" class="input-control" value="30000" required />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="sample-wasm-type">Workload Binary</label>
+            <select id="sample-wasm-type" class="input-control">
+              <option value="minimal">Minimal WASI Core (Standard Exit 0)</option>
+              <option value="compute">Fibonacci Compute Loop</option>
+            </select>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" id="btn-cancel-modal" class="btn btn-secondary">Cancel</button>
+            <button type="submit" class="btn btn-primary">Sign &amp; Dispatch Workload</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Job Logs Modal -->
+    <div id="modal-logs" class="modal-overlay hidden">
+      <div class="modal-box modal-large">
+        <div class="modal-header">
+          <h2 id="logs-modal-title">Job Execution Logs</h2>
+          <button id="logs-modal-close" class="modal-close-btn">&times;</button>
+        </div>
+        <div class="logs-container">
+          <div class="log-section">
+            <h4>STDOUT</h4>
+            <pre id="log-stdout" class="terminal-view"></pre>
+          </div>
+          <div class="log-section">
+            <h4>STDERR</h4>
+            <pre id="log-stderr" class="terminal-view"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

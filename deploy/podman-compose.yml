@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  control-plane:
+    build:
+      context: ..
+      dockerfile: containers/Containerfile.control-plane
+    container_name: spaas-control-plane
+    ports:
+      - "8080:8080"
+    environment:
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/system/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: containers/Containerfile.gateway
+    container_name: spaas-gateway
+    ports:
+      - "8000:8000"
+    command: ["--upstream-url", "http://control-plane:8080"]
+    depends_on:
+      - control-plane
+
+  web-console:
+    build:
+      context: ..
+      dockerfile: containers/Containerfile.web-console
+    container_name: spaas-web-console
+    ports:
+      - "3000:80"
+    depends_on:
+      - control-plane
+
+  node-simulator:
+    build:
+      context: ..
+      dockerfile: containers/Containerfile.node-simulator
+    container_name: spaas-node-simulator
+    command: ["--control-plane-url", "http://control-plane:8080", "--nodes", "20", "--duration-secs", "3600"]
+    depends_on:
+      - control-plane

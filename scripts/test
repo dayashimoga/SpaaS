@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=========================================================="
+echo " Running SPaaS Comprehensive Test Suite"
+echo "=========================================================="
+
+echo ">>> [1/2] Running Unit & Integration Tests (100% Pass Target)..."
+cargo test --workspace -- --nocapture
+
+echo ">>> [2/2] Running Security & Adversarial Tests..."
+cargo test -p spaas-integration-tests --test adversarial_security -- --nocapture
+
+echo "=========================================================="
+echo " All Tests Passed Successfully (100% Pass Rate)"
+echo "=========================================================="

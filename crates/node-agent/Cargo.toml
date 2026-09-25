@@ -1,0 +1,23 @@
+[package]
+name = "spaas-node-agent"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+spaas-protocol = { workspace = true }
+spaas-security = { workspace = true }
+spaas-runtime = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+rand = { workspace = true }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+wat = "1.218.0"

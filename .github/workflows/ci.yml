@@ -1,0 +1,100 @@
+name: SPaaS CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint-and-format:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Rustfmt Check
+        run: cargo fmt --all -- --check
+      - name: Clippy Linter
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test-suite:
+    name: Test Suite & Security Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Run Unit & Integration Tests
+        run: cargo test --workspace -- --nocapture
+      - name: Run Security Adversarial Tests
+        run: cargo test -p spaas-integration-tests --test adversarial_security -- --nocapture
+
+  web-console-build:
+    name: Build Web Console
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install & Build
+        run: |
+          cd apps/web-console
+          npm ci
+          npm run build
+      - name: Upload Web Console Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-console-dist
+          path: apps/web-console/dist/
+
+  build-release-binaries:
+    name: Build CLI & Server Binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Binaries
+        run: cargo build --release -p spaas-cli -p spaas-control-plane -p spaas-gateway -p spaas-node-simulator
+      - name: Upload CLI Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: spaas-cli-${{ matrix.os }}
+          path: |
+            target/release/spaas
+            target/release/spaas.exe
+
+  acceptance-gate:
+    name: Full Acceptance Gate
+    runs-on: ubuntu-latest
+    needs: [test-suite, web-console-build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Web Console Deps
+        run: cd apps/web-console && npm ci
+      - name: Run Full Acceptance Suite
+        run: ./scripts/acceptance
+      - name: Generate Checksums & SBOM
+        run: |
+          sha256sum acceptance-report.json > checksums.sha256
+      - name: Upload Acceptance Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-certification-report
+          path: |
+            acceptance-report.json
+            checksums.sha256

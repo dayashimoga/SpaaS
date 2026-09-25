@@ -1,0 +1,21 @@
+[package]
+name = "spaas-scheduler-daemon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+spaas-protocol = { workspace = true }
+spaas-scheduler-core = { workspace = true }
+spaas-telemetry = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[[bin]]
+name = "spaas-scheduler-daemon"
+path = "src/main.rs"

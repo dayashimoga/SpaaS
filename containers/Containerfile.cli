@@ -1,0 +1,16 @@
+# Multi-stage Containerfile for SPaaS CLI
+FROM docker.io/library/rust:1.80-slim-bullseye AS builder
+
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY apps ./apps
+COPY tests ./tests
+
+RUN cargo build --release -p spaas-cli
+
+FROM docker.io/library/debian:bullseye-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/spaas /usr/local/bin/spaas
+
+ENTRYPOINT ["/usr/local/bin/spaas"]

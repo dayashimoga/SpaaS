@@ -1,0 +1,73 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/protocol",
+    "crates/security",
+    "crates/workload-runtime",
+    "crates/scheduler-core",
+    "crates/metering",
+    "crates/verification",
+    "crates/telemetry",
+    "crates/node-agent",
+    "apps/control-plane",
+    "apps/scheduler",
+    "apps/gateway",
+    "apps/cli",
+    "apps/node-simulator",
+    "tests/integration",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["SPaaS Architecture Team <team@spaas.dev>"]
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/spaas-edge/spaas"
+
+[workspace.dependencies]
+# Internal workspace crates
+spaas-protocol = { path = "crates/protocol" }
+spaas-security = { path = "crates/security" }
+spaas-runtime = { path = "crates/workload-runtime" }
+spaas-scheduler-core = { path = "crates/scheduler-core" }
+spaas-metering = { path = "crates/metering" }
+spaas-verification = { path = "crates/verification" }
+spaas-telemetry = { path = "crates/telemetry" }
+spaas-node-agent = { path = "crates/node-agent" }
+
+# Serialization & Core Utilities
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.128"
+chrono = { version = "0.4.38", features = ["serde"] }
+uuid = { version = "1.10.0", features = ["v4", "serde"] }
+thiserror = "1.0.64"
+anyhow = "1.0.89"
+async-trait = "0.1.83"
+
+# Async & Networking
+tokio = { version = "1.40.0", features = ["full"] }
+axum = { version = "0.7.7", features = ["ws", "macros"] }
+tower = "0.5.1"
+tower-http = { version = "0.6.1", features = ["cors", "trace", "fs"] }
+reqwest = { version = "0.12.8", features = ["json", "stream"] }
+
+# Cryptography & Security
+ed25519-dalek = { version = "2.1.1", features = ["rand_core"] }
+rand = "0.8.5"
+sha2 = "0.10.8"
+hex = "0.4.3"
+base64 = "0.22.1"
+
+# Telemetry & Observability
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+
+# WebAssembly Engine
+wasmi = "0.40.0"
+
+# CLI
+clap = { version = "4.5.20", features = ["derive", "env"] }
+indicatif = "0.17.8"
+console = "0.15.8"
+dialoguer = "0.11.0"
+tabled = "0.16.0"

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONTAINERIZED="${1:-false}"
+echo ">>> Starting SPaaS Universal Edge Compute Fabric..."
+
+if [ "$CONTAINERIZED" = "--containerized" ] || [ "$CONTAINERIZED" = "true" ]; then
+    echo ">>> Starting via Podman Compose..."
+    podman compose -f deploy/podman-compose.yml up -d --build
+else
+    echo ">>> Starting local services..."
+    cargo run -p spaas-control-plane &
+    cargo run -p spaas-gateway &
+    cargo run -p spaas-node-simulator -- --nodes 10 &
+fi
+
+echo ">>> SPaaS Control Plane: http://localhost:8080"
+echo ">>> SPaaS Ingress Gateway: http://localhost:8000"
+echo ">>> SPaaS Web Console:    http://localhost:3000"

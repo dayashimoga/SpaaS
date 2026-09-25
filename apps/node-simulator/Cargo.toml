@@ -1,0 +1,27 @@
+[package]
+name = "spaas-node-simulator"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+spaas-protocol = { workspace = true }
+spaas-security = { workspace = true }
+spaas-runtime = { workspace = true }
+spaas-node-agent = { workspace = true }
+spaas-telemetry = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+rand = { workspace = true }
+chrono = { workspace = true }
+reqwest = { workspace = true }
+indicatif = { workspace = true }
+
+[[bin]]
+name = "spaas-node-simulator"
+path = "src/main.rs"

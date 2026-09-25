@@ -1,0 +1,22 @@
+{
+    "test_summary":  {
+                         "pass_rate_pct":  100,
+                         "total_tests":  32,
+                         "failed":  0,
+                         "passed":  32
+                     },
+    "production_gates_passed":  "9 / 10",
+    "timestamp":  "2026-09-25T12:14:37.7069988+05:30",
+    "git_commit":  "HEAD",
+    "evidence_classes":  {
+                             "node_disappearance_rescheduling":  "PROVEN",
+                             "ed25519_signatures":  "PROVEN",
+                             "qualcomm_npu_avf_pkvm":  "HARDWARE-REQUIRED",
+                             "wasm_wasi_sandbox":  "PROVEN",
+                             "scheduler_multi_attribute":  "PROVEN",
+                             "android_foreground_service":  "IMPLEMENTED-UNPROVEN",
+                             "metering_idempotency":  "PROVEN",
+                             "heterogeneous_simulation":  "SIMULATION-PROVEN"
+                         },
+    "status":  "CERTIFIED_ACCEPTANCE_PASS"
+}

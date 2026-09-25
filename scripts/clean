@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+echo ">>> Cleaning disposable build artifacts and temporary containers..."
+podman compose -f deploy/podman-compose.yml down --volumes --remove-orphans 2>/dev/null || true
+rm -rf target dist apps/web-console/dist
+echo ">>> Clean completed."

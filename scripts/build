@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=========================================================="
+echo " Building SPaaS Release Artifacts"
+echo "=========================================================="
+
+echo ">>> [1/3] Building Rust Release Binaries..."
+cargo build --release -p spaas-cli -p spaas-control-plane -p spaas-gateway -p spaas-node-simulator -p spaas-scheduler-daemon
+
+echo ">>> [2/3] Building Web Management Console Production Bundle..."
+(cd apps/web-console && npm run build)
+
+echo ">>> [3/3] Packaging Artifacts to dist/..."
+mkdir -p dist/bin
+cp -f target/release/spaas dist/bin/ 2>/dev/null || true
+cp -f target/release/spaas-control-plane dist/bin/ 2>/dev/null || true
+cp -f target/release/spaas-gateway dist/bin/ 2>/dev/null || true
+cp -f target/release/spaas-node-simulator dist/bin/ 2>/dev/null || true
+
+echo "=========================================================="
+echo " Build Completed Successfully! Artifacts in dist/"
+echo "=========================================================="
