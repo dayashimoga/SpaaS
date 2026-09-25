@@ -261,40 +261,154 @@
             </div>
           </div>
 
-          <!-- Embedded Device Details & Empirical Qualification Panel -->
-          <div class="details-grid mt-4" id="device-details-panel">
-            <div class="card detail-card">
-              <div class="card-header">
-                <h3>Hardware Specifications &amp; Telemetry</h3>
+          <!-- Embedded Device Details Operational Management Panel (8 Sub-tabs) -->
+          <div class="card mt-4" id="device-details-panel">
+            <div class="card-header">
+              <div>
+                <h3>Device Operational Management (<span id="detail-node-title">None Selected</span>)</h3>
                 <span id="detail-node-badge" class="badge badge-proven">SELECTED DEVICE</span>
+                <span id="detail-device-evidence" class="badge badge-simulated">SIMULATED</span>
               </div>
-              <div class="spec-list">
-                <div class="spec-row"><span class="spec-label">Selected Node ID:</span> <span id="detail-node-id" class="spec-val font-mono">None Selected</span></div>
-                <div class="spec-row"><span class="spec-label">Device Model:</span> <span id="detail-hw-model" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Architecture:</span> <span id="detail-hw-arch" class="spec-val font-mono">-</span></div>
-                <div class="spec-row"><span class="spec-label">CPU Cores &amp; RAM:</span> <span id="detail-hw-cores" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Battery Level:</span> <span id="detail-hw-battery" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Thermal Throttle:</span> <span id="detail-hw-thermal" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Network Interface:</span> <span id="detail-hw-net" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Vulkan Acceleration:</span> <span id="detail-hw-accel" class="spec-val text-emerald">Available</span></div>
+              <div class="device-subtabs">
+                <button class="subtab-btn active" data-devicetab="overview">Overview</button>
+                <button class="subtab-btn" data-devicetab="compute">Compute</button>
+                <button class="subtab-btn" data-devicetab="power">Power/Thermal</button>
+                <button class="subtab-btn" data-devicetab="network">Network</button>
+                <button class="subtab-btn" data-devicetab="security">Security</button>
+                <button class="subtab-btn" data-devicetab="jobs">Jobs</button>
+                <button class="subtab-btn" data-devicetab="earnings">Earnings</button>
+                <button class="subtab-btn" data-devicetab="controls">Diagnostics &amp; Controls</button>
               </div>
             </div>
 
-            <div class="card detail-card">
-              <div class="card-header">
-                <h3>Empirical Qualification Profile</h3>
-                <span id="qual-badge" class="badge badge-proven">QUALIFICATION</span>
+            <!-- Subtab 1: Overview -->
+            <div id="devicetab-view-overview" class="device-pane active">
+              <div class="spec-list">
+                <div class="spec-row"><span class="spec-label">Node ID:</span> <span id="detail-node-id" class="spec-val font-mono">None Selected</span></div>
+                <div class="spec-row"><span class="spec-label">Device Model / Name:</span> <span id="detail-hw-model" class="spec-val font-bold text-cyan">-</span></div>
+                <div class="spec-row"><span class="spec-label">Hardware Type:</span> <span id="detail-hw-type" class="spec-val">-</span></div>
+                <div class="spec-row"><span class="spec-label">OS &amp; Platform:</span> <span id="detail-hw-os" class="spec-val">-</span></div>
+                <div class="spec-row"><span class="spec-label">Region:</span> <span id="detail-hw-region" class="spec-val font-mono">local</span></div>
+                <div class="spec-row"><span class="spec-label">Operational State:</span> <span id="detail-hw-state" class="spec-val font-bold">-</span></div>
+                <div class="spec-row"><span class="spec-label">Last Heartbeat:</span> <span id="detail-hw-last-hb" class="spec-val font-mono">-</span></div>
               </div>
-              <div id="qual-empty-notice" class="empty-notice">
-                Select a device from the fleet or enroll an Android smartphone to view empirical qualification benchmark metrics.
+            </div>
+
+            <!-- Subtab 2: Compute -->
+            <div id="devicetab-view-compute" class="device-pane">
+              <div class="spec-list">
+                <div class="spec-row"><span class="spec-label">CPU Architecture:</span> <span id="detail-hw-arch" class="spec-val font-mono">-</span></div>
+                <div class="spec-row"><span class="spec-label">CPU Cores:</span> <span id="detail-hw-cores" class="spec-val font-mono">-</span></div>
+                <div class="spec-row"><span class="spec-label">Total / Available RAM:</span> <span id="detail-hw-ram" class="spec-val">-</span></div>
+                <div class="spec-row"><span class="spec-label">Storage Capacity:</span> <span id="detail-hw-storage" class="spec-val">-</span></div>
+                <div class="spec-row"><span class="spec-label">Fuel MIPS Benchmark:</span> <span id="detail-node-mips" class="spec-val font-bold text-cyan">-</span></div>
+                <div class="spec-row"><span class="spec-label">Vulkan GPU Support:</span> <span id="detail-hw-accel" class="spec-val text-emerald">Available</span></div>
+                <div class="spec-row"><span class="spec-label">Hardware NPU:</span> <span id="detail-hw-npu" class="spec-val text-muted">None / Reserved (HARDWARE-REQUIRED)</span></div>
               </div>
-              <div class="spec-list hidden" id="qual-specs-list">
-                <div class="spec-row"><span class="spec-label">Measured Fuel MIPS:</span> <span id="detail-node-mips" class="spec-val font-bold text-cyan">-</span></div>
-                <div class="spec-row"><span class="spec-label">WASM Core Conformance:</span> <span id="detail-node-wasm" class="spec-val text-emerald">PASSED</span></div>
-                <div class="spec-row"><span class="spec-label">WASI Preview 1 Profile:</span> <span id="detail-node-wasi" class="spec-val text-emerald">PASSED (fd_write, args, env, clock)</span></div>
-                <div class="spec-row"><span class="spec-label">Max Linear Memory Pages:</span> <span id="detail-node-mem" class="spec-val">16 pages (1.0 MB)</span></div>
-                <div class="spec-row"><span class="spec-label">Qualification Hash:</span> <span id="detail-node-hash" class="spec-val font-mono truncate">-</span></div>
-                <div class="spec-row"><span class="spec-label">Ed25519 Signature:</span> <span id="detail-node-sig" class="spec-val font-mono truncate">-</span></div>
+            </div>
+
+            <!-- Subtab 3: Power/Thermal -->
+            <div id="devicetab-view-power" class="device-pane">
+              <div class="spec-list">
+                <div class="spec-row"><span class="spec-label">Battery Level:</span> <span id="detail-hw-battery" class="spec-val font-bold">-</span></div>
+                <div class="spec-row"><span class="spec-label">Power Source:</span> <span id="detail-hw-charging" class="spec-val">-</span></div>
+                <div class="spec-row"><span class="spec-label">Thermal Status:</span> <span id="detail-hw-thermal" class="spec-val">-</span></div>
+                <div class="spec-row"><span class="spec-label">Estimated Temperature:</span> <span id="detail-hw-temp" class="spec-val">-</span></div>
+                <div class="spec-row"><span class="spec-label">Thermal Safety Cutoff:</span> <span id="detail-policy-thermal-cutoff" class="spec-val text-amber">Moderate</span></div>
+              </div>
+            </div>
+
+            <!-- Subtab 4: Network -->
+            <div id="devicetab-view-network" class="device-pane">
+              <div class="spec-list">
+                <div class="spec-row"><span class="spec-label">Interface Type:</span> <span id="detail-hw-net" class="spec-val">-</span></div>
+                <div class="spec-row"><span class="spec-label">Unmetered Network Only:</span> <span id="detail-policy-unmetered" class="spec-val font-bold text-emerald">Enabled</span></div>
+                <div class="spec-row"><span class="spec-label">Round Trip Ping:</span> <span id="detail-hw-ping" class="spec-val font-mono">18 ms</span></div>
+                <div class="spec-row"><span class="spec-label">Downlink Bandwidth:</span> <span id="detail-hw-downlink" class="spec-val font-mono">50 Mbps</span></div>
+              </div>
+            </div>
+
+            <!-- Subtab 5: Security -->
+            <div id="devicetab-view-security" class="device-pane">
+              <div class="spec-list">
+                <div class="spec-row"><span class="spec-label">Ed25519 Public Key:</span> <span id="detail-hw-pubkey" class="spec-val font-mono truncate">-</span></div>
+                <div class="spec-row"><span class="spec-label">Enrollment Status:</span> <span id="detail-hw-enrollment" class="spec-val font-bold text-emerald">Enrolled</span></div>
+                <div class="spec-row"><span class="spec-label">WASM Sandboxing:</span> <span class="spec-val text-emerald">Deterministic Fuel Metering (wasmi Core)</span></div>
+                <div class="spec-row"><span class="spec-label">Qualification Signature:</span> <span id="detail-node-sig" class="spec-val font-mono truncate">-</span></div>
+              </div>
+            </div>
+
+            <!-- Subtab 6: Jobs -->
+            <div id="devicetab-view-jobs" class="device-pane">
+              <div class="spec-list">
+                <div class="spec-row"><span class="spec-label">Active Running Job:</span> <span id="detail-device-active-job" class="spec-val font-mono">None</span></div>
+                <div class="spec-row"><span class="spec-label">Total Jobs Completed:</span> <span id="detail-device-jobs-completed" class="spec-val font-bold text-emerald">0</span></div>
+                <div class="spec-row"><span class="spec-label">Total Jobs Failed:</span> <span id="detail-device-jobs-failed" class="spec-val text-rose">0</span></div>
+                <div class="spec-row"><span class="spec-label">Empirical Reliability Score:</span> <span id="detail-device-reliability" class="spec-val font-bold text-cyan">100%</span></div>
+              </div>
+              <div class="mt-3">
+                <button type="button" id="btn-cancel-device-job" class="btn btn-xs btn-outline-rose">Cancel Active Job</button>
+              </div>
+            </div>
+
+            <!-- Subtab 7: Earnings -->
+            <div id="devicetab-view-earnings" class="device-pane">
+              <div class="spec-list">
+                <div class="spec-row"><span class="spec-label">Accumulated TEST CREDITS:</span> <span id="detail-device-credits" class="spec-val font-bold text-emerald">0 CR</span></div>
+                <div class="spec-row"><span class="spec-label">Total Execution Fuel:</span> <span id="detail-device-fuel" class="spec-val font-mono">0</span></div>
+                <div class="spec-row"><span class="spec-label">Accounting Disclaimer:</span> <span class="spec-val text-muted">All settlements are in TEST CREDITS for demonstration purposes.</span></div>
+              </div>
+            </div>
+
+            <!-- Subtab 8: Diagnostics & Controls -->
+            <div id="devicetab-view-controls" class="device-pane">
+              <div class="device-action-bar">
+                <button type="button" id="btn-action-rename" class="btn btn-sm btn-secondary">✏️ Rename Device</button>
+                <button type="button" id="btn-action-toggle-pause" class="btn btn-sm btn-outline-cyan">⏸️ Pause Compute</button>
+                <button type="button" id="btn-action-drain" class="btn btn-sm btn-secondary">🛡️ Drain Jobs</button>
+                <button type="button" id="btn-action-requalify" class="btn btn-sm btn-secondary">⚡ Requalify</button>
+                <button type="button" id="btn-action-revoke" class="btn btn-sm btn-outline-rose">🚫 Revoke Identity</button>
+                <button type="button" id="btn-action-remove" class="btn btn-sm btn-outline-rose">🗑️ Remove</button>
+              </div>
+
+              <div class="card p-3 mt-3">
+                <h4 class="mb-2">Configurable Compute &amp; Safety Policy</h4>
+                <div class="policy-grid">
+                  <div class="form-group">
+                    <label for="policy-input-cpu">Max CPU Workload Limit (%)</label>
+                    <input type="number" id="policy-input-cpu" class="input-control" value="60" min="10" max="100" />
+                  </div>
+                  <div class="form-group">
+                    <label for="policy-input-ram">Max RAM Allocated (MB)</label>
+                    <input type="number" id="policy-input-ram" class="input-control" value="512" min="64" max="4096" />
+                  </div>
+                  <div class="form-group">
+                    <label for="policy-input-battery">Minimum Battery Level (%)</label>
+                    <input type="number" id="policy-input-battery" class="input-control" value="40" min="10" max="95" />
+                  </div>
+                  <div class="form-group">
+                    <label for="policy-select-thermal">Thermal Shutdown Cutoff</label>
+                    <select id="policy-select-thermal" class="input-control">
+                      <option value="LIGHT">Light</option>
+                      <option value="MODERATE" selected>Moderate</option>
+                      <option value="SEVERE">Severe</option>
+                      <option value="CRITICAL">Critical</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row-checks mt-2">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="policy-check-charging" checked />
+                    <span>Only accept compute while plugged into charger</span>
+                  </label>
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="policy-check-unmetered" checked />
+                    <span>Require unmetered Wi-Fi / Ethernet connection</span>
+                  </label>
+                </div>
+                <div class="mt-3">
+                  <button type="button" id="btn-save-device-policy" class="btn btn-sm btn-primary">💾 Save Device Policy</button>
+                </div>
               </div>
             </div>
           </div>
@@ -481,18 +595,21 @@
             </div>
           </div>
 
-          <!-- Unified Job Details & Execution Logs Panel -->
+          <!-- Unified Job Details & Execution Logs Panel (6 Sub-tabs) -->
           <div class="card mt-4" id="job-details-panel">
             <div class="card-header">
               <div>
-                <h3>Job Details &amp; Execution Telemetry</h3>
+                <h3>Job Details &amp; Execution Telemetry (<span id="detail-job-title">None Selected</span>)</h3>
                 <span id="detail-job-state-badge" class="badge badge-proven">SELECT JOB</span>
+                <span id="detail-job-evidence-badge" class="badge badge-simulated">SIMULATED</span>
               </div>
               <div class="job-detail-subtabs">
                 <button class="subtab-btn active" data-jobtab="overview">Overview</button>
+                <button class="subtab-btn" data-jobtab="timeline">Lifecycle Timeline</button>
                 <button class="subtab-btn" data-jobtab="logs">Sandboxed Logs (STDOUT)</button>
+                <button class="subtab-btn" data-jobtab="result">Execution Result</button>
                 <button class="subtab-btn" data-jobtab="verification">Verification &amp; Proof</button>
-                <button class="subtab-btn" data-jobtab="metering">Metering Ledger</button>
+                <button class="subtab-btn" data-jobtab="metering">Metering &amp; Economics</button>
               </div>
             </div>
 
@@ -500,8 +617,9 @@
             <div id="jobtab-view-overview" class="jobtab-pane active">
               <div class="spec-list">
                 <div class="spec-row"><span class="spec-label">Job ID:</span> <span id="detail-job-id" class="spec-val font-mono">None Selected</span></div>
-                <div class="spec-row"><span class="spec-label">Workload Name:</span> <span id="detail-job-name" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Assigned Node ID:</span> <span id="detail-job-node" class="spec-val font-mono">-</span></div>
+                <div class="spec-row"><span class="spec-label">Workload Name:</span> <span id="detail-job-name" class="spec-val font-bold text-cyan">-</span></div>
+                <div class="spec-row"><span class="spec-label">Execution Target:</span> <span id="detail-job-node" class="spec-val font-mono">-</span></div>
+                <div class="spec-row"><span class="spec-label">Execution Environment:</span> <span id="detail-job-env" class="spec-val font-bold">-</span></div>
                 <div class="spec-row"><span class="spec-label">Active Lease ID:</span> <span id="detail-job-lease" class="spec-val font-mono">-</span></div>
                 <div class="spec-row"><span class="spec-label">Lease Expiry:</span> <span id="detail-job-lease-expiry" class="spec-val">-</span></div>
                 <div class="spec-row"><span class="spec-label">Exit Code:</span> <span id="detail-job-exit" class="spec-val font-mono">-</span></div>
@@ -509,7 +627,30 @@
               </div>
             </div>
 
-            <!-- Sub-tab 2: Sandboxed Logs -->
+            <!-- Sub-tab 2: Lifecycle Timeline (11 Steps) -->
+            <div id="jobtab-view-timeline" class="jobtab-pane">
+              <p class="text-sub mb-3">Cryptographic state progression from submission to idempotent dual-entry settlement:</p>
+              <div class="timeline-track" id="job-timeline-track">
+                <div class="timeline-node completed" id="tl-step-1"><div class="timeline-dot">1</div><div class="timeline-label">Submitted</div></div>
+                <div class="timeline-node completed" id="tl-step-2"><div class="timeline-dot">2</div><div class="timeline-label">Queued</div></div>
+                <div class="timeline-node completed" id="tl-step-3"><div class="timeline-dot">3</div><div class="timeline-label">Scheduled</div></div>
+                <div class="timeline-node completed" id="tl-step-4"><div class="timeline-dot">4</div><div class="timeline-label">Lease Granted</div></div>
+                <div class="timeline-node completed" id="tl-step-5"><div class="timeline-dot">5</div><div class="timeline-label">Artifact Verified</div></div>
+                <div class="timeline-node active" id="tl-step-6"><div class="timeline-dot">6</div><div class="timeline-label">Executing</div></div>
+                <div class="timeline-node" id="tl-step-7"><div class="timeline-dot">7</div><div class="timeline-label">Completed</div></div>
+                <div class="timeline-node" id="tl-step-8"><div class="timeline-dot">8</div><div class="timeline-label">Result Signed</div></div>
+                <div class="timeline-node" id="tl-step-9"><div class="timeline-dot">9</div><div class="timeline-label">Server Verified</div></div>
+                <div class="timeline-node" id="tl-step-10"><div class="timeline-dot">10</div><div class="timeline-label">Settled</div></div>
+              </div>
+              <div class="card p-3 mt-3">
+                <div class="spec-row"><span class="spec-label">Current Timeline Phase:</span> <span id="timeline-phase-desc" class="spec-val font-bold text-cyan">Complete</span></div>
+                <div class="spec-row"><span class="spec-label">Timestamp (Submitted):</span> <span id="timeline-time-submitted" class="spec-val font-mono">-</span></div>
+                <div class="spec-row"><span class="spec-label">Timestamp (Dispatched):</span> <span id="timeline-time-dispatched" class="spec-val font-mono">-</span></div>
+                <div class="spec-row"><span class="spec-label">Timestamp (Completed):</span> <span id="timeline-time-completed" class="spec-val font-mono">-</span></div>
+              </div>
+            </div>
+
+            <!-- Sub-tab 3: Sandboxed Logs -->
             <div id="jobtab-view-logs" class="jobtab-pane">
               <div class="terminal-container">
                 <div class="terminal-bar">
@@ -524,23 +665,36 @@
               </div>
             </div>
 
-            <!-- Sub-tab 3: Verification & Proof -->
-            <div id="jobtab-view-verification" class="jobtab-pane">
+            <!-- Sub-tab 4: Result -->
+            <div id="jobtab-view-result" class="jobtab-pane">
               <div class="spec-list">
-                <div class="spec-row"><span class="spec-label">Result Digest (SHA-256):</span> <span id="detail-job-digest" class="spec-val font-mono truncate">-</span></div>
-                <div class="spec-row"><span class="spec-label">Node Ed25519 Signature:</span> <span id="detail-job-sig" class="spec-val font-mono truncate">-</span></div>
-                <div class="spec-row"><span class="spec-label">Submitter Signature:</span> <span id="detail-job-submitter-sig" class="spec-val font-mono truncate">-</span></div>
-                <div class="spec-row"><span class="spec-label">Verification Engine Status:</span> <span id="detail-job-verification-status" class="spec-val text-emerald">VERIFIED_VALID</span></div>
+                <div class="spec-row"><span class="spec-label">Result SHA-256 Digest:</span> <span id="detail-job-digest" class="spec-val font-mono truncate">-</span></div>
+                <div class="spec-row"><span class="spec-label">Sandbox Exit Code:</span> <span id="detail-job-result-exit" class="spec-val font-mono font-bold text-emerald">0 (SUCCESS)</span></div>
+                <div class="spec-row"><span class="spec-label">Fuel Gas Metered:</span> <span id="detail-job-result-fuel" class="spec-val font-mono text-cyan">-</span></div>
+                <div class="spec-row"><span class="spec-label">Execution Wall Time:</span> <span id="detail-job-walltime" class="spec-val">-</span></div>
+                <div class="spec-row"><span class="spec-label">Peak Linear Memory:</span> <span id="detail-job-memory" class="spec-val">-</span></div>
               </div>
             </div>
 
-            <!-- Sub-tab 4: Metering -->
+            <!-- Sub-tab 5: Verification & Proof -->
+            <div id="jobtab-view-verification" class="jobtab-pane">
+              <div class="spec-list">
+                <div class="spec-row"><span class="spec-label">Verification Engine Status:</span> <span id="detail-job-verification-status" class="spec-val font-bold text-emerald">VERIFIED_VALID</span></div>
+                <div class="spec-row"><span class="spec-label">Node Ed25519 Signature:</span> <span id="detail-job-sig" class="spec-val font-mono truncate">-</span></div>
+                <div class="spec-row"><span class="spec-label">Submitter Signature:</span> <span id="detail-job-submitter-sig" class="spec-val font-mono truncate">-</span></div>
+                <div class="spec-row"><span class="spec-label">Verification Policy:</span> <span id="detail-job-policy" class="spec-val font-bold">HashMatch Dual Consensus</span></div>
+              </div>
+            </div>
+
+            <!-- Sub-tab 6: Metering & Economics -->
             <div id="jobtab-view-metering" class="jobtab-pane">
               <div class="spec-list">
-                <div class="spec-row"><span class="spec-label">Settlement Status:</span> <span class="spec-val text-emerald">SETTLED (Idempotent)</span></div>
-                <div class="spec-row"><span class="spec-label">Credits Transferred:</span> <span id="detail-job-credits" class="spec-val font-bold text-emerald">-</span></div>
-                <div class="spec-row"><span class="spec-label">Wall Clock Time:</span> <span id="detail-job-walltime" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Peak Linear Memory:</span> <span id="detail-job-memory" class="spec-val">-</span></div>
+                <div class="spec-row"><span class="spec-label">Settlement Status:</span> <span class="spec-val text-emerald font-bold">SETTLED (Idempotent)</span></div>
+                <div class="spec-row"><span class="spec-label">Total Consumer Charge:</span> <span id="detail-job-credits" class="spec-val font-bold text-emerald">50 TEST CREDITS</span></div>
+                <div class="spec-row"><span class="spec-label">Formula Breakdown:</span> <span id="detail-job-formula" class="spec-val font-mono text-cyan">Base (10) + Fuel (35) + Mem-Time (5) = 50 TEST CREDITS</span></div>
+                <div class="spec-row"><span class="spec-label">Provider Payout (90%):</span> <span id="detail-job-provider-earned" class="spec-val font-bold text-emerald">45 TEST CREDITS</span></div>
+                <div class="spec-row"><span class="spec-label">Platform Test Fee (10%):</span> <span id="detail-job-platform-fee" class="spec-val text-muted">5 TEST CREDITS</span></div>
+                <div class="spec-row"><span class="spec-label">Idempotency Transaction Key:</span> <span id="detail-job-idempotency-key" class="spec-val font-mono text-cyan">-</span></div>
               </div>
             </div>
           </div>
@@ -548,10 +702,26 @@
 
         <!-- Tab 5: Usage & Credits -->
         <section id="tab-view-usage" class="tab-pane">
+          <!-- Accounting Disclaimer Banner -->
+          <div class="card p-3 mb-3" style="border-left: 4px solid var(--accent-cyan);">
+            <div class="flex items-center justify-between">
+              <div>
+                <h4 class="text-cyan">TEST CREDITS Ledger &amp; Transparent Economics</h4>
+                <p class="text-sub">Every job settlement is cryptographically audited and denominated in TEST CREDITS for demonstration and sandbox verification. No fiat cash value is implied.</p>
+              </div>
+              <div class="timeframe-selector flex gap-1">
+                <button type="button" class="btn btn-xs btn-primary timeframe-btn active" data-timeframe="today">Today</button>
+                <button type="button" class="btn btn-xs btn-secondary timeframe-btn" data-timeframe="week">This Week</button>
+                <button type="button" class="btn btn-xs btn-secondary timeframe-btn" data-timeframe="month">This Month</button>
+                <button type="button" class="btn btn-xs btn-secondary timeframe-btn" data-timeframe="all">All Time</button>
+              </div>
+            </div>
+          </div>
+
           <div class="kpi-grid">
             <div class="kpi-card">
               <div class="kpi-header"><span class="kpi-label">Total Credits Settled</span> <span class="kpi-icon">💳</span></div>
-              <div class="kpi-value"><span id="usage-credits-earned">0</span> <span class="kpi-sub">CR</span></div>
+              <div class="kpi-value"><span id="usage-credits-earned">0</span> <span class="kpi-sub">TEST CR</span></div>
               <div class="kpi-footer text-emerald">Dual-entry cryptographic ledger</div>
             </div>
             <div class="kpi-card">
@@ -563,6 +733,18 @@
               <div class="kpi-header"><span class="kpi-label">Settled Executions</span> <span class="kpi-icon">📝</span></div>
               <div class="kpi-value"><span id="usage-tx-count">0</span> <span class="kpi-sub">records</span></div>
               <div class="kpi-footer text-emerald">Idempotency key replay protected</div>
+            </div>
+          </div>
+
+          <!-- Transparent Deterministic Formula Card -->
+          <div class="card mt-4 p-3">
+            <h4>Deterministic TEST CREDIT Settlement Formula</h4>
+            <div class="spec-list mt-2">
+              <div class="spec-row"><span class="spec-label">Base Transaction Fee:</span> <span class="spec-val font-mono">10 TEST CREDITS</span></div>
+              <div class="spec-row"><span class="spec-label">Fuel Execution Cost:</span> <span class="spec-val font-mono">ceil(fuel_consumed / 100,000) TEST CREDITS</span></div>
+              <div class="spec-row"><span class="spec-label">Memory-Time Allocation:</span> <span class="spec-val font-mono">ceil((peak_memory_mb) * (wall_time_sec)) TEST CREDITS</span></div>
+              <div class="spec-row"><span class="spec-label">Provider Payout Ratio:</span> <span class="spec-val text-emerald font-bold">90% of total settlement</span></div>
+              <div class="spec-row"><span class="spec-label">Protocol Safety Reserve:</span> <span class="spec-val text-muted">10% retained for zero-trust arbitration</span></div>
             </div>
           </div>
 
@@ -832,6 +1014,18 @@
           <h2>Enroll Compute Device into SPaaS Fabric</h2>
           <button id="modal-add-device-close" class="modal-close-btn" title="Close">&times;</button>
         </div>
+
+        <div class="fleet-group-select mb-3">
+          <label for="enroll-fleet-group" class="text-sub font-bold">Assign to Fleet Group:</label>
+          <select id="enroll-fleet-group" class="input-control mt-1">
+            <option value="Phones" selected>Smartphones (Voluntary Mobile Compute)</option>
+            <option value="Desktops">Desktops &amp; High-Throughput Workstations</option>
+            <option value="Emulators">Testing Emulators (Android AVD)</option>
+            <option value="Trusted">Trusted Hardware Cluster</option>
+            <option value="Custom">Custom Group</option>
+          </select>
+        </div>
+
         <div class="modal-tabs">
           <button class="modal-tab-btn active" data-modaltab="android">Android Smartphone</button>
           <button class="modal-tab-btn" data-modaltab="desktop">Desktop Edge Worker</button>
@@ -865,27 +1059,57 @@
             </div>
           </div>
 
+          <!-- Production APK Delivery & Verification Card -->
+          <div class="apk-download-card mt-3">
+            <div class="apk-meta-row">
+              <div class="apk-meta-item">
+                <span class="meta-label">APK VERSION</span>
+                <span class="meta-val font-mono" id="apk-version-label">v0.1.0</span>
+              </div>
+              <div class="apk-meta-item">
+                <span class="meta-label">PACKAGE SIZE</span>
+                <span class="meta-val font-mono" id="apk-size-label">23.12 MB (23,125,348 B)</span>
+              </div>
+              <div class="apk-meta-item">
+                <span class="meta-label">COMPATIBILITY</span>
+                <span class="meta-val" id="apk-compat-label">Android 10+ (API 29–34, ARM64 / x86_64)</span>
+              </div>
+            </div>
+            <div class="apk-sha256-row">
+              <span class="meta-label">SHA-256</span>
+              <code class="apk-sha256-code font-mono" id="apk-sha256-val">d54a25391a2822785eff7fdb15151b2eee275611b839d0f03f4ed8906c0e2955</code>
+              <button type="button" id="btn-copy-apk-sha256" class="btn btn-xs btn-outline-cyan">📋 Copy SHA256</button>
+            </div>
+            <div class="flex gap-2 mt-2">
+              <a href="/downloads/SPaaS-Node-v0.1.0.apk" download="SPaaS-Node-v0.1.0.apk" id="btn-download-apk" class="btn btn-sm btn-primary">
+                ⬇️ Download SPaaS-Node-v0.1.0.apk (23.12 MB)
+              </a>
+              <a href="/app-debug.apk" download="SPaaS-Node-v0.1.0.apk" id="btn-download-apk-mirror" class="btn btn-sm btn-outline-cyan">
+                Mirror Link
+              </a>
+            </div>
+          </div>
+
           <div class="steps-list mt-3">
             <div class="step-item">
               <div class="step-num">1</div>
               <div class="step-body">
-                <strong>Download &amp; Install SPaaS Node APK</strong>
-                <p>Install the debug APK on any Android 10+ smartphone (minSdk 29, targetSdk 34).</p>
-                <a href="/app-debug.apk" download id="btn-download-apk" class="btn btn-xs btn-outline-cyan mt-1">Download APK (23 MB)</a>
+                <strong>Install the Authenticated SPaaS Node APK</strong>
+                <p>Install the downloaded APK on any spare Android 10+ smartphone or active emulator.</p>
               </div>
             </div>
             <div class="step-item">
               <div class="step-num">2</div>
               <div class="step-body">
-                <strong>Open SPaaS Node App &amp; Tap "Connect Device"</strong>
-                <p>Launch the app on your smartphone and enter the 6-character code above or scan the QR.</p>
+                <strong>Launch &amp; Enter Single-Use Pairing Code</strong>
+                <p>Launch SPaaS Node and enter code <strong class="text-cyan font-mono" id="modal-code-display-step">SP-8492</strong> or scan the QR code.</p>
               </div>
             </div>
             <div class="step-item">
               <div class="step-num">3</div>
               <div class="step-body">
                 <strong>Automatic Enrollment &amp; Empirical Qualification</strong>
-                <p>The device registers over authenticated outbound TLS, executes empirical microbenchmarks, and marks itself READY.</p>
+                <p>The device connects outbound over mutual TLS, benchmarks its fuel MIPS, and marks itself READY for tasks.</p>
               </div>
             </div>
           </div>
@@ -893,14 +1117,28 @@
 
         <!-- Desktop Edge Worker Onboarding -->
         <div id="modaltab-desktop" class="modal-tab-content">
-          <div class="terminal-container">
-            <div class="terminal-bar">
-              <span>ONE-LINE DESKTOP WORKER RUNNER</span>
-              <button id="btn-copy-worker-cmd" class="btn btn-xs btn-secondary">Copy Command</button>
+          <div class="card p-3 mb-3">
+            <h4>Option A: One-Line PowerShell / Bash Runner (No Toolchain Required)</h4>
+            <p class="text-sub">Runs the standalone desktop worker process directly on this computer:</p>
+            <div class="terminal-container mt-2">
+              <div class="terminal-bar">
+                <span>POWERSHELL RUNNER</span>
+                <button type="button" id="btn-copy-ps-worker" class="btn btn-xs btn-secondary">Copy Command</button>
+              </div>
+              <pre class="terminal-view" id="worker-ps-snippet">powershell -Command "irm http://127.0.0.1:8080/downloads/spaas-desktop-worker.ps1 | iex"</pre>
             </div>
-            <pre class="terminal-view" id="worker-cmd-snippet">cargo run -p spaas-cli -- node worker</pre>
           </div>
-          <p class="text-sub mt-2">Starts a live native worker process on this host, benchmarks CPU fuel MIPS, and joins the compute fabric.</p>
+
+          <div class="card p-3">
+            <h4>Option B: Native Developer CLI (Rust)</h4>
+            <div class="terminal-container mt-2">
+              <div class="terminal-bar">
+                <span>RUST CLI RUNNER</span>
+                <button type="button" id="btn-copy-worker-cmd" class="btn btn-xs btn-secondary">Copy Command</button>
+              </div>
+              <pre class="terminal-view" id="worker-cmd-snippet">cargo run -p spaas-cli -- node worker --name "Desktop-Host-Worker" --duration-secs 0</pre>
+            </div>
+          </div>
         </div>
 
         <!-- Instant Demo Cluster -->
@@ -913,6 +1151,7 @@
         </div>
 
         <div class="modal-actions">
+          <button type="button" id="btn-add-another-device" class="btn btn-outline-cyan">➕ Enroll Another Device</button>
           <button type="button" id="btn-close-device-modal" class="btn btn-secondary">Done</button>
         </div>
       </div>

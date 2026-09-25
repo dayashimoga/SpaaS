@@ -1,7 +1,7 @@
 use crate::handlers::*;
 use crate::state::AppState;
 use axum::{
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use tower_http::cors::{Any, CorsLayer};
@@ -14,7 +14,7 @@ pub fn build_router(state: AppState) -> Router {
         .allow_headers(Any);
 
     Router::new()
-        // Node Management & Qualification
+        // Node Management, Qualification & Operational Controls
         .route("/api/v1/nodes/register", post(register_node))
         .route("/api/v1/nodes/heartbeat", post(heartbeat))
         .route("/api/v1/nodes/:node_id/poll", get(poll_job))
@@ -23,6 +23,10 @@ pub fn build_router(state: AppState) -> Router {
             post(qualify_node).get(get_node_qualification),
         )
         .route("/api/v1/nodes/:node_id/revoke", post(revoke_node))
+        .route("/api/v1/nodes/:node_id/rename", post(rename_node))
+        .route("/api/v1/nodes/:node_id/policy", post(update_node_policy))
+        .route("/api/v1/nodes/:node_id/state", post(set_node_state))
+        .route("/api/v1/nodes/:node_id", delete(remove_node))
         .route("/api/v1/nodes/results", post(submit_result))
         .route("/api/v1/nodes", get(list_nodes))
         // Device Pairing & Demo
@@ -42,9 +46,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/metrics", get(get_metrics))
         // Challenge & Real Verification
         .route("/api/v1/workloads/challenge", post(create_challenge_workload))
-        // APK Artifact Downloads
+        // APK Artifact Downloads & Delivery
         .route("/app-debug.apk", get(download_apk))
         .route("/downloads/spaas-android-node.apk", get(download_apk))
+        .route("/downloads/SPaaS-Node-v0.1.0.apk", get(download_apk))
+        .route("/downloads/SPaaS-Node-latest.apk", get(download_apk))
+        .route("/api/v1/downloads/apk-info", get(get_apk_info))
         .nest_service("/downloads", ServeDir::new("dist/bin"))
         .fallback_service(ServeDir::new("apps/web-console/dist"))
         .layer(cors)

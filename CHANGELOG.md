@@ -82,5 +82,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Direct Android APK Serving: Control plane serves compiled 23.12 MB `spaas-android-node.apk` directly with `application/vnd.android.package-archive` MIME type and attachment disposition from `/downloads/spaas-android-node.apk` and `/app-debug.apk`.
 - Updated 21-Gate Production Acceptance Runner: Verified all 21 behavioral gates (G01–G21) passing cleanly with 19 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED in 66s. Production Acceptance Certification: GRANTED.
 
+## [0.1.0-prod.5] - 2026-09-25
+
+### Added
+- Production Named APK Delivery End-to-End: Browser downloads produce `SPaaS-Node-v0.1.0.apk` (23.12 MB, SHA256 `D54A25391A2822785EFF7FDB15151B2EEE275611B839D0F03F4ED8906C0E2955`) with Content-Type `application/vnd.android.package-archive`, explicit Content-Disposition filename attachment, Content-Length, `x-spaas-version`, `x-spaas-sha256`, and JSON metadata endpoint `/api/v1/downloads/apk-info`.
+- Cryptographic Packaging & AAPT Validation: Upgraded Acceptance Gate G13 to perform containerized AAPT badging extraction (`package: name='dev.spaas.node'`, `sdkVersion: 29`, `targetSdkVersion: 34`) and apksigner verification confirming APK Signature Scheme v2 validity.
+- Physical Android Hardware Acceptance Harness (`scripts/physical-android-acceptance.ps1`): Standalone test runner that probes ADB for attached physical Android phones, validates APK compatibility, executes pairing token handshake, submits challenge WASM workload, verifies signed execution digest, inspects resource safety policies, and generates structured `physical-android-acceptance-report.json`. Missing physical phones are accurately classified as `HARDWARE-REQUIRED` without false claims.
+- 8-Subtab Device & Fleet Operational Management Console: Expanded Device Details panel into 8 operational sub-tabs (`Overview`, `Compute`, `Power/Thermal`, `Network`, `Security`, `Jobs`, `Earnings`, `Diagnostics & Controls`), featuring live controls (`Rename`, `Toggle Pause/Resume`, `Drain Active Jobs`, `Requalify Microbenchmarks`, `Revoke Identity`, `Permanently Remove Device`) and configurable compute policy enforcement (`max CPU %`, `max RAM MB`, `minimum battery %`, `thermal cutoff`, `charging-only`, `unmetered-only`).
+- REST Node Management Endpoints: Implemented `POST /api/v1/nodes/:id/rename`, `POST /api/v1/nodes/:id/state`, `POST /api/v1/nodes/:id/policy`, and `DELETE /api/v1/nodes/:id` in Control Plane with unit tests.
+- 6-Subtab Job Experience & 11-Step Lifecycle Timeline: Expanded Job Details panel with 6 sub-tabs (`Overview`, `Lifecycle Timeline`, `Sandboxed Logs`, `Execution Result`, `Verification & Proof`, `Metering & Economics`), featuring an 11-step visual state track (`Submitted` -> `Queued` -> `Scheduled` -> `Lease Granted` -> `Artifact Verified` -> `Executing` -> `Completed` -> `Result Signed` -> `Server Verified` -> `Settled`), strict evidence badges (`SIMULATED`, `EMULATOR`, `PHYSICAL`), and automatic auto-selection of the first job to eliminate empty panels.
+- Transparent Deterministic TEST CREDIT Accounting: Implemented transparent fee calculation breakdown (`Base [10 CR] + Fuel [ceil(fuel / 100k)] + Mem-Time [ceil(RAM * Sec)] = Total TEST CREDITS`) with 90% provider payout and 10% arbitration reserve, displayed per job and in the Verifiable Usage Ledger.
+- Standalone Desktop Worker Runner (`dist/bin/spaas-desktop-worker.ps1`): Pre-packaged PowerShell worker script enabling immediate compute participation on Windows/Linux host machines with a one-line command (`irm http://127.0.0.1:8080/downloads/spaas-desktop-worker.ps1 | iex`) without requiring local Rust/Cargo toolchains.
+- Multi-Device Fleet Enrollment: Added Fleet Group dropdown (`Phones`, `Desktops`, `Emulators`, `Trusted`, `Custom`) and `[➕ Enroll Another Device]` button in Add Device modal for rapid multi-device onboarding.
+
+
 
 

@@ -1199,3 +1199,187 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- APK Download & Verification Card --- */
+.apk-download-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-top: 12px;
+}
+.apk-meta-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.apk-meta-item .meta-label {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.apk-meta-item .meta-val {
+  font-size: 0.875rem;
+  color: var(--text-main);
+  font-weight: 500;
+}
+.apk-sha256-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 14px;
+}
+.apk-sha256-code {
+  flex: 1;
+  font-size: 0.78rem;
+  color: #38BDF8;
+  word-break: break-all;
+}
+
+/* --- 11-Step Visual Job Timeline --- */
+.timeline-track {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  margin: 20px 0;
+  padding: 0 10px;
+}
+.timeline-track::before {
+  content: "";
+  position: absolute;
+  top: 16px;
+  left: 20px;
+  right: 20px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  z-index: 1;
+}
+.timeline-node {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.timeline-dot {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #1E293B;
+  border: 2px solid #475569;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: bold;
+  color: #94A3B8;
+  transition: all 0.3s ease;
+}
+.timeline-node.completed .timeline-dot {
+  background: #065F46;
+  border-color: #10B981;
+  color: #D1FAE5;
+}
+.timeline-node.active .timeline-dot {
+  background: #0E7490;
+  border-color: #06B6D4;
+  color: #ECFEFF;
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.6);
+}
+.timeline-label {
+  margin-top: 8px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  max-width: 75px;
+  line-height: 1.2;
+}
+.timeline-node.active .timeline-label {
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+.timeline-node.completed .timeline-label {
+  color: #10B981;
+}
+
+/* --- Device Operational Sub-Tabs & Actions --- */
+.device-subtabs, .job-detail-subtabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.device-pane, .jobtab-pane {
+  display: none;
+  padding-top: 12px;
+}
+.device-pane.active, .jobtab-pane.active {
+  display: block;
+}
+.device-action-bar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.policy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+/* --- Evidence Badges --- */
+.badge-simulated {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94A3B8;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+.badge-emulator {
+  background: rgba(245, 158, 11, 0.15);
+  color: #F59E0B;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.badge-physical {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10B981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+/* --- Mental Model Mode Switcher --- */
+.mental-model-banner {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.mental-model-pills {
+  display: flex;
+  gap: 8px;
+}
+.model-pill {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+}
+.model-pill.active {
+  background: rgba(6, 182, 212, 0.2);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+

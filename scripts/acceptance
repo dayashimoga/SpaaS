@@ -139,7 +139,7 @@ report_gate 12 "G12" "Web Console Production Assets (6 Primary Tabs & Dual Studi
 
 # G13: Android APK Compilation & Packaging
 report_gate 13 "G13" "Android Node APK Production Compilation" "PROVEN" bash -c "
-    if [ -f apps/android-node/app/build/outputs/apk/debug/app-debug.apk ] || [ -f dist/bin/spaas-android-node.apk ]; then
+    if [ -f dist/bin/SPaaS-Node-v0.1.0.apk ] || [ -f dist/bin/spaas-android-node.apk ] || [ -f apps/android-node/app/build/outputs/apk/debug/app-debug.apk ]; then
         echo 'Android APK verified.'
     elif command -v gradle >/dev/null 2>&1; then
         echo 'Compiling Android APK via Gradle...'

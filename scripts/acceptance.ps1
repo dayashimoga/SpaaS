@@ -237,16 +237,26 @@ Report-Gate 12 "G12" "Web Console Production Assets (6 Primary Tabs & Dual Studi
     "PROVEN"
 }
 
-# G13: Android APK Compilation & Packaging
-Report-Gate 13 "G13" "Android Node APK Production Compilation" "Verify apps/android-node APK build output" {
-    $apkPath = "apps/android-node/app/build/outputs/apk/debug/app-debug.apk"
+# G13: Android APK Delivery, AAPT Badging & Cryptographic Signing Scheme v2 Verification
+Report-Gate 13 "G13" "Android Node APK Delivery, AAPT & Signature Scheme v2" "Verify real APK integrity, badging & apksigner" {
+    $apkPath = "dist/bin/SPaaS-Node-v0.1.0.apk"
+    if (-not (Test-Path $apkPath)) { $apkPath = "dist/bin/spaas-android-node.apk" }
     if (-not (Test-Path $apkPath)) {
         throw "Android APK not found at $apkPath. Run containerized gradle assembleDebug first."
     }
     $apkItem = Get-Item $apkPath
     $apkHash = (Get-FileHash $apkPath -Algorithm SHA256).Hash
-    Write-Host "Verified Real Android APK: Size = $($apkItem.Length) bytes, SHA256 = $apkHash"
-    if ($apkItem.Length -lt 10000000) { throw "APK size too small ($($apkItem.Length) bytes), likely invalid" }
+    Write-Host "Target APK: $apkPath (Size: $($apkItem.Length) bytes, SHA256: $apkHash)"
+    if ($apkItem.Length -lt 20000000) { throw "APK size suspiciously small ($($apkItem.Length) bytes)" }
+
+    # Run AAPT Badging and apksigner verification inside builder container
+    Write-Host "Verifying AndroidManifest badging & cryptographic signature scheme v2..."
+    $verifyOutput = podman run --rm -v "${PWD}:/workspace:z" --entrypoint bash localhost/spaas-android-builder -c "/opt/android-sdk-linux/build-tools/34.0.0/aapt dump badging /workspace/$apkPath 2>/dev/null | grep -E 'package:|sdkVersion:|targetSdkVersion:' ; /opt/android-sdk-linux/build-tools/34.0.0/apksigner verify --verbose /workspace/$apkPath 2>/dev/null | grep 'Verified using v2'"
+    $verifyText = [string]::Join("`n", $verifyOutput)
+    Write-Host $verifyText
+    if ($verifyText -notmatch "dev\.spaas\.node") { throw "Package dev.spaas.node not detected in AAPT dump" }
+    if ($verifyText -notmatch "Verified using v2 scheme") { throw "APK Signature Scheme v2 verification failed" }
+    Write-Host "Android APK cryptographically verified and validated with AAPT + APKSigner v2."
     "PROVEN"
 }
 

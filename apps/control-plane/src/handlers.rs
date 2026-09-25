@@ -12,7 +12,7 @@ use futures_util::stream::Stream;
 use spaas_persistence::{AuditRecord, WalEvent};
 use spaas_protocol::job::{JobLease, JobRecord, JobState};
 use spaas_protocol::metering::ResourceUsage;
-use spaas_protocol::node::{EnrollmentStatus, NodeQualificationProfile, NodeRecord, NodeState};
+use spaas_protocol::node::{EnrollmentStatus, NodeQualificationProfile, NodeRecord, NodeState, ProviderPolicy, ThermalStatus};
 use spaas_protocol::rpc::*;
 use spaas_security::hash::verify_sha256;
 use spaas_security::signing::verify_workload;
@@ -1024,15 +1024,71 @@ pub async fn create_challenge_workload(
     }))
 }
 
-pub async fn download_apk() -> Result<Response, (StatusCode, String)> {
+#[derive(Debug, serde::Serialize)]
+pub struct ApkInfoResponse {
+    pub version: String,
+    pub filename: String,
+    pub size_bytes: u64,
+    pub sha256: String,
+    pub min_sdk: u32,
+    pub target_sdk: u32,
+    pub compatibility: String,
+    pub download_url: String,
+}
+
+pub async fn get_apk_info() -> Result<Json<ApkInfoResponse>, (StatusCode, String)> {
     let candidate_paths = [
+        "dist/bin/SPaaS-Node-v0.1.0.apk",
+        "../../dist/bin/SPaaS-Node-v0.1.0.apk",
         "dist/bin/spaas-android-node.apk",
+        "../../dist/bin/spaas-android-node.apk",
+        "apps/web-console/dist/SPaaS-Node-v0.1.0.apk",
+        "../../apps/web-console/dist/SPaaS-Node-v0.1.0.apk",
         "apps/web-console/dist/app-debug.apk",
+        "../../apps/web-console/dist/app-debug.apk",
         "apps/android-node/app/build/outputs/apk/debug/app-debug.apk",
+        "../../apps/android-node/app/build/outputs/apk/debug/app-debug.apk",
     ];
 
     for path in &candidate_paths {
         if let Ok(bytes) = tokio::fs::read(path).await {
+            let sha256 = spaas_security::sha256_hex(&bytes);
+            return Ok(Json(ApkInfoResponse {
+                version: "0.1.0".into(),
+                filename: "SPaaS-Node-v0.1.0.apk".into(),
+                size_bytes: bytes.len() as u64,
+                sha256,
+                min_sdk: 29,
+                target_sdk: 34,
+                compatibility: "Android 10.0+ (API 29–34, ARM64 / x86_64)".into(),
+                download_url: "/downloads/SPaaS-Node-v0.1.0.apk".into(),
+            }));
+        }
+    }
+
+    Err((
+        StatusCode::NOT_FOUND,
+        "Android APK not found in release dist/bin or build outputs".into(),
+    ))
+}
+
+pub async fn download_apk() -> Result<Response, (StatusCode, String)> {
+    let candidate_paths = [
+        "dist/bin/SPaaS-Node-v0.1.0.apk",
+        "../../dist/bin/SPaaS-Node-v0.1.0.apk",
+        "dist/bin/spaas-android-node.apk",
+        "../../dist/bin/spaas-android-node.apk",
+        "apps/web-console/dist/SPaaS-Node-v0.1.0.apk",
+        "../../apps/web-console/dist/SPaaS-Node-v0.1.0.apk",
+        "apps/web-console/dist/app-debug.apk",
+        "../../apps/web-console/dist/app-debug.apk",
+        "apps/android-node/app/build/outputs/apk/debug/app-debug.apk",
+        "../../apps/android-node/app/build/outputs/apk/debug/app-debug.apk",
+    ];
+
+    for path in &candidate_paths {
+        if let Ok(bytes) = tokio::fs::read(path).await {
+            let sha256 = spaas_security::sha256_hex(&bytes);
             let resp = Response::builder()
                 .status(StatusCode::OK)
                 .header(
@@ -1041,9 +1097,17 @@ pub async fn download_apk() -> Result<Response, (StatusCode, String)> {
                 )
                 .header(
                     "content-disposition",
-                    "attachment; filename=\"spaas-android-node.apk\"",
+                    "attachment; filename=\"SPaaS-Node-v0.1.0.apk\"",
                 )
                 .header("content-length", bytes.len().to_string())
+                .header("x-spaas-version", "0.1.0")
+                .header("x-spaas-sha256", sha256)
+                .header("x-spaas-min-sdk", "29")
+                .header("x-spaas-target-sdk", "34")
+                .header(
+                    "access-control-expose-headers",
+                    "Content-Disposition, Content-Length, x-spaas-version, x-spaas-sha256, x-spaas-min-sdk, x-spaas-target-sdk",
+                )
                 .body(axum::body::Body::from(bytes))
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
             return Ok(resp);
@@ -1054,6 +1118,126 @@ pub async fn download_apk() -> Result<Response, (StatusCode, String)> {
         StatusCode::NOT_FOUND,
         "Android APK not found in release dist/bin or build outputs".into(),
     ))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct RenameNodeRequest {
+    pub name: String,
+}
+
+pub async fn rename_node(
+    State(state): State<AppState>,
+    Path(node_id): Path<Uuid>,
+    Json(payload): Json<RenameNodeRequest>,
+) -> Result<Json<NodeRecord>, (StatusCode, String)> {
+    let mut nodes = state.nodes.write().await;
+    let node = nodes.get_mut(&node_id).ok_or_else(|| {
+        (StatusCode::NOT_FOUND, format!("Node {node_id} not found"))
+    })?;
+    node.capabilities.device_model = payload.name.trim().to_string();
+    let updated = node.clone();
+    drop(nodes);
+    state.upsert_node(updated.clone()).await;
+    state.broadcast_event(
+        "NODE_UPDATED",
+        serde_json::json!({ "node_id": node_id, "name": updated.capabilities.device_model }),
+    );
+    Ok(Json(updated))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct UpdateNodePolicyRequest {
+    pub only_while_charging: Option<bool>,
+    pub only_on_unmetered_network: Option<bool>,
+    pub min_battery_threshold_pct: Option<u8>,
+    pub max_thermal_threshold: Option<ThermalStatus>,
+    pub max_concurrent_jobs: Option<u32>,
+    pub max_cpu_pct: Option<u8>,
+    pub max_memory_mb: Option<u64>,
+    pub is_user_paused: Option<bool>,
+}
+
+pub async fn update_node_policy(
+    State(state): State<AppState>,
+    Path(node_id): Path<Uuid>,
+    Json(payload): Json<UpdateNodePolicyRequest>,
+) -> Result<Json<NodeRecord>, (StatusCode, String)> {
+    let mut nodes = state.nodes.write().await;
+    let node = nodes.get_mut(&node_id).ok_or_else(|| {
+        (StatusCode::NOT_FOUND, format!("Node {node_id} not found"))
+    })?;
+    if let Some(v) = payload.only_while_charging { node.policy.only_while_charging = v; }
+    if let Some(v) = payload.only_on_unmetered_network { node.policy.only_on_unmetered_network = v; }
+    if let Some(v) = payload.min_battery_threshold_pct { node.policy.min_battery_threshold_pct = v; }
+    if let Some(v) = payload.max_thermal_threshold { node.policy.max_thermal_threshold = v; }
+    if let Some(v) = payload.max_concurrent_jobs { node.policy.max_concurrent_jobs = v; }
+    if let Some(v) = payload.max_cpu_pct { node.policy.max_cpu_pct = v; }
+    if let Some(v) = payload.max_memory_mb { node.policy.max_memory_mb = v; }
+    if let Some(v) = payload.is_user_paused { node.policy.is_user_paused = v; }
+    let updated = node.clone();
+    drop(nodes);
+    state.upsert_node(updated.clone()).await;
+    state.broadcast_event(
+        "NODE_POLICY_UPDATED",
+        serde_json::json!({ "node_id": node_id, "policy": updated.policy }),
+    );
+    Ok(Json(updated))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SetNodeStateRequest {
+    pub state: String,
+}
+
+pub async fn set_node_state(
+    State(state): State<AppState>,
+    Path(node_id): Path<Uuid>,
+    Json(payload): Json<SetNodeStateRequest>,
+) -> Result<Json<NodeRecord>, (StatusCode, String)> {
+    let mut nodes = state.nodes.write().await;
+    let node = nodes.get_mut(&node_id).ok_or_else(|| {
+        (StatusCode::NOT_FOUND, format!("Node {node_id} not found"))
+    })?;
+    match payload.state.to_uppercase().as_str() {
+        "PAUSED" => {
+            node.state = NodeState::Paused;
+            node.policy.is_user_paused = true;
+        }
+        "RESUMED" | "IDLE" => {
+            node.state = NodeState::Idle;
+            node.policy.is_user_paused = false;
+        }
+        "ACTIVE" => {
+            node.state = NodeState::Active;
+            node.policy.is_user_paused = false;
+        }
+        "DRAINING" => {
+            node.policy.is_user_paused = true;
+        }
+        _ => return Err((StatusCode::BAD_REQUEST, format!("Unknown state {}", payload.state))),
+    }
+    let updated = node.clone();
+    drop(nodes);
+    state.upsert_node(updated.clone()).await;
+    state.broadcast_event(
+        "NODE_STATE_CHANGED",
+        serde_json::json!({ "node_id": node_id, "state": updated.state }),
+    );
+    Ok(Json(updated))
+}
+
+pub async fn remove_node(
+    State(state): State<AppState>,
+    Path(node_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let mut nodes = state.nodes.write().await;
+    if nodes.remove(&node_id).is_some() {
+        drop(nodes);
+        state.broadcast_event("NODE_REMOVED", serde_json::json!({ "node_id": node_id }));
+        Ok(Json(serde_json::json!({ "removed": true, "node_id": node_id })))
+    } else {
+        Err((StatusCode::NOT_FOUND, format!("Node {node_id} not found")))
+    }
 }
 
 #[cfg(test)]
@@ -1193,5 +1377,84 @@ mod tests {
         let job = jobs.get(&submit_resp.job_id).unwrap();
         assert!(job.assigned_node_id.is_some());
         assert!(job.current_lease.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_apk_delivery_and_node_management_endpoints() {
+        let dir = tempdir().unwrap();
+        let state = AppState::new(dir.path());
+
+        // 1. Verify get_apk_info returns valid metadata
+        let apk_info = get_apk_info().await.unwrap().0;
+        assert_eq!(apk_info.version, "0.1.0");
+        assert_eq!(apk_info.filename, "SPaaS-Node-v0.1.0.apk");
+        assert!(apk_info.size_bytes > 10_000_000);
+        assert_eq!(apk_info.sha256.len(), 64);
+        assert_eq!(apk_info.min_sdk, 29);
+        assert_eq!(apk_info.target_sdk, 34);
+
+        // 2. Verify download_apk returns valid response headers
+        let download_resp = download_apk().await.unwrap();
+        assert_eq!(download_resp.status(), StatusCode::OK);
+        let headers = download_resp.headers();
+        assert_eq!(
+            headers.get("content-type").unwrap(),
+            "application/vnd.android.package-archive"
+        );
+        assert_eq!(
+            headers.get("content-disposition").unwrap(),
+            "attachment; filename=\"SPaaS-Node-v0.1.0.apk\""
+        );
+        assert_eq!(headers.get("x-spaas-version").unwrap(), "0.1.0");
+        assert_eq!(headers.get("x-spaas-sha256").unwrap(), apk_info.sha256.as_str());
+
+        // 3. Register a node to test management controls
+        let node_key = spaas_security::keys::KeyPair::generate();
+        let reg_req = RegisterNodeRequest {
+            public_key: node_key.public_key_hex(),
+            device_type: NodeDeviceType::AndroidSmartphone,
+            capabilities: NodeHardwareCapabilities::default(),
+            initial_telemetry: NodeTelemetry::default(),
+            initial_policy: ProviderPolicy::default(),
+            enrollment_signature: "sig123".into(),
+            timestamp_ms: chrono::Utc::now().timestamp_millis(),
+            region: "ap-south-1".into(),
+            is_simulated: false,
+        };
+        let reg = register_node(State(state.clone()), Json(reg_req)).await.unwrap().0;
+        let node_id = reg.node_id;
+
+        // 4. Test Rename
+        let rename_req = RenameNodeRequest { name: "Pixel 8 Pro - Bedroom".into() };
+        let renamed = rename_node(State(state.clone()), Path(node_id), Json(rename_req)).await.unwrap().0;
+        assert_eq!(renamed.capabilities.device_model, "Pixel 8 Pro - Bedroom");
+
+        // 5. Test Update Policy
+        let policy_req = UpdateNodePolicyRequest {
+            only_while_charging: Some(false),
+            only_on_unmetered_network: Some(false),
+            min_battery_threshold_pct: Some(25),
+            max_thermal_threshold: Some(ThermalStatus::Light),
+            max_concurrent_jobs: Some(2),
+            max_cpu_pct: Some(80),
+            max_memory_mb: Some(1024),
+            is_user_paused: Some(true),
+        };
+        let policy_updated = update_node_policy(State(state.clone()), Path(node_id), Json(policy_req)).await.unwrap().0;
+        assert!(!policy_updated.policy.only_while_charging);
+        assert_eq!(policy_updated.policy.min_battery_threshold_pct, 25);
+        assert_eq!(policy_updated.policy.max_cpu_pct, 80);
+        assert!(policy_updated.policy.is_user_paused);
+
+        // 6. Test Set State (Resume)
+        let state_req = SetNodeStateRequest { state: "RESUMED".into() };
+        let resumed = set_node_state(State(state.clone()), Path(node_id), Json(state_req)).await.unwrap().0;
+        assert_eq!(resumed.state, NodeState::Idle);
+        assert!(!resumed.policy.is_user_paused);
+
+        // 7. Test Remove Node
+        let remove_res = remove_node(State(state.clone()), Path(node_id)).await.unwrap().0;
+        assert_eq!(remove_res["removed"], true);
+        assert_eq!(state.nodes.read().await.len(), 0);
     }
 }

@@ -147,5 +147,16 @@
 - [x] First-Run UX Hero Callout & Preset Catalog: 4 quick action buttons (`[Add Android Phone]`, `[Use This Computer]`, `[Start Demo Cluster]`, `[Run First Workload]`) and 6 preset workloads (JSON Transform, Deflate Compression, File Hasher, Challenge SHA-256, Prime Sieve, Matrix) [PROVEN, 2026-09-25]
 - [x] 21 Behavioral Production Acceptance Gates (G01–G21): Re-executed and verified all 21 gates with exact commands, exit codes, durations, artifact hashes, and strictly enforced classifications (19 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED) in 66s [PROVEN, 2026-09-25]
 
+## [Phase 15: Production V1 Completion: APK Delivery, Fleet Controls & Job Lifecycle]
+- [x] End-to-End Named APK Delivery: Browser downloads produce `SPaaS-Node-v0.1.0.apk` (23.12 MB, SHA256 `D54A25391A2822785EFF7FDB15151B2EEE275611B839D0F03F4ED8906C0E2955`) with `application/vnd.android.package-archive` MIME type, Content-Disposition filename, Content-Length, and JSON metadata at `/api/v1/downloads/apk-info` [PROVEN, 2026-09-25]
+- [x] Containerized Cryptographic AAPT & APKSigner v2 Verification: Upgraded Gate G13 to verify `package: name='dev.spaas.node'`, `sdkVersion: 29`, `targetSdkVersion: 34`, and APK Signature Scheme v2 validity using containerized Android build-tools [PROVEN, 2026-09-25]
+- [x] Physical Android Hardware Acceptance Harness: Developed standalone `scripts/physical-android-acceptance.ps1` probing ADB, validating APK compatibility, testing pairing, and generating structured `physical-android-acceptance-report.json` with strict `HARDWARE-REQUIRED` classification when physical phone is absent [PROVEN, 2026-09-25]
+- [x] 8-Subtab Device & Fleet Operational Management Console: Implemented Overview, Compute, Power/Thermal, Network, Security, Jobs, Earnings, and Diagnostics & Controls with live actions (Rename, Pause/Resume, Drain, Requalify, Revoke, Remove) and policy enforcement (CPU %, RAM, battery cutoff, charging-only, Wi-Fi-only) [PROVEN, 2026-09-25]
+- [x] REST Node Management Endpoints: Added `POST /api/v1/nodes/:id/rename`, `POST /api/v1/nodes/:id/state`, `POST /api/v1/nodes/:id/policy`, and `DELETE /api/v1/nodes/:id` with comprehensive unit tests [PROVEN, 2026-09-25]
+- [x] 6-Subtab Job Experience & 11-Step Lifecycle Timeline: Implemented 6 subtabs, 11-step visual state track, strict evidence badges (`SIMULATED`, `EMULATOR`, `PHYSICAL`), and transparent deterministic TEST CREDIT settlement formula breakdown [PROVEN, 2026-09-25]
+- [x] Standalone Desktop Worker Runner (`dist/bin/spaas-desktop-worker.ps1`): Pre-packaged PowerShell worker script enabling immediate compute participation on Windows/Linux host machines with a one-line command (`irm http://127.0.0.1:8080/downloads/spaas-desktop-worker.ps1 | iex`) without local Rust/Cargo toolchains [PROVEN, 2026-09-25]
+- [x] Multi-Device Fleet Enrollment: Added Fleet Group dropdown (`Phones`, `Desktops`, `Emulators`, `Trusted`, `Custom`) and `[➕ Enroll Another Device]` button in Add Device modal for rapid multi-device onboarding [PROVEN, 2026-09-25]
+
+
 
 

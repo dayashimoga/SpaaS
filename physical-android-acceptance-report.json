@@ -1,0 +1,9 @@
+{
+    "reason":  "No physical Android smartphone connected via USB/Wi-Fi ADB and no active KVM emulator running on host. APK and WASM runtime engine are fully implemented and verified via unit tests.",
+    "timestamp":  "2026-09-25T18:49:47.3649351+05:30",
+    "apk_sha256":  "D54A25391A2822785EFF7FDB15151B2EEE275611B839D0F03F4ED8906C0E2955",
+    "devices_attached":  0,
+    "apk_size_bytes":  23125348,
+    "apk_path":  "dist/bin/SPaaS-Node-v0.1.0.apk",
+    "classification":  "HARDWARE-REQUIRED"
+}
