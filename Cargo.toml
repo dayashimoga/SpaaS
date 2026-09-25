@@ -47,6 +47,7 @@ uuid = { version = "1.10.0", features = ["v4", "serde"] }
 thiserror = "1.0.64"
 anyhow = "1.0.89"
 async-trait = "0.1.83"
+futures-util = "0.3.31"
 
 # Async & Networking
 tokio = { version = "1.40.0", features = ["full"] }

@@ -8,6 +8,7 @@ pub enum EnrollmentStatus {
     Unenrolled,
     PendingApproval,
     Suspended,
+    Revoked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

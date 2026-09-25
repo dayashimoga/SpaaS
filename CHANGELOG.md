@@ -57,3 +57,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Forensic production certification runner hardening in `scripts/acceptance.ps1` and `scripts/acceptance` with strict classification enforcement (16 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED).
 - Fixed workspace-wide rustfmt formatting and resolved all Clippy linter warnings across all crates. Granted Git executable permissions (chmod +x) to all scripts, eliminated subshell command-not-found issues with auto-detected cargo wrappers, and hardened process teardown (pkill -x) for CI reliability.
 
+## [0.1.0-prod.3] - 2026-09-25
+
+### Added
+- Authoritative health and connectivity state engine across the Web Management Console, API Gateway, and Control Plane, eliminating contradictory "HEALTHY" / "Disconnected" banners with authoritative connection status indicators and dynamic fallback.
+- Smartphone-first onboarding experience with `+ Add Compute Device` modal, featuring single-use 6-character alphanumeric pairing tokens (`SP-XXXX`), QR code payloads, direct Android APK downloads (`/app-debug.apk`), terminal registration commands, and manual device revocation (`DELETE /api/v1/nodes/:id/revoke`).
+- Real Android Node worker client architecture (`apps/android-node/app/src/main/java/dev/spaas/node/service/ComputeWorkerClient.kt`) with token pairing, continuous HTTP heartbeats, background job polling, sealed `JobResult` generation, and Jetpack Compose pairing UI card with cleartext traffic enabled for emulators.
+- End-to-end workload submission lifecycle: Web console Form & YAML submission automatically signs manifests with Ed25519; reconciler continuously executes jobs on simulated nodes, transitions through `Running` -> `Verifying` -> `Completed`, generates SHA-256 digests and Ed25519 signatures, commits state transitions to WAL, settles dual-entry metering credits, and broadcasts real-time SSE lifecycle events.
+- Instant Local Demo Cluster mode (`/api/v1/demo/start-cluster` and `Start Local Demo Cluster` CTA), bootstrapping 4 heterogeneous nodes (Pixel 8, Galaxy S24, Edge Worker, Tab S9) with automated reconciler heartbeat maintenance to prevent false timeouts.
+- Complete Web Console UI/UX overhaul organized into 6 primary navigation tabs (`Overview`, `Devices`, `Workloads`, `Jobs`, `Usage`, `Advanced`), with empirical Qualification Profile embedded inside Device Details (never showing fake default PASSED), unified Jobs view with sub-tabs, and bidirectional Form + YAML workload studio.
+- Rebuilt Behavioral Production Acceptance Gate Runner (`scripts/acceptance.ps1` and `scripts/acceptance`) implementing all 21 production gates (G01–G21), recording commands, exit codes, durations, artifact hashes, and strictly enforcing classifications (19 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED).
+
+

@@ -7,4 +7,6 @@ pkill -f "spaas-control-plane" || true
 pkill -f "spaas-gateway" || true
 pkill -f "spaas-node-simulator" || true
 pkill -f "spaas-scheduler-daemon" || true
+pkill -f "spaas-cli" || true
+pkill -f "spaas" || true
 echo ">>> SPaaS Environment stopped successfully."

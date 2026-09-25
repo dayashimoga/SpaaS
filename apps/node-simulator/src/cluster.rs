@@ -105,7 +105,8 @@ impl SimulatorCluster {
         let start_time = tokio::time::Instant::now();
         let client = reqwest::Client::new();
 
-        while start_time.elapsed() < duration {
+        let run_forever = duration.as_secs() == 0;
+        while run_forever || start_time.elapsed() < duration {
             for (idx, agent_lock) in self.agents.iter().enumerate() {
                 let mut agent = agent_lock.write().await;
                 let is_adversarial = self.adversarial_flags[idx];

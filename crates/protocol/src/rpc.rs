@@ -117,6 +117,15 @@ pub struct SubmitJobResultResponse {
     pub credits_earned: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SubsystemHealth {
+    pub gateway: String,
+    pub control_plane: String,
+    pub scheduler: String,
+    pub persistence: String,
+    pub worker_channel: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemHealthResponse {
     pub status: String,
@@ -130,6 +139,8 @@ pub struct SystemHealthResponse {
     pub failed_jobs: u64,
     pub average_scheduling_latency_ms: f64,
     pub uptime_secs: u64,
+    #[serde(default)]
+    pub subsystems: Option<SubsystemHealth>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,6 +153,54 @@ pub struct ListNodesResponse {
 pub struct ListJobsResponse {
     pub jobs: Vec<JobRecord>,
     pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CreatePairingTokenRequest {
+    pub device_type: Option<crate::node::NodeDeviceType>,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreatePairingTokenResponse {
+    pub pairing_code: String,
+    pub pairing_token: String,
+    pub expires_at_ms: i64,
+    pub server_url: String,
+    pub qr_payload: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairDeviceRequest {
+    pub pairing_code: String,
+    pub device_name: String,
+    pub device_type: crate::node::NodeDeviceType,
+    pub public_key: String,
+    pub capabilities: NodeHardwareCapabilities,
+    pub initial_telemetry: NodeTelemetry,
+    pub initial_policy: ProviderPolicy,
+    pub enrollment_signature: String,
+    pub timestamp_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RevokeNodeRequest {
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RevokeNodeResponse {
+    pub node_id: Uuid,
+    pub revoked: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartDemoClusterResponse {
+    pub success: bool,
+    pub simulated_nodes_added: usize,
+    pub desktop_nodes_added: usize,
+    pub total_nodes: usize,
 }
 
 #[cfg(test)]
@@ -297,8 +356,25 @@ mod tests {
             failed_jobs: 2,
             average_scheduling_latency_ms: 4.5,
             uptime_secs: 3600,
+            subsystems: Some(SubsystemHealth {
+                gateway: "HEALTHY".into(),
+                control_plane: "HEALTHY".into(),
+                scheduler: "HEALTHY".into(),
+                persistence: "HEALTHY".into(),
+                worker_channel: "HEALTHY".into(),
+            }),
         };
         assert!(serde_json::to_string(&health).unwrap().contains("HEALTHY"));
+
+        let _pair_req = CreatePairingTokenRequest::default();
+        let pair_resp = CreatePairingTokenResponse {
+            pairing_code: "SP-8492".into(),
+            pairing_token: "tok-uuid".into(),
+            expires_at_ms: 600000,
+            server_url: "http://127.0.0.1:8080".into(),
+            qr_payload: "spaas://pair?code=SP-8492".into(),
+        };
+        assert!(serde_json::to_string(&pair_resp).unwrap().contains("SP-8492"));
 
         let list_nodes = ListNodesResponse {
             nodes: vec![],

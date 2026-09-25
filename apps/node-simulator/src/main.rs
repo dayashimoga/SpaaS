@@ -41,7 +41,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         " Adversarial Node Ratio:  {:.1}%",
         args.adversarial_ratio * 100.0
     );
-    info!(" Simulation Run Duration: {}s", args.duration_secs);
+    if args.duration_secs == 0 {
+        info!(" Simulation Run Duration: Indefinite (Continuous mode)");
+    } else {
+        info!(" Simulation Run Duration: {}s", args.duration_secs);
+    }
     info!("===========================================================");
 
     let cluster = SimulatorCluster::new(args.control_plane_url, args.nodes, args.adversarial_ratio);

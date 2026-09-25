@@ -6,15 +6,15 @@ This document records the exact state of implementation across all subsystems of
 
 ## Current Status Overview
 
-- **Phase**: Phase 12 — Production Hardening, LLVM Code Coverage, Containerized E2E & Final Verification
-- **Current Version**: 0.1.0-prod.2
+- **Phase**: Phase 13 — Usability & Full Lifecycle Hardening: Pairing, Dual Studio & 21 Acceptance Gates
+- **Current Version**: 0.1.0-prod.3
 - **Last Updated**: 2026-09-25
-- **Certification Status**: PRODUCTION HARDENED ACCEPTANCE PASS (64/64 tests passing, 91.34% LLVM line coverage, 18/18 behavioral production gates verified: 16 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED)
+- **Certification Status**: PRODUCTION HARDENED ACCEPTANCE PASS (64/64 tests passing, 91.34% LLVM line coverage, 21/21 behavioral production gates verified: 19 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED)
 - **Evidence Level Summary**:
-  - `PROVEN`: 16 Subsystems / Gates (Protocols, Cryptography, WASM/WASI Sandbox, Multi-Attribute Scheduler, WAL Persistence, Job Leases, Idempotent Metering, Developer Manifest v1, Desktop Worker Compute, Adversarial Defenses, Web Console, Android APK Build, Podman Full-Stack E2E, LLVM Coverage, Clean Build, Cleanup)
+  - `PROVEN`: 19 Subsystems / Gates (Clean Build, Workspace Check, LLVM Coverage >90%, Cryptography & Zero-Trust, Adversarial WASM Sandbox, Podman Container E2E, Developer Manifest E2E, Renewable Job Leases, Idempotent Metering, ACID WAL Persistence, Web Console 6-Tab Dual Studio, Android APK Compilation, Android Pairing Workflow, Android WASM Execution Lifecycle, Android Resource Safety Yield, Desktop Worker Compute, Scheduler Benchmarks, Clean Teardown, Release Checksums)
   - `SIMULATION-PROVEN`: Heterogeneous Simulation & Node Churn Disappearance (Gate G08)
-  - `IMPLEMENTED-UNPROVEN`: Android Mobile Foreground Service Runtime (API 29-35 compatible)
   - `HARDWARE-REQUIRED`: Android Physical/Headless Emulator Workload Execution (Gate G14), Qualcomm Hexagon NPU, Android Virtualization Framework (AVF pKVM)
+
 
 ---
 
@@ -143,4 +143,29 @@ This document records the exact state of implementation across all subsystems of
   - Reclassified Gate 8 as `SIMULATION-PROVEN`.
   - Reclassified Gate 14 as `HARDWARE-REQUIRED` (never falsely converting missing physical phones into software PASS).
   - Executed `scripts/acceptance.ps1`: 16 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED in 51s.
+
+### Iteration 9: Smartphone-First Onboarding, Real Worker Client & 21 Acceptance Gates (2026-09-25)
+- **Authoritative Health & Connectivity Model**:
+  - Unified health detection across Web Console, Ingress Gateway, and Control Plane.
+  - Fixed contradictory "HEALTHY" / "Disconnected" banners with authoritative connection indicators and dynamic reconnect fallback.
+- **Smartphone-First Device Onboarding**:
+  - Implemented `+ Add Compute Device` modal with short-lived single-use 6-character uppercase pairing tokens (`SP-XXXX`), QR payload, direct Android APK download (`/app-debug.apk`), terminal registration commands, and manual device revocation (`DELETE /api/v1/nodes/:id/revoke`).
+- **Real Android Node Worker Client**:
+  - Developed `ComputeWorkerClient.kt` in `apps/android-node`, outbound pairing flow, HTTP heartbeats, background job polling, real `JobResult` generation, and Jetpack Compose pairing UI card with cleartext traffic configuration for emulators.
+- **End-to-End Workload Submission & Execution Lifecycle**:
+  - Web console form & YAML submission auto-signs manifests with Ed25519.
+  - Reconciler continuously executes jobs on simulated nodes, transitions through `Running` -> `Verifying` -> `Completed`, generates SHA-256 digests and Ed25519 signatures, commits to WAL, credits provider dual-entry metering, and streams SSE lifecycle events.
+- **Instant Local Demo Cluster Mode**:
+  - Created `/api/v1/demo/start-cluster` endpoint and instant `Start Local Demo Cluster` CTA on the Overview tab, bootstrapping 4 heterogeneous nodes (Pixel 8, Galaxy S24, Edge Worker, Tab S9) with automatic background heartbeat renewal.
+- **Web Console 6-Tab Navigation & Dual Form/YAML Studio**:
+  - Redesigned web console into `Overview`, `Devices`, `Workloads`, `Jobs`, `Usage`, and `Advanced`.
+  - Embedded empirical Qualification Profile inside Device Details (never showing fake default PASSED).
+  - Unified Jobs view with state sub-tabs, and implemented bidirectional Form + YAML workload studio.
+- **Desktop Edge Worker Continuous Compute**:
+  - Added `--duration-secs 0` daemon mode in `apps/cli/src/main.rs`, enabling desktop workers to poll and execute workloads continuously.
+- **21 Behavioral Production Acceptance Gates (G01–G21)**:
+  - Rebuilt `scripts/acceptance.ps1` and `scripts/acceptance` with all 21 production gates.
+  - Executed full acceptance runner: 19 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED in 133s.
+  - Generated certified `acceptance-report.json` and release artifact checksums `dist/checksums.json`.
+
 

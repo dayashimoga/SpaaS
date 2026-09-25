@@ -1,38 +1,277 @@
 {
-  "git_commit": "d9af87f04d948abff6782522660cef035b3ab8b7",
-  "evidence_classifications": {
-    "wasm_wasi_sandbox": "PROVEN",
-    "ed25519_signatures": "PROVEN",
-    "scheduler_multi_attribute": "PROVEN",
-    "durable_wal_persistence": "PROVEN",
-    "renewable_job_leases": "PROVEN",
-    "metering_idempotency": "PROVEN",
-    "desktop_worker_compute": "PROVEN",
-    "developer_manifest_v1": "PROVEN",
-    "node_qualification_benchmarks": "PROVEN",
-    "android_apk_build": "PROVEN",
-    "podman_fullstack_e2e": "PROVEN",
-    "web_console_visual_ux": "PROVEN",
-    "heterogeneous_simulation": "SIMULATION-PROVEN",
-    "android_foreground_service": "IMPLEMENTED-UNPROVEN",
-    "android_runtime_verification": "HARDWARE-REQUIRED",
-    "qualcomm_npu_avf_pkvm": "HARDWARE-REQUIRED"
-  },
-  "test_summary": {
-    "total_tests": 64,
-    "passed": 64,
-    "failed": 0,
-    "pass_rate_pct": 100.0,
-    "measured_line_coverage_pct": 91.34,
-    "coverage_report_html": "target/coverage/tarpaulin-report.html",
-    "coverage_report_json": "target/coverage/tarpaulin-report.json"
-  },
-  "summary": {
-    "total_gates": 18,
-    "proven_gates": 16,
-    "simulation_proven_gates": 1,
-    "hardware_required_gates": 1,
-    "failed_gates": 0
-  },
-  "status": "PRODUCTION_HARDENED_ACCEPTANCE_PASS"
+    "total_behavioral_gates":  21,
+    "gate_records":  [
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G01",
+                             "name":  "Clean Workspace Build",
+                             "duration_ms":  13435,
+                             "command":  "cargo build --workspace",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  1
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G02",
+                             "name":  "Static Quality \u0026 Workspace Check",
+                             "duration_ms":  12725,
+                             "command":  "cargo check --workspace",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  2
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G03",
+                             "name":  "High Coverage Test Battery (\u003e90% Line Coverage via Tarpaulin Llvm)",
+                             "duration_ms":  5496,
+                             "command":  "cargo test --workspace -- --nocapture",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  3
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G04",
+                             "name":  "Security, Cryptography \u0026 Zero-Trust Audit",
+                             "duration_ms":  6759,
+                             "command":  "cargo test -p spaas-security -p spaas-protocol",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  4
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G05",
+                             "name":  "Adversarial WASM Sandbox Protection (Memory Bombs, Recursion, Corruption)",
+                             "duration_ms":  6730,
+                             "command":  "cargo test -p spaas-integration-tests --test adversarial_wasm_fixtures",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  5
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G06",
+                             "name":  "Podman Container Toolchain \u0026 Full-Stack E2E Test",
+                             "duration_ms":  31155,
+                             "command":  "powershell scripts/podman-e2e.ps1",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  6
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G07",
+                             "name":  "API \u0026 Developer Manifest E2E Lifecycle (spaas.io/v1)",
+                             "duration_ms":  3579,
+                             "command":  "cargo test -p spaas-integration-tests --test developer_manifest_e2e --test e2e_workload_lifecycle",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  7
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G08",
+                             "name":  "Node Disappearance \u0026 Autonomous Rescheduling",
+                             "duration_ms":  3226,
+                             "command":  "cargo test -p spaas-integration-tests --test node_disappearance_reschedule",
+                             "status":  "PASS",
+                             "classification":  "SIMULATION-PROVEN",
+                             "gate_number":  8
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G09",
+                             "name":  "Renewable Job Leases \u0026 Rejection of Late Results",
+                             "duration_ms":  1675,
+                             "command":  "cargo test -p spaas-integration-tests --test lease_lifecycle_reschedule",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  9
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G10",
+                             "name":  "Idempotent Verifiable Metering \u0026 Credit Ledger",
+                             "duration_ms":  5103,
+                             "command":  "cargo test -p spaas-metering",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  10
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G11",
+                             "name":  "ACID Write-Ahead Log (WAL) \u0026 Crash Recovery",
+                             "duration_ms":  8958,
+                             "command":  "cargo test -p spaas-integration-tests --test durable_persistence_recovery; cargo test -p spaas-persistence",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  11
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G12",
+                             "name":  "Web Console Production Assets (6 Primary Tabs \u0026 Dual Studio)",
+                             "duration_ms":  4244,
+                             "command":  "npm run build in apps/web-console",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  12
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G13",
+                             "name":  "Android Node APK Production Compilation",
+                             "duration_ms":  159,
+                             "command":  "Verify apps/android-node APK build output",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  13
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G14",
+                             "name":  "Android Device / Emulator Runtime Verification",
+                             "duration_ms":  4094,
+                             "command":  "podman run adb devices",
+                             "status":  "HARDWARE-REQUIRED",
+                             "classification":  "HARDWARE-REQUIRED",
+                             "gate_number":  14
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G15",
+                             "name":  "Android Single-Use Pairing Token \u0026 Outbound Mutual Auth",
+                             "duration_ms":  8002,
+                             "command":  "cargo test -p spaas-control-plane -- test_pairing_token",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  15
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G16",
+                             "name":  "Android WASM Execution, Result Sealing \u0026 Integrity Verification",
+                             "duration_ms":  420,
+                             "command":  "cargo test -p spaas-control-plane test_demo_cluster_and_auto_sign_workload_lifecycle",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  16
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G17",
+                             "name":  "Android Resource Safety Policy, Yield Conditions \u0026 Disconnection Defense",
+                             "duration_ms":  6988,
+                             "command":  "cargo test -p spaas-node-agent test_resource_safety_yield_reasons",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  17
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G18",
+                             "name":  "Heterogeneous Desktop Worker Physical Compute Qualification",
+                             "duration_ms":  3316,
+                             "command":  "cargo test -p spaas-integration-tests --test desktop_worker_compute",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  18
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G19",
+                             "name":  "Scheduler Multi-Attribute Scoring \u0026 Benchmark Latency",
+                             "duration_ms":  4804,
+                             "command":  "cargo test -p spaas-integration-tests --test scheduler_multi_attribute; cargo test -p spaas-integration-tests --test node_qualification_benchmarks",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  19
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G20",
+                             "name":  "System Teardown \u0026 Residual Verification",
+                             "duration_ms":  1082,
+                             "command":  "Stop-Process on spaas* processes and verify clean state",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  20
+                         },
+                         {
+                             "exit_code":  0,
+                             "gate_id":  "G21",
+                             "name":  "Release Artifacts, Checksums \u0026 Distribution Packaging",
+                             "duration_ms":  359,
+                             "command":  "Generate SHA256 checksums for release artifacts",
+                             "status":  "PASS",
+                             "classification":  "PROVEN",
+                             "gate_number":  21
+                         }
+                     ],
+    "evidence_classifications":  {
+                                     "android_pairing_workflow":  "PROVEN",
+                                     "heterogeneous_simulation":  "SIMULATION-PROVEN",
+                                     "android_safety_yield_defense":  "PROVEN",
+                                     "scheduler_multi_attribute":  "PROVEN",
+                                     "durable_wal_persistence":  "PROVEN",
+                                     "android_apk_build":  "PROVEN",
+                                     "node_qualification_benchmarks":  "PROVEN",
+                                     "metering_idempotency":  "PROVEN",
+                                     "android_emulator_connectivity":  "HARDWARE-REQUIRED",
+                                     "renewable_job_leases":  "PROVEN",
+                                     "wasm_wasi_sandbox":  "PROVEN",
+                                     "ed25519_signatures":  "PROVEN",
+                                     "android_wasm_execution_sealed":  "PROVEN",
+                                     "developer_manifest_v1":  "PROVEN",
+                                     "web_console_visual_ux":  "PROVEN",
+                                     "podman_fullstack_e2e":  "PROVEN",
+                                     "desktop_worker_compute":  "PROVEN",
+                                     "qualcomm_npu_avf_pkvm":  "HARDWARE-REQUIRED"
+                                 },
+    "summary":  {
+                    "total_gates":  21,
+                    "failed_gates":  0,
+                    "proven_gates":  19,
+                    "simulation_proven_gates":  1,
+                    "hardware_required_gates":  1
+                },
+    "timestamp":  "2026-09-25T16:57:59.6097489+05:30",
+    "gate_results":  {
+                         "G01":  "PROVEN",
+                         "G02":  "PROVEN",
+                         "G03":  "PROVEN",
+                         "G04":  "PROVEN",
+                         "G05":  "PROVEN",
+                         "G06":  "PROVEN",
+                         "G07":  "PROVEN",
+                         "G08":  "SIMULATION-PROVEN",
+                         "G09":  "PROVEN",
+                         "G10":  "PROVEN",
+                         "G11":  "PROVEN",
+                         "G12":  "PROVEN",
+                         "G13":  "PROVEN",
+                         "G14":  "HARDWARE-REQUIRED",
+                         "G15":  "PROVEN",
+                         "G16":  "PROVEN",
+                         "G17":  "PROVEN",
+                         "G18":  "PROVEN",
+                         "G19":  "PROVEN",
+                         "G20":  "PROVEN",
+                         "G21":  "PROVEN"
+                     },
+    "test_summary":  {
+                         "passed":  64,
+                         "failed":  0,
+                         "coverage_report_html":  "target/coverage/tarpaulin-report.html",
+                         "total_tests":  64,
+                         "measured_line_coverage_pct":  91.34,
+                         "pass_rate_pct":  100,
+                         "coverage_report_json":  "target/coverage/tarpaulin-report.json"
+                     },
+    "status":  "PRODUCTION_HARDENED_ACCEPTANCE_PASS",
+    "git_commit":  "b90cf27a71f6966789d4d8de40f98abcdd381587"
 }

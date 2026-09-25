@@ -14,6 +14,17 @@ use tokio::sync::RwLock;
 use tracing::info;
 use uuid::Uuid;
 
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub struct PairingTokenData {
+    pub pairing_code: String,
+    pub token: String,
+    pub created_at_ms: i64,
+    pub expires_at_ms: i64,
+    pub used: bool,
+    pub device_type: Option<spaas_protocol::node::NodeDeviceType>,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub storage: Arc<DurableStorage>,
@@ -27,6 +38,8 @@ pub struct AppState {
     pub metrics: Arc<MetricsRegistry>,
     pub server_keypair: Arc<KeyPair>,
     pub audit_log: Arc<RwLock<Vec<AuditRecord>>>,
+    pub pairing_tokens: Arc<RwLock<HashMap<String, PairingTokenData>>>,
+    pub event_bus: tokio::sync::broadcast::Sender<String>,
     pub started_at_ms: i64,
 }
 
@@ -62,6 +75,8 @@ impl AppState {
             );
         }
 
+        let (event_bus, _) = tokio::sync::broadcast::channel(2048);
+
         Self {
             storage,
             nodes: Arc::new(RwLock::new(recovered.nodes)),
@@ -74,8 +89,38 @@ impl AppState {
             metrics: Arc::new(MetricsRegistry::new()),
             server_keypair: Arc::new(KeyPair::generate()),
             audit_log: Arc::new(RwLock::new(recovered.audit_log)),
+            pairing_tokens: Arc::new(RwLock::new(HashMap::new())),
+            event_bus,
             started_at_ms: chrono::Utc::now().timestamp_millis(),
         }
+    }
+
+    pub fn broadcast_event(&self, event_type: &str, data: serde_json::Value) {
+        let payload = serde_json::json!({
+            "type": event_type,
+            "timestamp_ms": chrono::Utc::now().timestamp_millis(),
+            "data": data,
+        });
+        let _ = self.event_bus.send(payload.to_string());
+    }
+
+    pub async fn store_pairing_token(&self, token_data: PairingTokenData) {
+        let mut tokens = self.pairing_tokens.write().await;
+        tokens.insert(token_data.pairing_code.clone(), token_data);
+    }
+
+    pub async fn validate_and_consume_pairing_token(&self, code: &str) -> Result<PairingTokenData, String> {
+        let mut tokens = self.pairing_tokens.write().await;
+        let token = tokens.get_mut(code).ok_or_else(|| "Invalid pairing code".to_string())?;
+        let now = chrono::Utc::now().timestamp_millis();
+        if token.used {
+            return Err("Pairing code has already been used".to_string());
+        }
+        if now > token.expires_at_ms {
+            return Err("Pairing code has expired".to_string());
+        }
+        token.used = true;
+        Ok(token.clone())
     }
 
     pub async fn log_audit(&self, event_type: &str, entity_id: &str, details: &str) {
@@ -164,6 +209,46 @@ impl AppState {
             .storage
             .append_event(WalEvent::StoreArtifact { sha256, bytes })
             .await;
+    }
+
+    pub async fn revoke_node(&self, node_id: Uuid, reason: &str) -> Result<NodeRecord, String> {
+        let (updated, active_job_leases) = {
+            let mut nodes = self.nodes.write().await;
+            let node = nodes.get_mut(&node_id).ok_or_else(|| "Node not found".to_string())?;
+            node.enrollment = spaas_protocol::node::EnrollmentStatus::Revoked;
+            node.state = spaas_protocol::node::NodeState::Offline;
+
+            // Find any jobs with leases assigned to this revoked node
+            let jobs = self.jobs.read().await;
+            let mut leases_to_revoke = Vec::new();
+            for (job_id, job) in jobs.iter() {
+                if let Some(ref lease) = job.current_lease {
+                    if lease.node_id == node_id {
+                        leases_to_revoke.push((*job_id, lease.lease_id));
+                    }
+                }
+            }
+            (node.clone(), leases_to_revoke)
+        };
+
+        for (job_id, lease_id) in active_job_leases {
+            self.revoke_lease(job_id, lease_id).await;
+        }
+
+        let _ = self
+            .storage
+            .append_event(WalEvent::UpsertNode {
+                node: updated.clone(),
+            })
+            .await;
+        self.log_audit("NODE_REVOKED", &node_id.to_string(), reason)
+            .await;
+        self.broadcast_event(
+            "NODE_REVOKED",
+            serde_json::json!({ "node_id": node_id, "reason": reason }),
+        );
+
+        Ok(updated)
     }
 }
 

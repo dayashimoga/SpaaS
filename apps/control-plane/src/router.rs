@@ -5,6 +5,7 @@ use axum::{
     Router,
 };
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::ServeDir;
 
 pub fn build_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
@@ -21,18 +22,25 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/nodes/:node_id/qualification",
             post(qualify_node).get(get_node_qualification),
         )
+        .route("/api/v1/nodes/:node_id/revoke", post(revoke_node))
         .route("/api/v1/nodes/results", post(submit_result))
         .route("/api/v1/nodes", get(list_nodes))
+        // Device Pairing & Demo
+        .route("/api/v1/devices/pairing-token", post(create_pairing_token))
+        .route("/api/v1/devices/pair", post(pair_device))
+        .route("/api/v1/demo/start-cluster", post(start_demo_cluster))
         // Job Management & Leases
         .route("/api/v1/jobs", post(submit_job).get(list_jobs))
         .route("/api/v1/jobs/:job_id", get(get_job))
         .route("/api/v1/jobs/:job_id/lease/renew", post(renew_job_lease))
         .route("/api/v1/jobs/:job_id/cancel", post(cancel_job))
-        // System Observability & Ledger
+        // System Observability, Live Events & Ledger
         .route("/api/v1/system/health", get(get_health))
+        .route("/api/v1/events", get(get_events))
         .route("/api/v1/metering", get(get_metering))
         .route("/api/v1/audit", get(get_audit_log))
         .route("/metrics", get(get_metrics))
+        .fallback_service(ServeDir::new("apps/web-console/dist"))
         .layer(cors)
         .with_state(state)
 }

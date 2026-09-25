@@ -8,12 +8,14 @@ if [ "$CONTAINERIZED" = "--containerized" ] || [ "$CONTAINERIZED" = "true" ]; th
     echo ">>> Starting via Podman Compose..."
     podman compose -f deploy/podman-compose.yml up -d --build
 else
-    echo ">>> Starting local services..."
+    echo ">>> Starting local services (Control Plane, Gateway, Desktop Worker, 3 Simulated Nodes)..."
     cargo run -p spaas-control-plane &
     cargo run -p spaas-gateway &
-    cargo run -p spaas-node-simulator -- --nodes 10 &
+    sleep 3
+    cargo run -p spaas-cli -- node worker --name "Desktop-Host-Worker-01" --duration-secs 0 &
+    cargo run -p spaas-node-simulator -- --nodes 3 --duration-secs 0 &
 fi
 
 echo ">>> SPaaS Control Plane: http://localhost:8080"
 echo ">>> SPaaS Ingress Gateway: http://localhost:8000"
-echo ">>> SPaaS Web Console:    http://localhost:3000"
+echo ">>> SPaaS Web Console:    http://localhost:8080"

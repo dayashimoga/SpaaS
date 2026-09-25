@@ -26,6 +26,7 @@ local.properties
 
 # Podman / Docker / Temp
 *.log
+data/
 scratch/
 tmp/
 temp/

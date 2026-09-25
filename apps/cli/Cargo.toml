@@ -9,6 +9,7 @@ license.workspace = true
 spaas-protocol = { workspace = true }
 spaas-security = { workspace = true }
 spaas-runtime = { workspace = true }
+spaas-node-agent = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }

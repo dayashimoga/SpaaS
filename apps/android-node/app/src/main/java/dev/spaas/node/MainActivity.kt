@@ -20,8 +20,12 @@ import androidx.compose.ui.unit.sp
 import dev.spaas.node.history.LocalJobHistoryRepository
 import dev.spaas.node.monitor.AndroidTelemetryMonitor
 import dev.spaas.node.monitor.DeviceTelemetryData
+import dev.spaas.node.policy.ProviderSafetyPolicy
 import dev.spaas.node.service.ComputeForegroundService
+import dev.spaas.node.service.ComputeWorkerClient
+import dev.spaas.node.service.PairResult
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -84,12 +88,17 @@ fun SpaasNodeDashboard(
     onPauseToggle: () -> Unit
 ) {
     var telemetry by remember { mutableStateOf<DeviceTelemetryData?>(null) }
-    var isEnrolled by remember { mutableStateOf(true) }
     var isRunning by remember { mutableStateOf(ComputeForegroundService.isRunning) }
     var isPaused by remember { mutableStateOf(ComputeForegroundService.isPaused) }
     var onlyWhileCharging by remember { mutableStateOf(true) }
     var onlyOnWifi by remember { mutableStateOf(true) }
     var minBatteryThreshold by remember { mutableFloatStateOf(40f) }
+
+    var pairingCodeInput by remember { mutableStateOf("") }
+    var serverUrlInput by remember { mutableStateOf(ComputeWorkerClient.serverBaseUrl) }
+    var pairingStatusMsg by remember { mutableStateOf<String?>(null) }
+    var isPairingLoading by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     // Live telemetry refresh loop
     LaunchedEffect(Unit) {
@@ -109,8 +118,60 @@ fun SpaasNodeDashboard(
     ) {
         item {
             HeaderSection(
-                isEnrolled = isEnrolled,
-                onEnrollToggle = { isEnrolled = it }
+                isEnrolled = ComputeWorkerClient.isPaired,
+                onEnrollToggle = { enrolled ->
+                    if (!enrolled) {
+                        ComputeWorkerClient.isPaired = false
+                        ComputeWorkerClient.pairedNodeId = null
+                    }
+                }
+            )
+        }
+
+        item {
+            PairingCard(
+                pairingCode = pairingCodeInput,
+                onPairingCodeChange = { pairingCodeInput = it },
+                serverUrl = serverUrlInput,
+                onServerUrlChange = { serverUrlInput = it },
+                isPaired = ComputeWorkerClient.isPaired,
+                pairedNodeId = ComputeWorkerClient.pairedNodeId,
+                statusMsg = pairingStatusMsg,
+                isLoading = isPairingLoading,
+                onPairClick = {
+                    coroutineScope.launch {
+                        isPairingLoading = true
+                        pairingStatusMsg = "Contacting SPaaS control plane..."
+                        val tel = telemetry ?: monitor.collectTelemetry()
+                        val pol = ProviderSafetyPolicy(
+                            onlyWhileCharging = onlyWhileCharging,
+                            onlyOnUnmeteredWifi = onlyOnWifi,
+                            minBatteryThresholdPct = minBatteryThreshold.toInt()
+                        )
+                        val res = ComputeWorkerClient.pairWithCode(
+                            baseUrl = serverUrlInput,
+                            pairingCode = pairingCodeInput,
+                            deviceName = android.os.Build.MODEL ?: "Android Smartphone",
+                            telemetry = tel,
+                            policy = pol
+                        )
+                        isPairingLoading = false
+                        when (res) {
+                            is PairResult.Success -> {
+                                pairingStatusMsg = "Paired successfully as ${res.nodeId}!"
+                                onStartService()
+                            }
+                            is PairResult.Failure -> {
+                                pairingStatusMsg = res.error
+                            }
+                        }
+                    }
+                },
+                onUnpairClick = {
+                    ComputeWorkerClient.isPaired = false
+                    ComputeWorkerClient.pairedNodeId = null
+                    pairingStatusMsg = "Device disconnected."
+                }
             )
         }
 
@@ -429,6 +490,139 @@ fun JobHistoryItem(entry: dev.spaas.node.history.LocalJobHistoryEntry) {
                 fontWeight = FontWeight.Bold,
                 fontSize = 12.sp
             )
+        }
+    }
+}
+
+@Composable
+fun PairingCard(
+    pairingCode: String,
+    onPairingCodeChange: (String) -> Unit,
+    serverUrl: String,
+    onServerUrlChange: (String) -> Unit,
+    isPaired: Boolean,
+    pairedNodeId: String?,
+    statusMsg: String?,
+    isLoading: Boolean,
+    onPairClick: () -> Unit,
+    onUnpairClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Cluster Enrollment & Pairing",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = Color.White
+                )
+                if (isPaired) {
+                    Surface(
+                        color = Color(0xFF2E7D32).copy(alpha = 0.3f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = "PAIRED",
+                            color = Color(0xFF81C784),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            if (!isPaired) {
+                Text(
+                    text = "Enter 6-char pairing code generated in Web Console (+ Add Compute Device):",
+                    fontSize = 12.sp,
+                    color = Color.Gray
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = pairingCode,
+                    onValueChange = onPairingCodeChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("e.g. SP-4932", color = Color.DarkGray) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF64B5F6),
+                        unfocusedBorderColor = Color.Gray
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Control Plane Endpoint URL:",
+                    fontSize = 12.sp,
+                    color = Color.Gray
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = serverUrl,
+                    onValueChange = onServerUrlChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF64B5F6),
+                        unfocusedBorderColor = Color.Gray
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = onPairClick,
+                    enabled = !isLoading && pairingCode.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0))
+                ) {
+                    Text(if (isLoading) "AUTHENTICATING..." else "PAIR DEVICE TO CLUSTER")
+                }
+            } else {
+                Text(
+                    text = "Active Node Identifier: ${pairedNodeId ?: "unknown"}",
+                    fontSize = 13.sp,
+                    color = Color(0xFF90CAF9),
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Endpoint: $serverUrl",
+                    fontSize = 11.sp,
+                    color = Color.Gray
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = onUnpairClick,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFE57373))
+                ) {
+                    Text("DISCONNECT / UNPAIR")
+                }
+            }
+
+            if (!statusMsg.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = statusMsg,
+                    fontSize = 12.sp,
+                    color = if (statusMsg.startsWith("Error") || statusMsg.startsWith("Pairing rejected")) Color(0xFFE57373) else Color(0xFF81C784)
+                )
+            }
         }
     }
 }

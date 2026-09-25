@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use console::style;
+use spaas_node_agent::NodeAgent;
 use spaas_protocol::job::JobRecord;
+use spaas_protocol::node::*;
 use spaas_protocol::rpc::*;
 use spaas_protocol::workload::*;
 use spaas_security::hash::sha256_hex;
@@ -60,6 +62,20 @@ enum Commands {
 enum NodeCommands {
     /// List all enrolled nodes and their current resource states
     List,
+    /// Starts a live local desktop compute worker that joins the fabric
+    Worker {
+        #[arg(long, default_value = "Desktop Compute Worker")]
+        name: String,
+        #[arg(long, default_value_t = 300)]
+        duration_secs: u64,
+    },
+    /// Pair this machine with the control plane using an enrollment code
+    Pair {
+        #[arg(long)]
+        code: String,
+        #[arg(long, default_value = "Paired Desktop Edge")]
+        name: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -185,6 +201,153 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .collect();
 
                 println!("{}", Table::new(rows));
+            }
+            NodeCommands::Worker { name, duration_secs } => {
+                println!("{}", style("===========================================================").cyan());
+                println!("{}", style(format!(" Starting SPaaS Desktop Worker: {}", name)).bold().green());
+                println!("{}", style(format!(" Target Control Plane:          {}", cli.api_url)).cyan());
+                println!("{}", style(format!(" Session Duration:              {} seconds", duration_secs)).cyan());
+                println!("{}", style("===========================================================").cyan());
+
+                let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) as u32;
+                let caps = NodeHardwareCapabilities {
+                    architecture: std::env::consts::ARCH.to_string(),
+                    cpu_cores: cpus,
+                    total_ram_mb: 16384,
+                    total_storage_mb: 65536,
+                    device_model: name.clone(),
+                    os_name: std::env::consts::OS.to_string(),
+                    os_version: "Host".into(),
+                    has_npu: false,
+                    has_gpu_vulkan: true,
+                    agent_version: "0.1.0".into(),
+                    supported_runtimes: vec!["wasm_wasi".into()],
+                };
+
+                let mut policy = ProviderPolicy::default();
+                policy.only_while_charging = false; // Desktops don't require battery charger check
+
+                let mut agent = NodeAgent::new(caps.clone(), policy.clone(), false);
+                println!("Running empirical microbenchmark qualification...");
+                let qual = agent.run_qualification().await.map_err(|e| format!("Qualification failed: {e}"))?;
+                println!("  Measured Fuel MIPS:  {}", style(format!("{:.1}", qual.measured_fuel_mips)).green());
+                println!("  Linear Memory Pages: {}", qual.measured_memory_max_pages);
+
+                // Register with Control Plane
+                let reg_req = RegisterNodeRequest {
+                    public_key: agent.public_key_hex(),
+                    device_type: match std::env::consts::OS {
+                        "windows" => NodeDeviceType::WindowsDesktop,
+                        "macos" => NodeDeviceType::MacDesktop,
+                        _ => NodeDeviceType::LinuxDesktop,
+                    },
+                    capabilities: caps,
+                    initial_telemetry: agent.telemetry.clone(),
+                    initial_policy: policy,
+                    region: "local".into(),
+                    is_simulated: false,
+                    enrollment_signature: format!("worker_sig_{}", agent.node_id),
+                    timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                };
+
+                let reg_url = format!("{}/api/v1/nodes/register", cli.api_url);
+                let reg_resp = client.post(&reg_url).json(&reg_req).send().await?
+                    .json::<RegisterNodeResponse>().await?;
+                println!("{}", style(format!("Worker successfully enrolled! Node ID: {}", reg_resp.node_id)).bold().green());
+
+                // Post qualification
+                let qual_url = format!("{}/api/v1/nodes/{}/qualification", cli.api_url, agent.node_id);
+                let qual_req = serde_json::json!({ "profile": qual });
+                let _ = client.post(&qual_url).json(&qual_req).send().await;
+
+                // Start execution loop
+                let start_time = tokio::time::Instant::now();
+                let duration = std::time::Duration::from_secs(duration_secs);
+
+                println!("{}", style("Worker is ready and listening for compute jobs...").cyan());
+
+                let run_forever = duration_secs == 0;
+                while run_forever || start_time.elapsed() < duration {
+                    // Send Heartbeat
+                    let hb_req = HeartbeatRequest {
+                        node_id: agent.node_id,
+                        telemetry: agent.telemetry.clone(),
+                        policy: agent.policy.clone(),
+                        timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                        signature: "hb_sig".into(),
+                    };
+                    let hb_url = format!("{}/api/v1/nodes/heartbeat", cli.api_url);
+                    let _ = client.post(&hb_url).json(&hb_req).send().await;
+
+                    // Poll for work
+                    let poll_url = format!("{}/api/v1/nodes/{}/poll", cli.api_url, agent.node_id);
+                    if let Ok(resp) = client.get(&poll_url).send().await {
+                        if let Ok(poll_res) = resp.json::<PollJobResponse>().await {
+                            if let Some(dispatch) = poll_res.job {
+                                println!("{}", style(format!(">>> Received job dispatch: {} ({})", dispatch.job_id, dispatch.spec.name)).bold().yellow());
+                                let lease_id = dispatch.lease_id;
+                                let exec_res = agent.execute_dispatched_job(dispatch).await;
+                                if let Ok(job_result) = exec_res {
+                                    println!("  Execution completed with exit code {}", style(job_result.exit_code).green());
+                                    println!("  Fuel Consumed: {}", style(job_result.fuel_consumed).cyan());
+                                    if !job_result.stdout.is_empty() {
+                                        println!("  STDOUT: {}", style(&job_result.stdout).italic());
+                                    }
+
+                                    let res_url = format!("{}/api/v1/nodes/results", cli.api_url);
+                                    let submit_req = SubmitJobResultRequest {
+                                        node_id: agent.node_id,
+                                        lease_id: Some(lease_id),
+                                        result: job_result,
+                                    };
+                                    if let Ok(res_resp) = client.post(&res_url).json(&submit_req).send().await {
+                                        if let Ok(data) = res_resp.json::<SubmitJobResultResponse>().await {
+                                            println!("{}", style(format!("  Result verified! Credits Earned: +{} CR", data.credits_earned)).bold().green());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                }
+
+                println!("{}", style("Worker session finished.").cyan());
+            }
+            NodeCommands::Pair { code, name } => {
+                println!("{}", style("Pairing device with SPaaS Control Plane...").bold().cyan());
+                println!("  Pairing Code: {}", style(&code).yellow());
+                println!("  Device Name:  {}", style(&name).cyan());
+
+                let dev_key = KeyPair::generate();
+                let pair_req = PairDeviceRequest {
+                    pairing_code: code,
+                    device_name: name,
+                    device_type: match std::env::consts::OS {
+                        "windows" => NodeDeviceType::WindowsDesktop,
+                        "macos" => NodeDeviceType::MacDesktop,
+                        _ => NodeDeviceType::LinuxDesktop,
+                    },
+                    public_key: dev_key.public_key_hex(),
+                    capabilities: NodeHardwareCapabilities::default(),
+                    initial_telemetry: NodeTelemetry::default(),
+                    initial_policy: ProviderPolicy::default(),
+                    enrollment_signature: "pair_sig".into(),
+                    timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                };
+
+                let url = format!("{}/api/v1/devices/pair", cli.api_url);
+                let resp = client.post(&url).json(&pair_req).send().await?;
+                if resp.status().is_success() {
+                    let data = resp.json::<RegisterNodeResponse>().await?;
+                    println!("{}", style("Pairing successful!").bold().green());
+                    println!("  Node ID:    {}", style(data.node_id).green());
+                    println!("  Auth Token: {}", style(&data.auth_token[..16]).dim());
+                } else {
+                    let err = resp.text().await.unwrap_or_else(|_| "Unknown error".into());
+                    println!("{}", style(format!("Pairing failed: {}", err)).bold().red());
+                }
             }
         },
         Commands::Workload { cmd } => match cmd {

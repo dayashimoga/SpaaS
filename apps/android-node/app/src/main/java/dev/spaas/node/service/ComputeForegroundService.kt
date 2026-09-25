@@ -97,12 +97,28 @@ class ComputeForegroundService : Service() {
                     }
                     updateNotification(reasonLabel)
                 } else if (!isPaused) {
+                    // Send outbound heartbeat
+                    if (ComputeWorkerClient.isPaired) {
+                        ComputeWorkerClient.sendHeartbeat(telemetry, safetyPolicy)
+
+                        // Poll and execute job
+                        val executed = ComputeWorkerClient.pollAndExecuteJob()
+                        if (executed != null) {
+                            currentActiveJob = executed.workloadName
+                            currentNodeState = "ACTIVE"
+                            updateNotification("ACTIVE: Executed ${executed.workloadName}")
+                            delay(1000)
+                            currentActiveJob = null
+                        }
+                    }
+
                     if (currentActiveJob != null) {
                         currentNodeState = "ACTIVE"
                         updateNotification("ACTIVE: Executing $currentActiveJob (Battery: ${telemetry.batteryPct}%)")
                     } else {
                         currentNodeState = "IDLE"
-                        updateNotification("IDLE - Monitoring for work (Battery: ${telemetry.batteryPct}%)")
+                        val pairStatus = if (ComputeWorkerClient.isPaired) "Paired" else "Standby"
+                        updateNotification("IDLE ($pairStatus) - Monitoring for work (Battery: ${telemetry.batteryPct}%)")
                     }
                 }
 

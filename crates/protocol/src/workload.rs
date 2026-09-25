@@ -128,10 +128,14 @@ pub enum VerificationPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 #[repr(u8)]
 pub enum WorkloadPriority {
+    #[serde(rename = "low", alias = "Low")]
     Low = 0,
     #[default]
+    #[serde(rename = "normal", alias = "Normal")]
     Normal = 10,
+    #[serde(rename = "high", alias = "High")]
     High = 20,
+    #[serde(rename = "critical", alias = "Critical")]
     Critical = 30,
 }
 

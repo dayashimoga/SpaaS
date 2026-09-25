@@ -55,6 +55,7 @@ impl JobState {
             (JobState::Scheduled, JobState::Cancelled) => true,
 
             (JobState::Running, JobState::Verifying) => true,
+            (JobState::Running, JobState::Completed) => true,
             (JobState::Running, JobState::Retrying) => true,
             (JobState::Running, JobState::TimedOut) => true,
             (JobState::Running, JobState::Failed) => true,
