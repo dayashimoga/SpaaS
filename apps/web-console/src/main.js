@@ -475,8 +475,7 @@ function initNavigation() {
   const btnAlertConfig = document.getElementById('btn-alert-config');
   if (btnAlertConfig) {
     btnAlertConfig.addEventListener('click', () => {
-      switchTab('advanced');
-      switchAdvTab('settings');
+      openConnectGuideModal();
     });
   }
 
@@ -660,12 +659,15 @@ async function runDiagnostics() {
     setConnectionState('OPERATIONAL');
   } catch (err) {
     const cpLatency = Math.round(performance.now() - cpStart);
+    const isHttpsMixedContent = window.location.protocol === 'https:' && (API_BASE.startsWith('http://127.0.0.1') || API_BASE.startsWith('http://localhost') || API_BASE.startsWith('http://'));
     if (diagBadgeCp) {
       diagBadgeCp.className = 'status-badge status-error';
       diagBadgeCp.textContent = '✗ UNREACHABLE';
       diagLatCp.textContent = `${cpLatency} ms`;
       diagTimeCp.textContent = nowStr;
-      diagMsgCp.textContent = `Connection refused at ${API_BASE || 'http://127.0.0.1:8080'} (${err.message})`;
+      diagMsgCp.textContent = isHttpsMixedContent
+        ? `Browser Mixed Content: HTTPS page blocked unencrypted fetch to ${API_BASE}`
+        : `Connection refused at ${API_BASE || 'http://127.0.0.1:8080'} (${err.message})`;
     }
 
     if (diagBadgeSched) {
@@ -684,7 +686,11 @@ async function runDiagnostics() {
       diagMsgPersist.textContent = 'Upstream Control Plane unreachable';
     }
 
-    setConnectionState('DISCONNECTED', `Control Plane unavailable at ${API_BASE} (${err.message}) — workload submission disabled`);
+    const reason = isHttpsMixedContent
+      ? `🔒 HTTPS Mixed-Content Block: Cloudflare Pages (HTTPS) cannot reach unencrypted ${API_BASE} directly. Click "Connect Control Plane" for quick solutions.`
+      : `Control Plane unavailable at ${API_BASE} (${err.message}) — workload submission disabled`;
+
+    setConnectionState('DISCONNECTED', reason);
   }
 
   // 4. SSE Check
@@ -959,7 +965,11 @@ async function fetchSystemHealth() {
       if (workerChanMetric) workerChanMetric.textContent = sub.worker_channel;
     }
   } catch (err) {
-    setConnectionState('DISCONNECTED', `Control Plane unavailable at ${API_BASE} (${err.message}) — workload submission disabled`);
+    const isHttpsMixedContent = window.location.protocol === 'https:' && (API_BASE.startsWith('http://127.0.0.1') || API_BASE.startsWith('http://localhost') || API_BASE.startsWith('http://'));
+    const reason = isHttpsMixedContent
+      ? `🔒 HTTPS Mixed-Content Block: Cloudflare Pages (HTTPS) cannot reach unencrypted ${API_BASE} directly. Click "Connect Control Plane" to see quick solutions.`
+      : `Control Plane unavailable at ${API_BASE} (${err.message}) — workload submission disabled`;
+    setConnectionState('DISCONNECTED', reason);
   }
 }
 
@@ -2491,6 +2501,43 @@ function initModals() {
     });
   }
 
+  // Connect Control Plane Guide Modal Listeners
+  const modalConnectGuide = document.getElementById('modal-connect-guide');
+  const btnCloseConnectGuide = document.getElementById('modal-connect-guide-close');
+  const btnCloseConnectGuide2 = document.getElementById('btn-modal-connect-guide-close');
+  const btnSaveTunnel = document.getElementById('btn-modal-save-tunnel');
+  const inputTunnel = document.getElementById('input-modal-tunnel-url');
+  const btnOpenConnectGuide = document.getElementById('btn-open-connect-guide');
+
+  const closeConnectGuide = () => {
+    if (modalConnectGuide) modalConnectGuide.classList.add('hidden');
+  };
+
+  if (btnCloseConnectGuide) btnCloseConnectGuide.addEventListener('click', closeConnectGuide);
+  if (btnCloseConnectGuide2) btnCloseConnectGuide2.addEventListener('click', closeConnectGuide);
+
+  if (btnOpenConnectGuide) {
+    btnOpenConnectGuide.addEventListener('click', () => {
+      openConnectGuideModal();
+    });
+  }
+
+  if (btnSaveTunnel && inputTunnel) {
+    btnSaveTunnel.addEventListener('click', () => {
+      const url = inputTunnel.value.trim();
+      if (!url) return alert('Please enter an HTTPS endpoint URL');
+      localStorage.setItem('spaas_api_url', url);
+      API_BASE = url;
+      btnSaveTunnel.textContent = 'Connecting...';
+      const inputApi = document.getElementById('input-api-url');
+      if (inputApi) inputApi.value = url;
+      closeConnectGuide();
+      connectEventStream();
+      refreshAllData();
+      btnSaveTunnel.textContent = 'Connect';
+    });
+  }
+
   // Guided workflows buttons
   const btnWfAddDevice = document.getElementById('btn-wf-add-device');
   if (btnWfAddDevice) {
@@ -2533,6 +2580,17 @@ function initModals() {
       btnToggleExcludeSim.classList.toggle('btn-outline-cyan', !window.excludeSimulated);
       fetchNodes();
     });
+  }
+}
+
+function openConnectGuideModal() {
+  const modal = document.getElementById('modal-connect-guide');
+  if (modal) {
+    modal.classList.remove('hidden');
+    const input = document.getElementById('input-modal-tunnel-url');
+    if (input) {
+      input.value = API_BASE.startsWith('https://') ? API_BASE : '';
+    }
   }
 }
 

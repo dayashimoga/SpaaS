@@ -86,7 +86,7 @@
           <span id="system-alerts-text" class="alert-text">Control Plane unavailable — workload submission and live node management disabled</span>
           <div class="alert-actions">
             <button id="btn-alert-retry" class="btn btn-xs btn-primary">Retry Now</button>
-            <button id="btn-alert-config" class="btn btn-xs btn-secondary">Configure Endpoint</button>
+            <button id="btn-alert-config" class="btn btn-xs btn-secondary">Connect Control Plane</button>
           </div>
           <button id="btn-dismiss-alert" class="alert-dismiss" title="Dismiss Alert">&times;</button>
         </div>
@@ -1194,6 +1194,10 @@
                     <input type="text" id="input-api-url" class="input-control" value="http://127.0.0.1:8080" />
                     <button id="btn-save-api-url" class="btn btn-primary">Save &amp; Test</button>
                   </div>
+                  <div id="settings-mixed-content-hint" style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.5rem; line-height: 1.5;">
+                    <span class="text-amber">⚠️ Cloudflare Pages Notice:</span> When hosted over HTTPS, browsers block direct unencrypted calls to <code class="font-mono text-cyan">http://127.0.0.1:8080</code>.
+                    <button type="button" id="btn-open-connect-guide" class="btn btn-xs btn-outline-cyan" style="margin-left: 0.5rem;">Connection Guide</button>
+                  </div>
                 </div>
                 <div class="form-group">
                   <label for="select-refresh-interval">Telemetry Polling Interval</label>
@@ -1480,6 +1484,84 @@
             <button type="submit" id="btn-dispatch-modal" class="btn btn-primary">Sign &amp; Dispatch Workload</button>
           </div>
         </form>
+      </div>
+    <!-- Modal: Connect Control Plane Guide -->
+    <div id="modal-connect-guide" class="modal-overlay hidden">
+      <div class="modal-box modal-lg">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span style="font-size: 1.5rem;">🔌</span>
+            <div>
+              <h2 style="margin: 0; font-size: 1.25rem;">Connect Control Plane to Web Console</h2>
+              <span class="text-sub" style="font-size: 0.8rem;">Bridge your local SPaaS cluster or Cloudflare Tunnel to this console</span>
+            </div>
+          </div>
+          <button id="modal-connect-guide-close" class="modal-close-btn" title="Close">&times;</button>
+        </div>
+
+        <div class="modal-scroll-body" style="display: flex; flex-direction: column; gap: 1.25rem; padding: 1.25rem;">
+          <!-- Notice card -->
+          <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.3); border-radius: 8px; padding: 0.875rem 1rem;">
+            <div style="font-weight: 600; color: #38bdf8; margin-bottom: 0.25rem; display: flex; align-items: center; gap: 0.5rem;">
+              <span>ℹ️</span> Why does "Control Plane unavailable" show on Cloudflare Pages?
+            </div>
+            <p style="font-size: 0.85rem; color: #94a3b8; margin: 0; line-height: 1.5;">
+              This web console is served over <strong>HTTPS</strong> (<code class="font-mono text-cyan">pages.dev</code>). Web browsers strictly block HTTPS pages from making unencrypted requests to <code class="font-mono text-cyan">http://127.0.0.1:8080</code> (known as <em>Mixed Active Content</em>). Choose any of the quick options below to connect:
+            </p>
+          </div>
+
+          <!-- Option 1: Chrome Insecure Content Setting -->
+          <div style="background: var(--bg-card, #131b2e); border: 1px solid var(--border-color, #1e293b); border-radius: 8px; padding: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-weight: 600; color: #f8fafc; font-size: 0.95rem;">Option 1: Allow Insecure Content in Chrome / Edge (10 Seconds, Zero-Install)</span>
+              <span class="badge badge-proven" style="font-size: 0.7rem;">Fastest for Local Dev</span>
+            </div>
+            <ol style="font-size: 0.85rem; color: #cbd5e1; margin: 0; padding-left: 1.25rem; line-height: 1.6;">
+              <li>In your browser's address bar, click the <strong>Site Settings icon</strong> (the tune/slider icon to the left of the URL).</li>
+              <li>Click <strong>Site settings</strong>.</li>
+              <li>Scroll down to <strong>Insecure content</strong> and change it from <em>Block</em> to <strong>Allow</strong>.</li>
+              <li>Return here and reload the page. The console will immediately connect to your local <code class="font-mono text-cyan">http://127.0.0.1:8080</code>!</li>
+            </ol>
+          </div>
+
+          <!-- Option 2: Cloudflare Tunnel -->
+          <div style="background: var(--bg-card, #131b2e); border: 1px solid var(--border-color, #1e293b); border-radius: 8px; padding: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-weight: 600; color: #f8fafc; font-size: 0.95rem;">Option 2: Cloudflare Tunnel (HTTPS &mdash; Recommended for Real Phones &amp; Remote)</span>
+              <span class="badge badge-sim" style="font-size: 0.7rem; background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: rgba(16, 185, 129, 0.4);">Production Grade</span>
+            </div>
+            <p style="font-size: 0.85rem; color: #cbd5e1; margin: 0 0 0.75rem 0; line-height: 1.5;">
+              Create a free instant HTTPS tunnel to your local control plane using Cloudflare:
+            </p>
+            <div style="background: #0a0f1d; border: 1px solid #1e293b; border-radius: 6px; padding: 0.6rem 0.8rem; font-family: monospace; font-size: 0.8rem; color: #38bdf8; margin-bottom: 0.75rem;">
+              cloudflared tunnel --url http://127.0.0.1:8080
+            </div>
+            <p style="font-size: 0.8rem; color: #94a3b8; margin: 0 0 0.5rem 0;">
+              Paste the generated <code class="font-mono text-cyan">https://&lt;subdomain&gt;.trycloudflare.com</code> URL below:
+            </p>
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="text" id="input-modal-tunnel-url" class="input-control" placeholder="https://random-words.trycloudflare.com" style="flex: 1; font-family: monospace; font-size: 0.85rem;">
+              <button id="btn-modal-save-tunnel" class="btn btn-primary" style="white-space: nowrap;">Connect</button>
+            </div>
+          </div>
+
+          <!-- Option 3: Localhost Direct -->
+          <div style="background: var(--bg-card, #131b2e); border: 1px solid var(--border-color, #1e293b); border-radius: 8px; padding: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-weight: 600; color: #f8fafc; font-size: 0.95rem;">Option 3: Open Web Console Directly from Local Control Plane</span>
+            </div>
+            <p style="font-size: 0.85rem; color: #cbd5e1; margin: 0 0 0.5rem 0; line-height: 1.5;">
+              Your local SPaaS Control Plane binary already serves the compiled web console directly on port 8080 with zero mixed-content barriers:
+            </p>
+            <a href="http://127.0.0.1:8080" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; font-size: 0.85rem;">
+              <span>🌐 Open http://127.0.0.1:8080</span> &rarr;
+            </a>
+          </div>
+        </div>
+
+        <div class="modal-actions" style="border-top: 1px solid var(--border-color, #1e293b); padding: 0.875rem 1.25rem;">
+          <button type="button" id="btn-modal-connect-guide-close" class="btn btn-secondary">Close</button>
+        </div>
       </div>
     </div>
 
