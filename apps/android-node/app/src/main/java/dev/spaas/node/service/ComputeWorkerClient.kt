@@ -84,9 +84,10 @@ object ComputeWorkerClient {
         }
     }
 
-    fun persistIdentity(context: android.content.Context) {
+    fun persistIdentity(context: android.content.Context? = appContext) {
+        val ctx = context ?: appContext ?: return
         try {
-            val prefs = context.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE)
+            val prefs = ctx.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE)
             val kp = getOrCreateKeyPair()
             val privB64 = android.util.Base64.encodeToString(kp.private.encoded, android.util.Base64.NO_WRAP)
             val pubB64 = android.util.Base64.encodeToString(kp.public.encoded, android.util.Base64.NO_WRAP)
@@ -101,12 +102,15 @@ object ComputeWorkerClient {
         } catch (_: Throwable) {}
     }
 
-    fun clearIdentity(context: android.content.Context) {
+    fun clearIdentity(context: android.content.Context? = appContext) {
         pairedNodeId = null
         authToken = null
         isPaired = false
         connectionState = ConnectionState.DISCONNECTED
-        context.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE).edit().clear().apply()
+        val ctx = context ?: appContext
+        try {
+            ctx?.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE)?.edit()?.clear()?.apply()
+        } catch (_: Throwable) {}
     }
 
     fun getOrCreateKeyPair(): java.security.KeyPair {

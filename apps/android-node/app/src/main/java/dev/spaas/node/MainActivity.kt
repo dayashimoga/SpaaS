@@ -247,7 +247,7 @@ fun SpaasAppScaffold(
                         }
                     },
                     onUnpairClick = {
-                        ComputeWorkerClient.clearIdentity()
+                        ComputeWorkerClient.clearIdentity(context)
                         pairingStatusMsg = "Device disconnected."
                         onStopService()
                     },
