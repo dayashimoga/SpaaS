@@ -187,8 +187,8 @@ object ComputeWorkerClient {
             }
         } catch (e: Exception) {
             val detail = when {
-                e is java.net.ConnectException -> "Connection refused at $serverBaseUrl. Verify control plane is running and port 8080 is accessible."
-                e is java.net.SocketTimeoutException -> "Connection timed out at $serverBaseUrl. If on Guest Wi-Fi (e.g. TP-Link Guest), router AP Isolation blocks local devices. Switch PC and phone to main Wi-Fi (e.g. TP-Link_BEC7) or PC Mobile Hotspot, and ensure Windows Firewall allows port 8080."
+                e is java.net.ConnectException -> "Connection refused at $serverBaseUrl. Verify control plane is running. Note: If connected to Guest Wi-Fi (e.g. TP-Link_Guest), router AP Isolation blocks device communication. Switch PC & phone to primary Wi-Fi (e.g. TP-Link_BEC7), PC Mobile Hotspot, or Cloudflare Tunnel."
+                e is java.net.SocketTimeoutException -> "Connection timed out at $serverBaseUrl. Router AP Isolation or Windows Firewall is blocking packets. Switch PC and phone to primary Wi-Fi (e.g. TP-Link_BEC7) or PC Mobile Hotspot."
                 e is java.net.UnknownHostException -> "Host unresolvable: ${e.message}. Check IP address format."
                 else -> e.localizedMessage ?: e.message ?: "Unknown network failure"
             }

@@ -267,27 +267,33 @@ fun HomeView(
     val isPaired = ComputeWorkerClient.isPaired
     val activeJob = ComputeForegroundService.currentActiveJob
     val nodeState = when {
+        !isPaired -> "UNPAIRED"
         !isRunning -> "OFFLINE"
         isPaused -> "PAUSED"
-        activeJob != null -> "WORKING"
+        activeJob != null -> "RUNNING"
         else -> "READY"
     }
 
     val stateColor = when (nodeState) {
-        "WORKING" -> Color(0xFF10B981)
+        "RUNNING", "WORKING" -> Color(0xFF10B981)
         "READY" -> Color(0xFF00E5FF)
         "PAUSED" -> Color(0xFFF59E0B)
+        "UNPAIRED" -> Color(0xFF94A3B8)
         else -> Color(0xFFEF4444)
     }
 
-    val sessionElapsedSec = ((System.currentTimeMillis() - sessionStartTime) / 1000).coerceAtLeast(0)
+    val sessionElapsedSec = if (isPaired && isRunning && !isPaused) {
+        ((System.currentTimeMillis() - sessionStartTime) / 1000).coerceAtLeast(0)
+    } else {
+        0L
+    }
     val hours = sessionElapsedSec / 3600
     val mins = (sessionElapsedSec % 3600) / 60
     val secs = sessionElapsedSec % 60
-    val sessionTimeStr = "%02d:%02d:%02d".format(hours, mins, secs)
+    val sessionTimeStr = if (isPaired && isRunning) "%02d:%02d:%02d".format(hours, mins, secs) else "00:00:00 (Standby)"
 
     val history = LocalJobHistoryRepository.getRecent()
-    val totalCreditsEarned = history.count { it.isSuccess } * 38 // Deterministic demonstration credits
+    val totalCreditsEarned = if (isPaired) history.count { it.isSuccess } * 38 else 0
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // App Title & Connectivity Banner
