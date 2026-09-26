@@ -39,6 +39,7 @@ pub struct AppState {
     pub server_keypair: Arc<KeyPair>,
     pub audit_log: Arc<RwLock<Vec<AuditRecord>>>,
     pub pairing_tokens: Arc<RwLock<HashMap<String, PairingTokenData>>>,
+    pub scheduler_decisions: Arc<RwLock<HashMap<Uuid, spaas_protocol::workload::SchedulerDecision>>>,
     pub event_bus: tokio::sync::broadcast::Sender<String>,
     pub started_at_ms: i64,
 }
@@ -90,6 +91,7 @@ impl AppState {
             server_keypair: Arc::new(KeyPair::generate()),
             audit_log: Arc::new(RwLock::new(recovered.audit_log)),
             pairing_tokens: Arc::new(RwLock::new(HashMap::new())),
+            scheduler_decisions: Arc::new(RwLock::new(HashMap::new())),
             event_bus,
             started_at_ms: chrono::Utc::now().timestamp_millis(),
         }

@@ -112,6 +112,7 @@ mod tests {
             limits: ResourceLimits::default(),
             network_policy: NetworkPolicy::None,
             required_capabilities: RequiredCapabilities::default(),
+            dimension_weights: WorkloadDimensionWeights::default(),
             retry_policy: RetryPolicy::default(),
             verification_policy: VerificationPolicy::SingleNode,
             priority: WorkloadPriority::Normal,

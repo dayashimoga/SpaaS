@@ -52,6 +52,64 @@ pub fn score_node(node: &NodeRecord, weights: &SchedulerWeights) -> f64 {
     composite_score.max(0.0)
 }
 
+/// Workload-specific multi-attribute fit scoring using CapabilityVector and LiveCapacity
+pub fn score_workload_fit(
+    node: &NodeRecord,
+    weights: &spaas_protocol::workload::WorkloadDimensionWeights,
+    live: &spaas_protocol::node::LiveCapacity,
+) -> (f64, std::collections::HashMap<String, f64>) {
+    use spaas_protocol::node::{CapabilityStatus, CapabilityVector};
+    let mut dimension_scores = std::collections::HashMap::new();
+
+    let caps = match &node.qualification {
+        Some(q) => q.capability_vector.clone(),
+        None => CapabilityVector::default(),
+    };
+
+    let cpu_score = caps.cpu as f64 * weights.cpu;
+    dimension_scores.insert("cpu".into(), cpu_score);
+
+    let wasm_score = caps.wasm as f64 * weights.wasm;
+    dimension_scores.insert("wasm".into(), wasm_score);
+
+    let fp_score = caps.fp as f64 * weights.fp;
+    dimension_scores.insert("fp".into(), fp_score);
+
+    let memory_score = caps.memory as f64 * weights.memory;
+    dimension_scores.insert("memory".into(), memory_score);
+
+    let gpu_score = match caps.gpu {
+        CapabilityStatus::Score(s) => s as f64 * weights.gpu,
+        _ => 0.0,
+    };
+    dimension_scores.insert("gpu".into(), gpu_score);
+
+    let npu_score = match caps.npu {
+        CapabilityStatus::Score(s) => s as f64 * weights.npu,
+        _ => 0.0,
+    };
+    dimension_scores.insert("npu".into(), npu_score);
+
+    let storage_score = caps.storage as f64 * weights.storage;
+    dimension_scores.insert("storage".into(), storage_score);
+
+    let network_score = caps.network as f64 * weights.network;
+    dimension_scores.insert("network".into(), network_score);
+
+    let reliability_score = caps.reliability as f64 * weights.reliability;
+    dimension_scores.insert("reliability".into(), reliability_score);
+
+    let energy_score = caps.energy_efficiency as f64 * weights.energy_efficiency;
+    dimension_scores.insert("energy_efficiency".into(), energy_score);
+
+    let base_sum: f64 = dimension_scores.values().sum();
+
+    // Multiply by dynamic live capacity multiplier (0.0 to 1.0)
+    let composite_score = base_sum * (live.capacity_multiplier as f64);
+
+    (composite_score, dimension_scores)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

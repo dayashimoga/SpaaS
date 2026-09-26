@@ -37,6 +37,7 @@ async fn test_desktop_physical_compute_worker() {
         max_cpu_pct: 80,
         max_memory_mb: 2048,
         is_user_paused: false,
+        ..Default::default()
     };
 
     // Instantiate physical desktop worker agent
@@ -107,6 +108,7 @@ async fn test_desktop_physical_compute_worker() {
         retry_policy: RetryPolicy::default(),
         verification_policy: VerificationPolicy::SingleNode,
         priority: WorkloadPriority::Normal,
+        dimension_weights: Default::default(),
         submitter_signature: "".into(),
         submitter_pubkey: "".into(),
         created_at_ms: chrono::Utc::now().timestamp_millis(),

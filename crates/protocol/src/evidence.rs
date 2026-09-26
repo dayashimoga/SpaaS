@@ -12,6 +12,8 @@ pub enum VerificationEvidenceClass {
     EmulatorProven,
     /// Verified inside the distributed system simulation lab (Podman/synthetic nodes)
     SimulationProven,
+    /// Verified on a physical mobile or edge hardware device
+    PhysicalDeviceProven,
     /// Fully coded and structurally integrated, but lacking hardware runtime execution
     ImplementedUnproven,
     /// Requires specific physical hardware (e.g., Qualcomm NPU, AVF pKVM, Secure Element)
@@ -23,14 +25,14 @@ pub enum VerificationEvidenceClass {
 impl VerificationEvidenceClass {
     /// Returns true if this evidence class permits production certification
     pub fn is_production_certified(&self) -> bool {
-        matches!(self, Self::Proven)
+        matches!(self, Self::Proven | Self::PhysicalDeviceProven)
     }
 
-    /// Returns true if verified via simulated or emulated environments
+    /// Returns true if verified via physical, simulated, or emulated environments
     pub fn is_test_verified(&self) -> bool {
         matches!(
             self,
-            Self::Proven | Self::EmulatorProven | Self::SimulationProven
+            Self::Proven | Self::PhysicalDeviceProven | Self::EmulatorProven | Self::SimulationProven
         )
     }
 
@@ -38,6 +40,7 @@ impl VerificationEvidenceClass {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Proven => "PROVEN",
+            Self::PhysicalDeviceProven => "PHYSICAL-DEVICE-PROVEN",
             Self::EmulatorProven => "EMULATOR-PROVEN",
             Self::SimulationProven => "SIMULATION-PROVEN",
             Self::ImplementedUnproven => "IMPLEMENTED-UNPROVEN",
@@ -60,6 +63,7 @@ mod tests {
     #[test]
     fn test_evidence_classification_promotion_rules() {
         assert!(VerificationEvidenceClass::Proven.is_production_certified());
+        assert!(VerificationEvidenceClass::PhysicalDeviceProven.is_production_certified());
         assert!(!VerificationEvidenceClass::EmulatorProven.is_production_certified());
         assert!(!VerificationEvidenceClass::SimulationProven.is_production_certified());
         assert!(!VerificationEvidenceClass::ImplementedUnproven.is_production_certified());
@@ -68,12 +72,17 @@ mod tests {
 
         assert!(VerificationEvidenceClass::SimulationProven.is_test_verified());
         assert!(VerificationEvidenceClass::EmulatorProven.is_test_verified());
+        assert!(VerificationEvidenceClass::PhysicalDeviceProven.is_test_verified());
         assert!(!VerificationEvidenceClass::ImplementedUnproven.is_test_verified());
         assert!(!VerificationEvidenceClass::HardwareRequired.is_test_verified());
         assert!(!VerificationEvidenceClass::Unsupported.is_test_verified());
 
         // Labels and Display
         assert_eq!(format!("{}", VerificationEvidenceClass::Proven), "PROVEN");
+        assert_eq!(
+            format!("{}", VerificationEvidenceClass::PhysicalDeviceProven),
+            "PHYSICAL-DEVICE-PROVEN"
+        );
         assert_eq!(
             format!("{}", VerificationEvidenceClass::EmulatorProven),
             "EMULATOR-PROVEN"
@@ -102,5 +111,10 @@ mod tests {
         assert_eq!(json, "\"SIMULATION_PROVEN\"");
         let deserialized: VerificationEvidenceClass = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, VerificationEvidenceClass::SimulationProven);
+
+        let phys_json = serde_json::to_string(&VerificationEvidenceClass::PhysicalDeviceProven).unwrap();
+        assert_eq!(phys_json, "\"PHYSICAL_DEVICE_PROVEN\"");
+        let phys_deser: VerificationEvidenceClass = serde_json::from_str(&phys_json).unwrap();
+        assert_eq!(phys_deser, VerificationEvidenceClass::PhysicalDeviceProven);
     }
 }

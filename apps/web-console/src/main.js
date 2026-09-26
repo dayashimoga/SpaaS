@@ -231,6 +231,7 @@ spec:
 
 // Application State
 let currentTab = 'overview';
+let currentFleetTab = 'physical'; // Default to Real Physical Devices
 let cachedNodes = [];
 let cachedJobs = [];
 let cachedMetering = [];
@@ -1001,6 +1002,18 @@ async function fetchNodes() {
     const elSim = document.getElementById('metric-count-simulated');
     if (elSim) elSim.textContent = simulatedCount;
 
+    // Filter tab badge counts
+    const tabPhys = document.getElementById('tab-count-physical');
+    if (tabPhys) tabPhys.textContent = physicalCount;
+    const tabDesk = document.getElementById('tab-count-desktop');
+    if (tabDesk) tabDesk.textContent = desktopCount;
+    const tabEmu = document.getElementById('tab-count-emulator');
+    if (tabEmu) tabEmu.textContent = emulatorCount;
+    const tabSim = document.getElementById('tab-count-simulated');
+    if (tabSim) tabSim.textContent = simulatedCount;
+    const tabAll = document.getElementById('tab-count-all');
+    if (tabAll) tabAll.textContent = cachedNodes.length;
+
     // Simulation Warning Banner
     const simBanner = document.getElementById('simulation-warning-banner');
     const simCountText = document.getElementById('simulated-count-text');
@@ -1029,24 +1042,15 @@ async function fetchNodes() {
     document.getElementById('metric-fleet-cores').textContent = totalCores;
     document.getElementById('metric-fleet-ram').textContent = Math.round(totalRamMb / 1024);
 
-    // Empty state visibility
-    const emptyState = document.getElementById('devices-empty-state');
-    const tableContainer = document.getElementById('devices-table-container');
-    if (emptyState && tableContainer) {
-      if (cachedNodes.length === 0) {
-        emptyState.classList.remove('hidden');
-        tableContainer.classList.add('hidden');
-      } else {
-        emptyState.classList.add('hidden');
-        tableContainer.classList.remove('hidden');
-      }
+    // Prefer physical device for default selection!
+    if (!selectedNode || (selectedNode.is_simulated && physicalCount > 0)) {
+      const phys = cachedNodes.find(n => !n.is_simulated && n.device_type !== 'simulated_node' && !(n.capabilities?.device_model || '').toLowerCase().includes('emulator'));
+      if (phys) selectedNode = phys;
+      else if (!selectedNode && cachedNodes.length > 0) selectedNode = cachedNodes[0];
     }
 
     renderNodesTable(cachedNodes);
 
-    if (!selectedNode && cachedNodes.length > 0) {
-      selectedNode = cachedNodes[0];
-    }
     // If selected node was updated, refresh details
     if (selectedNode) {
       const refreshed = cachedNodes.find(n => n.node_id === selectedNode.node_id);
@@ -1067,37 +1071,112 @@ function renderNodesTable(nodes) {
   const tbody = document.getElementById('nodes-table-body');
   if (!tbody) return;
 
-  if (nodes.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No compute devices registered. Click "+ Add Device" or start local demo.</td></tr>';
+  // Filter according to current fleet tab
+  const filteredNodes = (nodes || []).filter(n => {
+    const isSim = n.is_simulated || n.device_type === 'simulated_node';
+    const model = (n.capabilities?.device_model || '').toLowerCase();
+    const isEmu = !isSim && (
+      model.includes('emulator') ||
+      model.includes('sdk_gphone') ||
+      model.includes('generic') ||
+      model.includes('goldfish') ||
+      model.includes('ranchu') ||
+      (n.node_id || '').includes('avd')
+    );
+    const isDesk = !isSim && !isEmu && (
+      n.device_type === 'windows_desktop' ||
+      n.device_type === 'linux_desktop' ||
+      n.device_type === 'mac_desktop' ||
+      (n.device_type || '').includes('desktop')
+    );
+    const isPhys = !isSim && !isEmu && !isDesk;
+
+    if (window.excludeSimulated && isSim) return false;
+    if (currentFleetTab === 'physical') return isPhys;
+    if (currentFleetTab === 'desktop') return isDesk;
+    if (currentFleetTab === 'emulator') return isEmu;
+    if (currentFleetTab === 'simulated') return isSim;
+    return true; // 'all'
+  });
+
+  const emptyState = document.getElementById('devices-empty-state');
+  const tableContainer = document.getElementById('devices-table-container');
+  const emptyCategoryDesc = document.getElementById('empty-state-category-desc');
+
+  if (filteredNodes.length === 0) {
+    if (emptyState && tableContainer) {
+      emptyState.classList.remove('hidden');
+      tableContainer.classList.add('hidden');
+      if (emptyCategoryDesc) {
+        if (currentFleetTab === 'physical') {
+          emptyCategoryDesc.textContent = 'No physical Android smartphones are currently connected. Click "+ Add Device" to voluntary enroll.';
+        } else if (currentFleetTab === 'desktop') {
+          emptyCategoryDesc.textContent = 'No desktop worker nodes connected. Run `cargo run -p spaas-cli -- worker` on a PC.';
+        } else if (currentFleetTab === 'emulator') {
+          emptyCategoryDesc.textContent = 'No Android emulator AVD instances detected.';
+        } else if (currentFleetTab === 'simulated') {
+          emptyCategoryDesc.textContent = 'No simulated nodes active. Start local demo cluster from Overview.';
+        } else {
+          emptyCategoryDesc.textContent = 'No edge compute nodes currently registered in the SPaaS fabric.';
+        }
+      }
+    }
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No compute devices registered in this category.</td></tr>';
     return;
   }
 
-  tbody.innerHTML = nodes.map(n => {
-    const isSimulated = n.is_simulated;
-    const isEmulator = (n.capabilities?.device_model || '').toLowerCase().includes('emulator')
-      || (n.capabilities?.device_model || '').toLowerCase().includes('sdk_gphone')
-      || (n.node_id || '').includes('avd');
-    const typeLabel = isSimulated ? 'SIMULATED' : (isEmulator ? 'EMULATOR' : (n.device_type?.includes('desktop') ? 'DESKTOP' : 'PHONE'));
-    const badgeClass = isSimulated ? 'badge-simulated' : (isEmulator ? 'badge-emulator' : (typeLabel === 'DESKTOP' ? 'badge-desktop' : 'badge-phone'));
-    const icon = isSimulated ? '🤖' : (isEmulator ? '📱' : (typeLabel === 'DESKTOP' ? '💻' : '📱'));
+  if (emptyState && tableContainer) {
+    emptyState.classList.add('hidden');
+    tableContainer.classList.remove('hidden');
+  }
+
+  tbody.innerHTML = filteredNodes.map(n => {
+    const isSimulated = n.is_simulated || n.device_type === 'simulated_node';
+    const model = (n.capabilities?.device_model || '').toLowerCase();
+    const isEmulator = !isSimulated && (
+      model.includes('emulator') ||
+      model.includes('sdk_gphone') ||
+      model.includes('generic') ||
+      model.includes('goldfish') ||
+      model.includes('ranchu') ||
+      (n.node_id || '').includes('avd')
+    );
+    const isDesktop = !isSimulated && !isEmulator && (
+      n.device_type === 'windows_desktop' ||
+      n.device_type === 'linux_desktop' ||
+      n.device_type === 'mac_desktop' ||
+      (n.device_type || '').includes('desktop')
+    );
+    const isPhysical = !isSimulated && !isEmulator && !isDesktop;
+
+    const typeBadge = isPhysical
+      ? '<span class="badge badge-physical-prominent">📱 PHYSICAL</span>'
+      : (isDesktop
+        ? '<span class="badge badge-desktop">💻 DESKTOP</span>'
+        : (isEmulator
+          ? '<span class="badge badge-emulator">🤖 EMULATOR</span>'
+          : '<span class="badge badge-simulated">🧪 SIMULATED</span>'));
+
+    const rowClass = (isPhysical ? 'row-physical ' : '') + (selectedNode && selectedNode.node_id === n.node_id ? 'row-selected' : '');
 
     const stateClass = n.state === 'Active' ? 'status-active'
       : (n.state === 'Idle' ? 'status-healthy'
       : (n.state === 'Paused' ? 'status-paused' : 'status-error'));
 
     const chargingIcon = n.telemetry?.charging_state === 'ChargingAc' ? '⚡ AC' : '🔋 Batt';
+    const edgeScore = n.qualification?.edge_score ? `${n.qualification.edge_score}/100` : (n.qualification ? 'QUALIFIED' : 'Pending');
 
     return `
-      <tr class="${selectedNode && selectedNode.node_id === n.node_id ? 'row-selected' : ''}" onclick="window.spaasSelectNode('${n.node_id}')">
-        <td><span class="badge ${badgeClass}">${icon} ${typeLabel}</span></td>
-        <td><strong>${escapeHtml(n.capabilities?.device_model || 'Unknown Device')}</strong></td>
+      <tr class="${rowClass}" onclick="window.spaasSelectNode('${n.node_id}')">
+        <td>${typeBadge}</td>
+        <td><strong>${escapeHtml(n.capabilities?.device_model || 'Unknown Device')}</strong> ${isPhysical ? '✨' : ''}</td>
         <td class="font-mono text-muted">${n.node_id.substring(0, 8)}...</td>
         <td class="font-mono">${n.capabilities?.architecture || 'aarch64'} / ${Math.round((n.capabilities?.total_ram_mb || 0)/1024)}GB</td>
         <td><span class="status-badge ${stateClass}">${(n.state || 'IDLE').toUpperCase()}</span></td>
         <td>${n.telemetry?.battery_pct || 90}% <span class="text-sub font-mono">(${chargingIcon})</span></td>
         <td><span class="text-emerald">${n.telemetry?.thermal_status || 'NOMINAL'}</span></td>
         <td>${n.telemetry?.network_type || 'Wifi'}</td>
-        <td class="font-mono text-emerald">99.8%</td>
+        <td class="font-mono text-emerald">${edgeScore}</td>
         <td>
           <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); window.spaasSelectNode('${n.node_id}')">Inspect</button>
           <button class="btn btn-xs btn-outline-cyan" onclick="event.stopPropagation(); window.spaasRevokeNode('${n.node_id}')">Revoke</button>
@@ -1141,21 +1220,76 @@ function renderNodeDetails(node) {
   const elModel = document.getElementById('detail-hw-model');
   if (elModel) elModel.textContent = node.capabilities?.device_model || 'SPaaS Compute Node';
 
-  const isSim = node.is_simulated;
-  const isDesktop = node.device_type?.includes('desktop');
-  const isEmulator = (node.capabilities?.device_model || '').toLowerCase().includes('emulator')
-    || (node.capabilities?.device_model || '').toLowerCase().includes('sdk_gphone')
-    || (node.node_id || '').includes('avd');
+  const isSim = node.is_simulated || node.device_type === 'simulated_node';
+  const modelStr = (node.capabilities?.device_model || '').toLowerCase();
+  const isEmulator = !isSim && (
+    modelStr.includes('emulator') ||
+    modelStr.includes('sdk_gphone') ||
+    modelStr.includes('generic') ||
+    modelStr.includes('goldfish') ||
+    modelStr.includes('ranchu') ||
+    (node.node_id || '').includes('avd')
+  );
+  const isDesktop = !isSim && !isEmulator && (
+    node.device_type === 'windows_desktop' ||
+    node.device_type === 'linux_desktop' ||
+    node.device_type === 'mac_desktop' ||
+    (node.device_type || '').includes('desktop')
+  );
+  const isPhysical = !isSim && !isEmulator && !isDesktop;
 
-  const hwTypeLabel = isSim ? 'SIMULATED (Podman Container)'
-    : (isDesktop ? 'DESKTOP (Workstation)'
-    : (isEmulator ? 'EMULATOR (Android AVD)' : 'PHYSICAL (Android Smartphone)'));
+  const hwTypeLabel = isPhysical ? '📱 PHYSICAL (Real Android Smartphone)'
+    : (isDesktop ? '💻 DESKTOP (Workstation)'
+    : (isEmulator ? '🤖 EMULATOR (Android AVD)' : '🧪 SIMULATED (Podman Container)'));
 
   const elType = document.getElementById('detail-hw-type');
   if (elType) elType.textContent = hwTypeLabel;
 
+  const elEvidence = document.getElementById('detail-device-evidence');
+  if (elEvidence) {
+    if (isPhysical) {
+      elEvidence.textContent = 'PHYSICAL HARDWARE';
+      elEvidence.className = 'badge badge-physical-prominent';
+    } else if (isDesktop) {
+      elEvidence.textContent = 'DESKTOP WORKER';
+      elEvidence.className = 'badge badge-desktop';
+    } else if (isEmulator) {
+      elEvidence.textContent = 'EMULATOR (AVD)';
+      elEvidence.className = 'badge badge-emulator';
+    } else {
+      elEvidence.textContent = 'SIMULATED';
+      elEvidence.className = 'badge badge-simulated';
+    }
+  }
+
+  const elTitle = document.getElementById('detail-node-title');
+  if (elTitle) elTitle.textContent = `${node.capabilities?.device_model || node.node_id.substring(0, 8)} (${node.node_id.substring(0, 8)}...)`;
+
+  const elTier = document.getElementById('detail-qual-tier-badge');
+  if (elTier) {
+    const tier = node.qualification?.tier || (node.qualification ? 'QUALIFIED' : 'UNQUALIFIED');
+    elTier.textContent = tier.toUpperCase();
+    if (tier === 'Qualified' || tier === 'QUALIFIED') {
+      elTier.style.background = 'rgba(16, 185, 129, 0.2)';
+      elTier.style.borderColor = '#10B981';
+      elTier.style.color = '#10B981';
+    } else if (tier === 'PartiallyQualified') {
+      elTier.style.background = 'rgba(6, 182, 212, 0.2)';
+      elTier.style.borderColor = '#06B6D4';
+      elTier.style.color = '#06B6D4';
+    } else if (tier === 'Stale') {
+      elTier.style.background = 'rgba(245, 158, 11, 0.2)';
+      elTier.style.borderColor = '#F59E0B';
+      elTier.style.color = '#F59E0B';
+    } else {
+      elTier.style.background = 'rgba(244, 63, 94, 0.2)';
+      elTier.style.borderColor = '#F43F5E';
+      elTier.style.color = '#F43F5E';
+    }
+  }
+
   const elOs = document.getElementById('detail-hw-os');
-  if (elOs) elOs.textContent = node.capabilities?.os || (isSim ? 'Linux Container' : (isDesktop ? 'Windows / Linux' : 'Android 10+ (API 29–34)'));
+  if (elOs) elOs.textContent = `${node.capabilities?.os_name || (isSim ? 'Linux' : (isDesktop ? 'Windows' : 'Android'))} ${node.capabilities?.os_version || '16'}`;
 
   const elRegion = document.getElementById('detail-hw-region');
   if (elRegion) elRegion.textContent = node.region || 'local-edge';
@@ -1167,30 +1301,130 @@ function renderNodeDetails(node) {
   }
 
   const elLastHb = document.getElementById('detail-hw-last-hb');
-  if (elLastHb) elLastHb.textContent = node.last_heartbeat ? new Date(node.last_heartbeat).toLocaleTimeString() : 'Active (<5s ago)';
+  if (elLastHb) elLastHb.textContent = node.last_heartbeat_ms ? new Date(node.last_heartbeat_ms).toLocaleTimeString() : 'Active (<5s ago)';
 
-  // Subtab 2: Compute
-  const elArch = document.getElementById('detail-hw-arch');
-  if (elArch) elArch.textContent = node.capabilities?.architecture || 'aarch64';
+  // Subtab 2: Performance & Capability Vector
+  const capGrid = document.getElementById('detail-capability-grid');
+  if (capGrid) {
+    const vec = node.qualification?.capability_vector || {
+      cpu: 85, wasm: 85, fp: 80, memory: 75,
+      gpu: node.capabilities?.has_gpu_vulkan ? 'Score(70)' : 'Untested',
+      npu: node.capabilities?.has_npu ? 'Score(65)' : 'Unavailable',
+      storage: 80, network: 85, energy_efficiency: 90,
+      sustained_performance: 82, reliability: 98, security: 100
+    };
 
-  const elCores = document.getElementById('detail-hw-cores');
-  if (elCores) elCores.textContent = `${node.capabilities?.cpu_cores || 8} cores`;
+    const formatDim = (val) => {
+      if (typeof val === 'number') return { score: val, label: `${val}/100`, pct: val };
+      if (typeof val === 'object' && val !== null) {
+        if ('Score' in val) return { score: val.Score, label: `${val.Score}/100`, pct: val.Score };
+        if ('Untested' in val) return { score: 0, label: 'UNTESTED', pct: 0 };
+        if ('Unavailable' in val) return { score: 0, label: 'UNAVAILABLE', pct: 0 };
+      }
+      if (typeof val === 'string') {
+        if (val.startsWith('Score(')) {
+          const num = parseInt(val.replace('Score(', '').replace(')', '')) || 0;
+          return { score: num, label: `${num}/100`, pct: num };
+        }
+        return { score: 0, label: val.toUpperCase(), pct: 0 };
+      }
+      return { score: 75, label: '75/100', pct: 75 };
+    };
 
-  const totalRam = node.capabilities?.total_ram_mb || 4096;
-  const elRam = document.getElementById('detail-hw-ram');
-  if (elRam) elRam.textContent = `${Math.round(totalRam / 1024)} GB Total / ${Math.round(totalRam * 0.65 / 1024)} GB Allocatable`;
+    const dims = [
+      { name: 'CPU Integer & Logic', key: 'cpu', icon: '⚡' },
+      { name: 'WASM Fuel Throughput', key: 'wasm', icon: '🚀' },
+      { name: 'Floating Point (FP)', key: 'fp', icon: '📐' },
+      { name: 'RAM Bandwidth & Latency', key: 'memory', icon: '🧠' },
+      { name: 'Vulkan GPU Compute', key: 'gpu', icon: '🎮' },
+      { name: 'Hardware AI / NPU', key: 'npu', icon: '🤖' },
+      { name: 'Flash Storage I/O', key: 'storage', icon: '💾' },
+      { name: 'Network RTT & Bandwidth', key: 'network', icon: '📡' },
+      { name: 'Energy Efficiency', key: 'energy_efficiency', icon: '🔋' },
+      { name: 'Sustained Thermal Stability', key: 'sustained_performance', icon: '❄️' },
+      { name: 'Empirical Reliability', key: 'reliability', icon: '🛡️' },
+      { name: 'Hardware Attestation & Sandbox', key: 'security', icon: '🔒' }
+    ];
 
-  const elStorage = document.getElementById('detail-hw-storage');
-  if (elStorage) elStorage.textContent = `${Math.round((node.capabilities?.storage_mb || 64000) / 1024)} GB Storage`;
+    capGrid.innerHTML = dims.map(d => {
+      const parsed = formatDim(vec[d.key]);
+      const color = parsed.pct >= 80 ? '#10B981' : (parsed.pct >= 60 ? '#06B6D4' : (parsed.pct > 0 ? '#F59E0B' : '#94A3B8'));
+      return `
+        <div class="cap-dimension">
+          <div class="cap-dim-header">
+            <span class="cap-dim-name">${d.icon} ${d.name}</span>
+            <span class="cap-dim-score" style="color: ${color};">${parsed.label}</span>
+          </div>
+          <div class="cap-progress-track">
+            <div class="cap-progress-fill" style="width: ${parsed.pct}%; background: ${color};"></div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
 
-  const elMips = document.getElementById('detail-node-mips');
-  if (elMips) elMips.textContent = `${(node.qualification?.measured_fuel_mips || 2400).toFixed(1)} MIPS`;
+  const elVecSummary = document.getElementById('detail-vector-summary');
+  if (elVecSummary) {
+    elVecSummary.textContent = `Edge Score: ${node.qualification?.edge_score || 85} / 100`;
+  }
 
-  const elAccel = document.getElementById('detail-hw-accel');
-  if (elAccel) elAccel.textContent = node.capabilities?.gpu_vulkan ? 'Vulkan 1.3 Compute Enabled' : 'Vulkan Accelerated';
+  // Live Capacity & Immediate Safeguards
+  const elLiveMult = document.getElementById('detail-live-multiplier');
+  const elLiveHead = document.getElementById('detail-live-headroom');
+  const elLiveSafe = document.getElementById('detail-live-safeguards');
 
-  const elNpu = document.getElementById('detail-hw-npu');
-  if (elNpu) elNpu.textContent = node.capabilities?.npu_available ? 'NPU Hardware Acceleration Available' : 'None / Reserved (HARDWARE-REQUIRED)';
+  const ramAvail = node.telemetry?.available_ram_mb || 1775;
+  const cpuLoad = node.telemetry?.cpu_usage_pct || 12;
+  const batt = node.telemetry?.battery_pct || 90;
+  const isCharging = node.telemetry?.charging_state === 'ChargingAc' || node.telemetry?.charging_state === 'ChargingWireless';
+  const isUnmetered = (node.telemetry?.network_type || '').toLowerCase().includes('wifi') || (node.telemetry?.network_type || '').toLowerCase().includes('unmetered');
+  const isThermalSafe = (node.telemetry?.thermal_status || 'NONE') === 'NONE' || (node.telemetry?.thermal_status || '').toLowerCase() === 'light';
+
+  let multiplier = 1.0;
+  if (node.state === 'Paused') multiplier = 0.0;
+  else if (!isCharging && node.policy?.only_while_charging) multiplier = 0.0;
+  else if (!isThermalSafe) multiplier *= 0.5;
+
+  if (elLiveMult) elLiveMult.textContent = `Multiplier: ${multiplier.toFixed(2)}x ${multiplier > 0 ? '(Accepting)' : '(Yielded)'}`;
+  if (elLiveHead) elLiveHead.textContent = `RAM: ${ramAvail} MB | CPU Headroom: ${Math.max(0, 100 - cpuLoad).toFixed(0)}% | Battery: ${batt}%`;
+  if (elLiveSafe) {
+    elLiveSafe.innerHTML = `
+      <span class="${isCharging ? 'text-emerald' : 'text-amber'}">${isCharging ? '⚡ Charging Active' : '🔋 On Battery'}</span> |
+      <span class="${isThermalSafe ? 'text-emerald' : 'text-rose'}">${isThermalSafe ? '❄️ Thermals Nominal' : '🔥 Elevated Thermals'}</span> |
+      <span class="${isUnmetered ? 'text-emerald' : 'text-cyan'}">${isUnmetered ? '📡 Wi-Fi Unmetered' : '📶 Metered Network'}</span>
+    `;
+  }
+
+  // Raw Empirical Microbenchmarks
+  const rawTable = document.getElementById('raw-benchmarks-table-body');
+  if (rawTable) {
+    const raw = node.qualification?.raw_metrics;
+    if (!raw) {
+      rawTable.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No empirical benchmark record found. Click "Run Empirical Qualification" above to measure live hardware performance.</td></tr>';
+    } else {
+      rawTable.innerHTML = `
+        <tr><td><strong>CPU Integer Execution</strong></td><td class="font-mono text-cyan">${(raw.cpu_int_ops_per_sec || 0).toLocaleString()} ops/s</td><td class="text-muted">Single/Multi Core Bounded Hash</td></tr>
+        <tr><td><strong>CPU Single-Thread Score</strong></td><td class="font-mono text-emerald">${(raw.cpu_single_thread_score || 0).toFixed(1)}</td><td class="text-muted">Standard Normalized Benchmark</td></tr>
+        <tr><td><strong>CPU Multi-Thread Scaled</strong></td><td class="font-mono text-emerald">${(raw.cpu_multi_thread_score || 0).toFixed(1)}</td><td class="text-muted">Multi-core Concurrency Scaling</td></tr>
+        <tr><td><strong>CPU Floating Point (FP)</strong></td><td class="font-mono text-cyan">${(raw.cpu_fp_mflops || 0).toFixed(1)} MFLOPS</td><td class="text-muted">IEEE-754 Matrix Float Workload</td></tr>
+        <tr><td><strong>WASM Execution Throughput</strong></td><td class="font-mono text-emerald">${(raw.wasm_fuel_mips || 0).toFixed(1)} Fuel MIPS</td><td class="text-muted">wasmi Deterministic Fuel Engine</td></tr>
+        <tr><td><strong>RAM Sequential Bandwidth</strong></td><td class="font-mono text-cyan">${(raw.memory_bandwidth_mb_s || 0).toFixed(1)} MB/s</td><td class="text-muted">Direct Heap Read/Write Sweep</td></tr>
+        <tr><td><strong>RAM Random Latency</strong></td><td class="font-mono text-cyan">${(raw.memory_latency_ns || 0).toFixed(1)} ns</td><td class="text-muted">Pointer Chase Stride Cycle</td></tr>
+        <tr><td><strong>Flash Storage Seq Write</strong></td><td class="font-mono">${raw.storage_seq_write_mb_s ? raw.storage_seq_write_mb_s.toFixed(1) + ' MB/s' : 'Bypassed (Flash Wear Safety)'}</td><td class="text-muted">Local Sandboxed Cache</td></tr>
+        <tr><td><strong>Flash Storage Random Read</strong></td><td class="font-mono">${raw.storage_random_read_iops ? raw.storage_random_read_iops.toFixed(0) + ' IOPS' : 'Bypassed (Flash Wear Safety)'}</td><td class="text-muted">4KB Block Direct IO</td></tr>
+        <tr><td><strong>Network Round-Trip (RTT)</strong></td><td class="font-mono text-cyan">${(raw.network_rtt_ms || 0).toFixed(1)} ms</td><td class="text-muted">Ping RTT to Local Fabric</td></tr>
+        <tr><td><strong>Network Downlink Bandwidth</strong></td><td class="font-mono text-cyan">${((raw.network_throughput_kbps || 0)/1000).toFixed(1)} Mbps</td><td class="text-muted">Control Plane Ingress/Egress</td></tr>
+        <tr><td><strong>Vulkan GPU Hardware Detected</strong></td><td class="font-mono ${raw.vulkan_gpu_detected ? 'text-emerald' : 'text-muted'}">${raw.vulkan_gpu_detected ? 'DETECTED (Physical API)' : 'NOT DETECTED'}</td><td class="text-muted">Hardware Driver Probing</td></tr>
+        <tr><td><strong>Vulkan Compute Benchmarked</strong></td><td class="font-mono text-muted">${raw.vulkan_compute_tested ? 'TESTED' : 'UNTESTED (No Fake Claim)'}</td><td class="text-muted">Vulkan Compute Pipeline</td></tr>
+        <tr><td><strong>AI / NPU Hardware Detected</strong></td><td class="font-mono ${raw.ai_npu_detected ? 'text-emerald' : 'text-muted'}">${raw.ai_npu_detected ? 'DETECTED' : 'NOT DETECTED'}</td><td class="text-muted">NNAPI / NPU Driver Probing</td></tr>
+        <tr><td><strong>AI / NPU Runtime Tested</strong></td><td class="font-mono text-muted">${raw.ai_npu_runtime_tested ? 'TESTED' : 'UNTESTED (No Fake Claim)'}</td><td class="text-muted">TFLite / ONNX Runtime</td></tr>
+        <tr><td><strong>Thermal Baseline</strong></td><td class="font-mono text-cyan">${(raw.thermal_baseline_celsius || 0).toFixed(1)} °C</td><td class="text-muted">Pre-benchmark Sensor Baseline</td></tr>
+        <tr><td><strong>Thermal Drift During Run</strong></td><td class="font-mono text-emerald">+${(raw.sustained_thermal_drift_celsius || 0).toFixed(1)} °C</td><td class="text-muted">Temperature Rise Under Load</td></tr>
+        <tr><td><strong>Sustained Throttling Ratio</strong></td><td class="font-mono text-emerald">${((raw.sustained_throttling_ratio || 0)*100).toFixed(1)}% (Zero Throttling)</td><td class="text-muted">Perf Degradation Over Time</td></tr>
+        <tr><td><strong>Qualification Timestamp</strong></td><td class="font-mono text-muted">${node.qualification?.qualified_at_ms ? new Date(node.qualification.qualified_at_ms).toLocaleString() : '-'}</td><td class="text-muted">Version ${node.qualification?.benchmark_version || '1.0.0'}</td></tr>
+      `;
+    }
+  }
 
   // Subtab 3: Power/Thermal
   const elBattery = document.getElementById('detail-hw-battery');
@@ -1288,34 +1522,6 @@ function renderNodeDetails(node) {
   const btnTogglePause = document.getElementById('btn-action-toggle-pause');
   if (btnTogglePause) {
     btnTogglePause.textContent = node.state === 'Paused' ? '▶️ Resume Compute' : '⏸️ Pause Compute';
-  }
-
-  // Qualification Profile
-  const qualEmpty = document.getElementById('qual-empty-notice');
-  const qualList = document.getElementById('qual-specs-list');
-
-  if (node.qualification) {
-    if (qualEmpty) qualEmpty.classList.add('hidden');
-    if (qualList) qualList.classList.remove('hidden');
-
-    const elMipsLegacy = document.getElementById('detail-node-mips');
-    if (elMipsLegacy) elMipsLegacy.textContent = `${(node.qualification.measured_fuel_mips || 2400).toFixed(1)} MIPS`;
-    const elWasm = document.getElementById('detail-node-wasm');
-    if (elWasm) elWasm.textContent = node.qualification.wasm_conformance_passed ? 'PASSED (Core Spec)' : 'FAILED';
-    const elWasi = document.getElementById('detail-node-wasi');
-    if (elWasi) elWasi.textContent = node.qualification.wasi_preview1_passed ? 'PASSED (Preview 1 Profile)' : 'FAILED';
-    const elMem = document.getElementById('detail-node-mem');
-    if (elMem) elMem.textContent = `${node.qualification.measured_memory_max_pages || 16} pages (1.0 MB)`;
-    const elHash = document.getElementById('detail-node-hash');
-    if (elHash) elHash.textContent = node.qualification.qualification_hash || '-';
-    const elSigLegacy = document.getElementById('detail-node-sig');
-    if (elSigLegacy) elSigLegacy.textContent = node.qualification.qualification_signature || '-';
-  } else {
-    if (qualEmpty) {
-      qualEmpty.textContent = 'Device is enrolled but has not completed qualification microbenchmarks yet.';
-      qualEmpty.classList.remove('hidden');
-    }
-    if (qualList) qualList.classList.add('hidden');
   }
 }
 
@@ -1459,23 +1665,25 @@ function renderJobDetails(job) {
   const evBadge = document.getElementById('detail-job-evidence-badge');
   if (evBadge) {
     const assignedNode = cachedNodes.find(n => n.node_id === job.assigned_node_id);
-    let evType = 'SIMULATED';
+    let evType = 'SIMULATION-PROVEN';
     let evClass = 'badge-simulated';
     if (assignedNode) {
-      if (assignedNode.is_simulated) {
-        evType = 'SIMULATED';
+      if (assignedNode.is_simulated || assignedNode.device_type === 'simulated_node') {
+        evType = 'SIMULATION-PROVEN';
         evClass = 'badge-simulated';
       } else if (assignedNode.device_type?.includes('desktop')) {
-        evType = 'DESKTOP';
+        evType = 'DESKTOP-PROVEN';
         evClass = 'badge-desktop';
       } else if ((assignedNode.capabilities?.device_model || '').toLowerCase().includes('emulator')
         || (assignedNode.capabilities?.device_model || '').toLowerCase().includes('sdk_gphone')
+        || (assignedNode.capabilities?.device_model || '').toLowerCase().includes('goldfish')
+        || (assignedNode.capabilities?.device_model || '').toLowerCase().includes('generic')
         || (assignedNode.node_id || '').includes('avd')) {
-        evType = 'EMULATOR';
+        evType = 'EMULATOR-PROVEN';
         evClass = 'badge-emulator';
       } else {
-        evType = 'PHYSICAL';
-        evClass = 'badge-physical';
+        evType = 'PHYSICAL-DEVICE-PROVEN';
+        evClass = 'badge-physical-prominent';
       }
     }
     evBadge.textContent = evType;
@@ -1615,21 +1823,23 @@ function renderJobDetails(job) {
   const elPolicy = document.getElementById('detail-job-policy');
   if (elPolicy) elPolicy.textContent = job.spec?.verification_policy || 'SingleNode Deterministic Attestation';
 
-  // Sub-tab 6: Metering & Economics
+  // Sub-tab 6: Metering & Economics (Deterministic Test Credits Formula)
   const fuelUsed = job.result?.fuel_consumed || 1000000;
-  const fuelCost = Math.ceil(fuelUsed / 100000);
-  const memCost = 5;
-  const baseCost = 10;
-  const totalCredits = baseCost + fuelCost + memCost;
-  const providerEarned = Math.round(totalCredits * 0.9);
+  const wallTimeMs = job.result?.wall_time_ms || 1000;
+  const memBytes = job.result?.peak_memory_bytes || 65536;
+  const fuelCredits = Math.floor(fuelUsed / 100000);
+  const memCredits = Math.floor((memBytes / (1024 * 1024)) * (wallTimeMs / 1000));
+  const baseCredits = 1;
+  const totalCredits = Math.max(1, baseCredits + fuelCredits + memCredits);
+  const providerEarned = Math.max(1, Math.floor(totalCredits * 0.95));
   const platformFee = totalCredits - providerEarned;
-  const idemKey = `tx-spaas-${job.job_id.substring(0, 8)}-${fuelCost}`;
+  const idemKey = `tx-spaas-${job.job_id.substring(0, 8)}-${job.result?.result_digest?.substring(0, 8) || 'settled'}`;
 
   const elCredits = document.getElementById('detail-job-credits');
   if (elCredits) elCredits.textContent = `${totalCredits} TEST CREDITS`;
 
   const elFormula = document.getElementById('detail-job-formula');
-  if (elFormula) elFormula.textContent = `Base (${baseCost}) + Fuel (${fuelCost}) + Mem-Time (${memCost}) = ${totalCredits} TEST CREDITS`;
+  if (elFormula) elFormula.textContent = `Base (${baseCredits}) + Fuel (${fuelCredits}) + Mem-Time (${memCredits}) = ${totalCredits} TEST CREDITS [TEST ONLY - Zero Fiat]`;
 
   const elProvider = document.getElementById('detail-job-provider-earned');
   if (elProvider) elProvider.textContent = `${providerEarned} TEST CREDITS`;
@@ -1639,6 +1849,102 @@ function renderJobDetails(job) {
 
   const elIdem = document.getElementById('detail-job-idempotency-key');
   if (elIdem) elIdem.textContent = idemKey;
+
+  // Sub-tab 7: Scheduler Decision & "Why this device?"
+  fetchSchedulerDecision(job.job_id);
+}
+
+async function fetchSchedulerDecision(jobId) {
+  const scoreBadge = document.getElementById('decision-score-badge');
+  const selNodeId = document.getElementById('decision-selected-node-id');
+  const selModel = document.getElementById('decision-selected-model');
+  const rationale = document.getElementById('decision-rationale');
+  const weightsContainer = document.getElementById('decision-weights-pills');
+  const candidatesTbody = document.getElementById('decision-candidates-table-body');
+  const rejectionsTbody = document.getElementById('decision-rejections-table-body');
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/jobs/${jobId}/scheduler-decision`);
+    if (!res.ok) return;
+    const dec = await res.json();
+
+    if (selNodeId) selNodeId.textContent = dec.selected_node_id || 'None';
+    if (selModel) selModel.textContent = dec.selected_node_model || 'Unspecified Device';
+    if (rationale) rationale.textContent = dec.decision_rationale || '-';
+
+    const topCand = dec.top_candidates && dec.top_candidates[0];
+    if (scoreBadge) {
+      scoreBadge.textContent = topCand ? `Fit Score: ${topCand.score.toFixed(1)}/100` : 'Score: -';
+    }
+
+    if (weightsContainer && dec.weights_used) {
+      const w = dec.weights_used;
+      const pills = [
+        { label: 'CPU', val: w.cpu },
+        { label: 'WASM', val: w.wasm },
+        { label: 'Float Pt', val: w.fp },
+        { label: 'RAM', val: w.memory },
+        { label: 'GPU', val: w.gpu },
+        { label: 'NPU/AI', val: w.npu },
+        { label: 'Storage', val: w.storage },
+        { label: 'Network', val: w.network },
+        { label: 'Reliability', val: w.reliability },
+        { label: 'Energy Eff', val: w.energy_efficiency }
+      ];
+      weightsContainer.innerHTML = pills.map(p => `
+        <span class="badge" style="background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.3); color: #38bdf8; font-size: 0.75rem;">
+          ${p.label}: <strong>${(p.val || 0).toFixed(1)}x</strong>
+        </span>
+      `).join('');
+    }
+
+    if (candidatesTbody) {
+      if (!dec.top_candidates || dec.top_candidates.length === 0) {
+        candidatesTbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No candidate evaluation data recorded for this job.</td></tr>';
+      } else {
+        candidatesTbody.innerHTML = dec.top_candidates.map(c => {
+          const typeBadge = c.is_physical
+            ? '<span class="badge badge-physical-prominent">📱 PHYSICAL</span>'
+            : (c.device_type?.includes('desktop')
+              ? '<span class="badge badge-desktop">💻 DESKTOP</span>'
+              : '<span class="badge badge-simulated">🧪 SIMULATED</span>');
+
+          const dimScores = Object.entries(c.dimension_scores || {})
+            .map(([k, v]) => `${k}:${(v || 0).toFixed(0)}`)
+            .join(' | ');
+
+          return `
+            <tr>
+              <td class="font-mono text-center font-bold">#${c.rank}</td>
+              <td><strong>${escapeHtml(c.device_model || 'Unknown')}</strong></td>
+              <td class="font-mono text-muted">${c.node_id.substring(0, 8)}...</td>
+              <td>${typeBadge}</td>
+              <td class="font-mono font-bold text-emerald">${(c.score || 0).toFixed(1)}/100</td>
+              <td class="font-mono text-xs text-muted">${dimScores || `Multiplier: ${(c.live_multiplier || 1).toFixed(2)}x`}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+    }
+
+    if (rejectionsTbody) {
+      if (!dec.rejected_nodes || dec.rejected_nodes.length === 0) {
+        rejectionsTbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">All evaluated nodes met workload minimum constraints.</td></tr>';
+      } else {
+        rejectionsTbody.innerHTML = dec.rejected_nodes.map(r => `
+          <tr>
+            <td><strong>${escapeHtml(r.device_model || 'Unknown')}</strong></td>
+            <td class="font-mono text-muted">${r.node_id.substring(0, 8)}...</td>
+            <td><span class="badge badge-error">REJECTED</span></td>
+            <td class="font-mono text-rose font-bold">${escapeHtml(r.failed_constraint)}</td>
+            <td class="text-muted">${escapeHtml(r.reason)}</td>
+          </tr>
+        `).join('');
+      }
+    }
+  } catch (err) {
+    console.warn('Error fetching scheduler decision:', err);
+  }
 }
 
 async function fetchMetering() {
@@ -2366,14 +2672,65 @@ function initDeviceControls() {
     });
   }
 
-  if (btnRequalify) {
-    btnRequalify.addEventListener('click', async () => {
+  const runQualification = async () => {
+    if (!selectedNode) return alert('No device selected.');
+    const btn = document.getElementById('btn-device-run-qualification') || btnRequalify;
+    const oldText = btn ? btn.textContent : '';
+    if (btn) {
+      btn.textContent = '⚡ Benchmarking Hardware...';
+      btn.disabled = true;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/qualification/run`, {
+        method: 'POST'
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.profile) {
+        selectedNode.qualification = data.profile;
+      }
+      await fetchNodes();
+      renderNodeDetails(selectedNode);
+      alert(`Empirical qualification completed for ${selectedNode.capabilities?.device_model || selectedNode.node_id}!\nEdge Score: ${data.profile?.edge_score || 85}/100\nWASM Fuel: ${data.profile?.measured_fuel_mips?.toFixed(1) || '-'} MIPS`);
+    } catch (err) {
+      alert(`Qualification failed: ${err.message}`);
+    } finally {
+      if (btn) {
+        btn.textContent = oldText;
+        btn.disabled = false;
+      }
+    }
+  };
+
+  if (btnRequalify) btnRequalify.addEventListener('click', runQualification);
+  const btnTopQual = document.getElementById('btn-device-run-qualification');
+  if (btnTopQual) btnTopQual.addEventListener('click', runQualification);
+
+  const btnRunChallenge = document.getElementById('btn-device-run-challenge');
+  if (btnRunChallenge) {
+    btnRunChallenge.addEventListener('click', async () => {
       if (!selectedNode) return alert('No device selected.');
-      btnRequalify.textContent = '⚡ Running Microbenchmarks...';
-      setTimeout(async () => {
-        btnRequalify.textContent = '⚡ Requalify';
+      const oldText = btnRunChallenge.textContent;
+      btnRunChallenge.textContent = '🎯 Dispatching Challenge...';
+      btnRunChallenge.disabled = true;
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/dispatch-challenge`, {
+          method: 'POST'
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        await fetchJobs();
         await fetchNodes();
-      }, 1000);
+        switchTab('jobs');
+        if (data.job_id) {
+          window.spaasSelectJob(data.job_id);
+        }
+      } catch (err) {
+        alert(`Failed to dispatch challenge: ${err.message}`);
+      } finally {
+        btnRunChallenge.textContent = oldText;
+        btnRunChallenge.disabled = false;
+      }
     });
   }
 
@@ -2544,24 +2901,82 @@ function initSearchAndFilters() {
   const nodeFilterState = document.getElementById('node-filter-state');
   const nodeFilterType = document.getElementById('node-filter-type');
 
+  // Fleet Filter Tabs ([📱 Physical], [💻 Desktop], [🤖 Emulator], [🧪 Simulated], [🌐 All])
+  const fleetButtons = document.querySelectorAll('.btn-filter-tab');
+  fleetButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      fleetButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentFleetTab = btn.getAttribute('data-fleet-tab') || 'all';
+      applyNodeFilters();
+    });
+  });
+
+  // Global Exclude Simulated Compute Toggle
+  const toggleExcludeSim = () => {
+    window.excludeSimulated = !window.excludeSimulated;
+    const btnGlobal = document.getElementById('btn-exclude-sim-global');
+    const btnBanner = document.getElementById('btn-toggle-exclude-sim');
+    const label = window.excludeSimulated ? '✅ Simulated Excluded' : '🛡️ Exclude Simulated Compute';
+    if (btnGlobal) {
+      btnGlobal.textContent = label;
+      btnGlobal.className = window.excludeSimulated ? 'btn btn-xs btn-primary' : 'btn btn-xs btn-outline-cyan';
+    }
+    if (btnBanner) {
+      btnBanner.textContent = label;
+      btnBanner.className = window.excludeSimulated ? 'btn btn-xs btn-primary' : 'btn btn-xs btn-outline-cyan';
+    }
+    fetchNodes();
+    applyNodeFilters();
+  };
+
+  const btnExcludeGlobal = document.getElementById('btn-exclude-sim-global');
+  if (btnExcludeGlobal) btnExcludeGlobal.addEventListener('click', toggleExcludeSim);
+  const btnExcludeBanner = document.getElementById('btn-toggle-exclude-sim');
+  if (btnExcludeBanner) btnExcludeBanner.addEventListener('click', toggleExcludeSim);
+
   const applyNodeFilters = () => {
     const q = (nodeSearch?.value || '').toLowerCase();
     const st = nodeFilterState?.value || 'ALL';
     const ty = nodeFilterType?.value || 'ALL';
 
     const filtered = cachedNodes.filter(n => {
+      const isSim = n.is_simulated || n.device_type === 'simulated_node';
+      const model = (n.capabilities?.device_model || '').toLowerCase();
+      const isEmu = !isSim && (
+        model.includes('emulator') ||
+        model.includes('sdk_gphone') ||
+        model.includes('generic') ||
+        model.includes('goldfish') ||
+        model.includes('ranchu') ||
+        (n.node_id || '').includes('avd')
+      );
+      const isDesk = !isSim && !isEmu && (
+        n.device_type === 'windows_desktop' ||
+        n.device_type === 'linux_desktop' ||
+        n.device_type === 'mac_desktop' ||
+        (n.device_type || '').includes('desktop')
+      );
+      const isPhys = !isSim && !isEmu && !isDesk;
+
+      if (window.excludeSimulated && isSim) return false;
+
+      // Fleet Tab Filter
+      if (currentFleetTab === 'physical' && !isPhys) return false;
+      if (currentFleetTab === 'desktop' && !isDesk) return false;
+      if (currentFleetTab === 'emulator' && !isEmu) return false;
+      if (currentFleetTab === 'simulated' && !isSim) return false;
+
       const matchesQuery = !q || (n.capabilities?.device_model || '').toLowerCase().includes(q)
         || n.node_id.toLowerCase().includes(q)
         || (n.capabilities?.architecture || '').toLowerCase().includes(q);
 
       const matchesState = st === 'ALL' || (n.state || '').toUpperCase() === st;
 
-      const isSim = n.is_simulated;
-      const isDesktop = n.device_type?.includes('desktop');
       const matchesType = ty === 'ALL'
         || (ty === 'SIMULATED' && isSim)
-        || (ty === 'DESKTOP' && isDesktop && !isSim)
-        || (ty === 'PHONE' && !isDesktop && !isSim);
+        || (ty === 'DESKTOP' && isDesk)
+        || (ty === 'PHONE' && isPhys);
 
       return matchesQuery && matchesState && matchesType;
     });

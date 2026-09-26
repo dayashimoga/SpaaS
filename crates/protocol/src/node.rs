@@ -263,6 +263,27 @@ pub struct ProviderPolicy {
     pub max_memory_mb: u64,
     /// User explicit pause switch
     pub is_user_paused: bool,
+    /// Allow GPU compute acceleration when supported
+    pub allow_gpu: bool,
+    /// Allow NPU / AI model inference when supported
+    pub allow_npu: bool,
+    /// Maximum execution worker threads allowed
+    pub max_threads: u32,
+    /// Daily compute quota limit in minutes (0 = unlimited)
+    pub daily_compute_limit_minutes: u32,
+    /// Allow mobile data when enabled by owner
+    pub allow_mobile_data: bool,
+    /// Bandwidth transfer cap in kbps (0 = unlimited)
+    pub bandwidth_cap_kbps: u64,
+    /// Temporary share duration in hours (0 = continuous/manual)
+    pub temporary_share_hours: u32,
+}
+
+fn default_max_threads() -> u32 {
+    4
+}
+fn default_daily_limit() -> u32 {
+    480
 }
 
 #[derive(Deserialize)]
@@ -298,6 +319,20 @@ struct ProviderPolicyRaw {
     max_memory_mb: u64,
     #[serde(default, alias = "isUserPaused")]
     is_user_paused: bool,
+    #[serde(default, alias = "allowGpu")]
+    allow_gpu: bool,
+    #[serde(default, alias = "allowNpu")]
+    allow_npu: bool,
+    #[serde(default = "default_max_threads", alias = "maxThreads")]
+    max_threads: u32,
+    #[serde(default = "default_daily_limit", alias = "dailyComputeLimitMinutes")]
+    daily_compute_limit_minutes: u32,
+    #[serde(default, alias = "allowMobileData")]
+    allow_mobile_data: bool,
+    #[serde(default, alias = "bandwidthCapKbps")]
+    bandwidth_cap_kbps: u64,
+    #[serde(default, alias = "temporaryShareHours")]
+    temporary_share_hours: u32,
 }
 
 impl From<ProviderPolicyRaw> for ProviderPolicy {
@@ -315,6 +350,13 @@ impl From<ProviderPolicyRaw> for ProviderPolicy {
             max_cpu_pct: raw.max_cpu_pct,
             max_memory_mb: raw.max_memory_mb,
             is_user_paused: raw.is_user_paused,
+            allow_gpu: raw.allow_gpu,
+            allow_npu: raw.allow_npu,
+            max_threads: raw.max_threads,
+            daily_compute_limit_minutes: raw.daily_compute_limit_minutes,
+            allow_mobile_data: raw.allow_mobile_data,
+            bandwidth_cap_kbps: raw.bandwidth_cap_kbps,
+            temporary_share_hours: raw.temporary_share_hours,
         }
     }
 }
@@ -330,20 +372,154 @@ impl Default for ProviderPolicy {
             max_cpu_pct: 60,
             max_memory_mb: 512,
             is_user_paused: false,
+            allow_gpu: false,
+            allow_npu: false,
+            max_threads: 4,
+            daily_compute_limit_minutes: 480,
+            allow_mobile_data: false,
+            bandwidth_cap_kbps: 0,
+            temporary_share_hours: 0,
         }
     }
+}
+
+/// Capability Status for specialized accelerators
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", content = "score", rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CapabilityStatus {
+    Score(u8),
+    Untested,
+    Unavailable,
+}
+
+impl Default for CapabilityStatus {
+    fn default() -> Self {
+        Self::Untested
+    }
+}
+
+/// Normalized 0-100 multidimensional capability vector
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CapabilityVector {
+    pub cpu: u8,
+    pub wasm: u8,
+    pub fp: u8,
+    pub memory: u8,
+    pub gpu: CapabilityStatus,
+    pub npu: CapabilityStatus,
+    pub storage: u8,
+    pub network: u8,
+    pub energy_efficiency: u8,
+    pub sustained_performance: u8,
+    pub reliability: u8,
+    pub security: u8,
+}
+
+impl Default for CapabilityVector {
+    fn default() -> Self {
+        Self {
+            cpu: 75,
+            wasm: 75,
+            fp: 70,
+            memory: 70,
+            gpu: CapabilityStatus::Untested,
+            npu: CapabilityStatus::Untested,
+            storage: 75,
+            network: 80,
+            energy_efficiency: 85,
+            sustained_performance: 80,
+            reliability: 95,
+            security: 100,
+        }
+    }
+}
+
+/// Unaltered raw empirical measurements from bounded microbenchmarks
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct RawBenchmarkMetrics {
+    pub cpu_int_ops_per_sec: f64,
+    pub cpu_fp_mflops: f64,
+    pub cpu_single_thread_score: f64,
+    pub cpu_multi_thread_score: f64,
+    pub wasm_fuel_mips: f64,
+    pub memory_bandwidth_mb_s: f64,
+    pub memory_latency_ns: f64,
+    pub storage_seq_write_mb_s: Option<f64>,
+    pub storage_random_read_iops: Option<f64>,
+    pub network_rtt_ms: f64,
+    pub network_throughput_kbps: f64,
+    pub thermal_baseline_celsius: f32,
+    pub sustained_thermal_drift_celsius: f32,
+    pub sustained_throttling_ratio: f32,
+    pub vulkan_gpu_detected: bool,
+    pub vulkan_compute_tested: bool,
+    pub vulkan_gflops: Option<f64>,
+    pub ai_npu_detected: bool,
+    pub ai_npu_runtime_tested: bool,
+    pub ai_npu_tops: Option<f64>,
+    pub reliability_history_score: f32,
+}
+
+/// Qualification Tier classification
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum QualificationTier {
+    #[default]
+    Qualified,
+    PartiallyQualified,
+    Stale,
+    Unqualified,
+}
+
+fn default_benchmark_version() -> String {
+    "v1.2.0".to_string()
+}
+fn default_runtime_env() -> String {
+    "Universal Edge Sandboxed Runtime".to_string()
+}
+fn default_edge_score() -> u8 {
+    75
 }
 
 /// Empirical qualification results produced by edge node sandbox microbenchmarks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeQualificationProfile {
+    #[serde(default = "default_benchmark_version")]
+    pub benchmark_version: String,
     pub qualified_at_ms: i64,
+    #[serde(default = "default_runtime_env")]
+    pub runtime_environment: String,
     pub wasm_conformance_passed: bool,
     pub wasi_preview1_passed: bool,
     pub measured_fuel_mips: f64,
     pub measured_memory_max_pages: u32,
+    #[serde(default)]
+    pub raw_metrics: RawBenchmarkMetrics,
+    #[serde(default)]
+    pub capability_vector: CapabilityVector,
+    #[serde(default = "default_edge_score")]
+    pub edge_score: u8,
+    #[serde(default)]
+    pub tier: QualificationTier,
     pub qualification_hash: String,
     pub qualification_signature: String,
+}
+
+/// Dynamic live capacity reflecting immediate availability and safeguards
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveCapacity {
+    pub available_ram_mb: u64,
+    pub available_storage_mb: u64,
+    pub cpu_headroom_pct: u8,
+    pub battery_headroom_pct: u8,
+    pub is_charging: bool,
+    pub thermal_safe: bool,
+    pub thermal_status: ThermalStatus,
+    pub network_unmetered: bool,
+    pub network_latency_ms: u32,
+    pub active_job_slots: u32,
+    pub throttled: bool,
+    pub capacity_multiplier: f32,
 }
 
 /// Complete node record maintained by Control Plane
@@ -392,6 +568,60 @@ impl NodeRecord {
             return false;
         }
         true
+    }
+
+    /// Evaluates dynamic live capacity reflecting current headroom and owner policies
+    pub fn compute_live_capacity(&self) -> LiveCapacity {
+        let is_charging = self.telemetry.charging_state.is_charging();
+        let thermal_safe = self.telemetry.thermal_status <= self.policy.max_thermal_threshold;
+        let network_unmetered = self.telemetry.network_type.is_unmetered();
+        let ping = self.telemetry.round_trip_ping_ms.unwrap_or(50);
+
+        let active_slots = self
+            .policy
+            .max_concurrent_jobs
+            .saturating_sub(self.telemetry.active_job_count);
+        let cpu_headroom = (self.policy.max_cpu_pct)
+            .saturating_sub(self.telemetry.cpu_usage_pct as u8);
+        let battery_headroom = if self.telemetry.battery_pct > self.policy.min_battery_threshold_pct
+        {
+            self.telemetry.battery_pct - self.policy.min_battery_threshold_pct
+        } else {
+            0
+        };
+
+        // Determine dynamic multiplier (0.0 to 1.0)
+        let multiplier = if !self.is_ready_for_workload() {
+            0.0
+        } else {
+            let charge_mult = if is_charging { 1.0 } else { 0.7 };
+            let therm_mult = match self.telemetry.thermal_status {
+                ThermalStatus::None => 1.0,
+                ThermalStatus::Light => 0.9,
+                ThermalStatus::Moderate => 0.6,
+                _ => 0.2,
+            };
+            let load_mult = (cpu_headroom as f32 / 100.0).clamp(0.2, 1.0);
+            (charge_mult * therm_mult * load_mult).clamp(0.0, 1.0)
+        };
+
+        LiveCapacity {
+            available_ram_mb: self
+                .telemetry
+                .available_ram_mb
+                .min(self.policy.max_memory_mb),
+            available_storage_mb: self.telemetry.available_storage_mb,
+            cpu_headroom_pct: cpu_headroom,
+            battery_headroom_pct: battery_headroom,
+            is_charging,
+            thermal_safe,
+            thermal_status: self.telemetry.thermal_status,
+            network_unmetered,
+            network_latency_ms: ping,
+            active_job_slots: active_slots,
+            throttled: self.telemetry.thermal_status >= ThermalStatus::Moderate,
+            capacity_multiplier: multiplier,
+        }
     }
 }
 
@@ -465,6 +695,7 @@ mod tests {
         node.telemetry.active_job_count = 1;
         node.policy.max_concurrent_jobs = 1;
         assert!(!node.is_ready_for_workload());
+        node.telemetry.active_job_count = 0;
 
         // Test 9: Network & charging variants
         assert!(ChargingState::ChargingWireless.is_charging());
@@ -474,13 +705,19 @@ mod tests {
         assert!(!NetworkType::CellularMetered.is_unmetered());
         assert!(!NetworkType::Offline.is_unmetered());
 
-        // Test 10: Qualification profile serde
+        // Test 10: Qualification profile serde and live capacity
         let q = NodeQualificationProfile {
+            benchmark_version: "v1.2.0".into(),
             qualified_at_ms: 1000,
+            runtime_environment: "Test Sandbox".into(),
             wasm_conformance_passed: true,
             wasi_preview1_passed: true,
             measured_fuel_mips: 250.5,
             measured_memory_max_pages: 512,
+            raw_metrics: RawBenchmarkMetrics::default(),
+            capability_vector: CapabilityVector::default(),
+            edge_score: 85,
+            tier: QualificationTier::Qualified,
             qualification_hash: "hash_qual".into(),
             qualification_signature: "sig_qual".into(),
         };
@@ -488,5 +725,14 @@ mod tests {
         let q_deser: NodeQualificationProfile = serde_json::from_str(&q_json).unwrap();
         assert_eq!(q_deser.qualification_hash, "hash_qual");
         assert_eq!(q_deser.measured_fuel_mips, 250.5);
+        assert_eq!(q_deser.edge_score, 85);
+        assert_eq!(q_deser.tier, QualificationTier::Qualified);
+
+        // Test 11: Live Capacity computation
+        let live = node.compute_live_capacity();
+        assert!(live.capacity_multiplier > 0.0);
+        assert!(live.is_charging);
+        assert!(live.thermal_safe);
+        assert_eq!(live.cpu_headroom_pct, 55); // 60 max - 5 current
     }
 }

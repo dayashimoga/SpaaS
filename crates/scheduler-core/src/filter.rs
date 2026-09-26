@@ -25,6 +25,53 @@ pub enum FilterRejectionReason {
         max_allowed: ThermalStatus,
         actual: ThermalStatus,
     },
+    AcceleratorNotSupported {
+        required: String,
+    },
+}
+
+impl FilterRejectionReason {
+    pub fn failed_constraint(&self) -> &'static str {
+        match self {
+            Self::NotEnrolled => "ENROLLMENT",
+            Self::NodeOfflineOrPaused => "NODE_STATE",
+            Self::UserExplicitlyPaused => "OWNER_PAUSED",
+            Self::MaxConcurrentJobsReached => "CONCURRENCY_LIMIT",
+            Self::ArchitectureMismatch { .. } => "ARCHITECTURE",
+            Self::InsufficientRam { .. } => "RAM_LIMIT",
+            Self::BatteryTooLow { .. } => "BATTERY_THRESHOLD",
+            Self::ChargingRequiredNotMet => "CHARGING_REQUIRED",
+            Self::UnmeteredNetworkRequiredNotMet => "UNMETERED_NETWORK",
+            Self::ThermalThrottled { .. } => "THERMAL_LIMIT",
+            Self::AcceleratorNotSupported { .. } => "ACCELERATOR_REQUIRED",
+        }
+    }
+
+    pub fn description(&self) -> String {
+        match self {
+            Self::NotEnrolled => "Node enrollment is not active or suspended".into(),
+            Self::NodeOfflineOrPaused => "Node is currently offline or paused".into(),
+            Self::UserExplicitlyPaused => "Device owner explicitly paused compute contribution".into(),
+            Self::MaxConcurrentJobsReached => "Node has reached its owner-configured max concurrent jobs".into(),
+            Self::ArchitectureMismatch { required, actual } => {
+                format!("CPU architecture mismatch: requires {:?}, node is {}", required, actual)
+            }
+            Self::InsufficientRam { required_mb, available_mb } => {
+                format!("Insufficient free RAM: requires {} MB, available is {} MB", required_mb, available_mb)
+            }
+            Self::BatteryTooLow { threshold_pct, actual_pct } => {
+                format!("Battery below threshold: requires >= {}%, currently at {}%", threshold_pct, actual_pct)
+            }
+            Self::ChargingRequiredNotMet => "Workload or node policy requires active AC/Wireless charging".into(),
+            Self::UnmeteredNetworkRequiredNotMet => "Workload or node policy requires unmetered Wi-Fi/Ethernet".into(),
+            Self::ThermalThrottled { max_allowed, actual } => {
+                format!("Thermal status exceeded: allowed {:?}, current is {:?}", max_allowed, actual)
+            }
+            Self::AcceleratorNotSupported { required } => {
+                format!("Required accelerator '{}' not supported or denied by owner policy", required)
+            }
+        }
+    }
 }
 
 /// Evaluates if a node is strictly eligible to execute a given workload
@@ -105,6 +152,21 @@ pub fn evaluate_node_eligibility(
             max_allowed: policy_max_thermal,
             actual: node.telemetry.thermal_status,
         });
+    }
+
+    // 11. Hardware accelerator check
+    if let Some(ref acc) = req_caps.required_accelerator {
+        let acc_lower = acc.to_lowercase();
+        if acc_lower == "gpu" && (!node.capabilities.has_gpu_vulkan || !node.policy.allow_gpu) {
+            return Err(FilterRejectionReason::AcceleratorNotSupported {
+                required: "GPU/Vulkan".into(),
+            });
+        }
+        if acc_lower == "npu" && (!node.capabilities.has_npu || !node.policy.allow_npu) {
+            return Err(FilterRejectionReason::AcceleratorNotSupported {
+                required: "NPU/AI".into(),
+            });
+        }
     }
 
     Ok(())

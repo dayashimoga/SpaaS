@@ -262,6 +262,33 @@
 
         <!-- Tab 2: Devices -->
         <section id="tab-view-devices" class="tab-pane">
+          <!-- Real/Simulated Fleet Separation Filter Bar -->
+          <div class="fleet-filter-bar mb-3">
+            <div class="fleet-filter-pills">
+              <button type="button" class="btn btn-sm btn-filter-tab active" data-fleet-tab="physical" id="tab-filter-physical">
+                📱 Physical Devices (<span id="tab-count-physical">0</span>)
+              </button>
+              <button type="button" class="btn btn-sm btn-filter-tab" data-fleet-tab="desktop" id="tab-filter-desktop">
+                💻 Desktops (<span id="tab-count-desktop">0</span>)
+              </button>
+              <button type="button" class="btn btn-sm btn-filter-tab" data-fleet-tab="emulator" id="tab-filter-emulator">
+                🤖 Emulators (<span id="tab-count-emulator">0</span>)
+              </button>
+              <button type="button" class="btn btn-sm btn-filter-tab" data-fleet-tab="simulated" id="tab-filter-simulated">
+                🧪 Simulated (<span id="tab-count-simulated">0</span>)
+              </button>
+              <button type="button" class="btn btn-sm btn-filter-tab" data-fleet-tab="all" id="tab-filter-all">
+                🌐 All Fleet (<span id="tab-count-all">0</span>)
+              </button>
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <button type="button" id="btn-exclude-sim-global" class="btn btn-xs btn-outline-cyan">
+                🛡️ Exclude Simulated Compute
+              </button>
+              <button id="btn-devices-add" class="btn btn-sm btn-primary">+ Add Device</button>
+            </div>
+          </div>
+
           <div class="card">
             <div class="table-header">
               <div>
@@ -270,12 +297,6 @@
               </div>
               <div class="filter-group">
                 <input type="text" id="node-search" placeholder="Search by model, ID or arch..." class="input-search" />
-                <select id="node-filter-type" class="select-filter">
-                  <option value="ALL">All Device Types</option>
-                  <option value="PHONE">Smartphones Only</option>
-                  <option value="DESKTOP">Desktops / Laptops</option>
-                  <option value="SIMULATED">Simulated Only</option>
-                </select>
                 <select id="node-filter-state" class="select-filter">
                   <option value="ALL">All States</option>
                   <option value="IDLE">Idle</option>
@@ -283,15 +304,14 @@
                   <option value="PAUSED">Paused</option>
                   <option value="OFFLINE">Offline</option>
                 </select>
-                <button id="btn-devices-add" class="btn btn-sm btn-primary">+ Add Device</button>
               </div>
             </div>
 
             <!-- Empty State for Devices -->
             <div id="devices-empty-state" class="empty-state-container hidden">
               <div class="empty-state-icon">📱</div>
-              <h3>No devices connected to SPaaS fabric</h3>
-              <p>Voluntarily enroll a spare Android smartphone or run a local desktop worker to begin processing workloads.</p>
+              <h3>No devices connected in this category</h3>
+              <p id="empty-state-category-desc">Enroll a spare Android smartphone or run a local desktop worker to begin processing workloads.</p>
               <div class="empty-state-actions">
                 <button id="btn-empty-add-phone" class="btn btn-primary">+ Add Android Smartphone</button>
                 <button id="btn-empty-start-demo" class="btn btn-secondary">Start Local Demo Cluster</button>
@@ -323,15 +343,29 @@
 
           <!-- Embedded Device Details Operational Management Panel (8 Sub-tabs) -->
           <div class="card mt-4" id="device-details-panel">
-            <div class="card-header">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
               <div>
-                <h3>Device Operational Management (<span id="detail-node-title">None Selected</span>)</h3>
-                <span id="detail-node-badge" class="badge badge-proven">SELECTED DEVICE</span>
-                <span id="detail-device-evidence" class="badge badge-simulated">SIMULATED</span>
+                <h3 style="margin-bottom: 0.25rem;">Device Operational Management (<span id="detail-node-title">None Selected</span>)</h3>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                  <span id="detail-node-badge" class="badge badge-proven">SELECTED DEVICE</span>
+                  <span id="detail-device-evidence" class="badge badge-simulated">SIMULATED</span>
+                  <span id="detail-qual-tier-badge" class="badge" style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10B981; color: #10B981;">QUALIFIED</span>
+                </div>
               </div>
+              <div class="detail-quick-actions" style="display: flex; gap: 0.5rem;">
+                <button type="button" id="btn-device-run-qualification" class="btn btn-sm btn-outline-cyan" title="Run real empirical CPU, FP, RAM, Storage, and WASM microbenchmarks">
+                  ⚡ Run Empirical Qualification
+                </button>
+                <button type="button" id="btn-device-run-challenge" class="btn btn-sm btn-primary" title="Force cryptographically random challenge exclusively to this physical node">
+                  🎯 Run Verification Job
+                </button>
+              </div>
+            </div>
+
+            <div class="card-body" style="padding: 1rem 1.5rem;">
               <div class="device-subtabs">
                 <button class="subtab-btn active" data-devicetab="overview">Overview</button>
-                <button class="subtab-btn" data-devicetab="compute">Compute</button>
+                <button class="subtab-btn" data-devicetab="compute">Performance &amp; Vector</button>
                 <button class="subtab-btn" data-devicetab="power">Power/Thermal</button>
                 <button class="subtab-btn" data-devicetab="network">Network</button>
                 <button class="subtab-btn" data-devicetab="security">Security</button>
@@ -339,33 +373,60 @@
                 <button class="subtab-btn" data-devicetab="earnings">Earnings</button>
                 <button class="subtab-btn" data-devicetab="controls">Diagnostics &amp; Controls</button>
               </div>
-            </div>
 
-            <!-- Subtab 1: Overview -->
-            <div id="devicetab-view-overview" class="device-pane active">
-              <div class="spec-list">
-                <div class="spec-row"><span class="spec-label">Node ID:</span> <span id="detail-node-id" class="spec-val font-mono">None Selected</span></div>
-                <div class="spec-row"><span class="spec-label">Device Model / Name:</span> <span id="detail-hw-model" class="spec-val font-bold text-cyan">-</span></div>
-                <div class="spec-row"><span class="spec-label">Hardware Type:</span> <span id="detail-hw-type" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">OS &amp; Platform:</span> <span id="detail-hw-os" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Region:</span> <span id="detail-hw-region" class="spec-val font-mono">local</span></div>
-                <div class="spec-row"><span class="spec-label">Operational State:</span> <span id="detail-hw-state" class="spec-val font-bold">-</span></div>
-                <div class="spec-row"><span class="spec-label">Last Heartbeat:</span> <span id="detail-hw-last-hb" class="spec-val font-mono">-</span></div>
+              <!-- Subtab 1: Overview -->
+              <div id="devicetab-view-overview" class="device-pane active">
+                <div class="spec-list">
+                  <div class="spec-row"><span class="spec-label">Node ID:</span> <span id="detail-node-id" class="spec-val font-mono">None Selected</span></div>
+                  <div class="spec-row"><span class="spec-label">Device Model / Name:</span> <span id="detail-hw-model" class="spec-val font-bold text-cyan">-</span></div>
+                  <div class="spec-row"><span class="spec-label">Hardware Type:</span> <span id="detail-hw-type" class="spec-val">-</span></div>
+                  <div class="spec-row"><span class="spec-label">OS &amp; Platform:</span> <span id="detail-hw-os" class="spec-val">-</span></div>
+                  <div class="spec-row"><span class="spec-label">Region:</span> <span id="detail-hw-region" class="spec-val font-mono">local</span></div>
+                  <div class="spec-row"><span class="spec-label">Operational State:</span> <span id="detail-hw-state" class="spec-val font-bold">-</span></div>
+                  <div class="spec-row"><span class="spec-label">Last Heartbeat:</span> <span id="detail-hw-last-hb" class="spec-val font-mono">-</span></div>
+                </div>
               </div>
-            </div>
 
-            <!-- Subtab 2: Compute -->
-            <div id="devicetab-view-compute" class="device-pane">
-              <div class="spec-list">
-                <div class="spec-row"><span class="spec-label">CPU Architecture:</span> <span id="detail-hw-arch" class="spec-val font-mono">-</span></div>
-                <div class="spec-row"><span class="spec-label">CPU Cores:</span> <span id="detail-hw-cores" class="spec-val font-mono">-</span></div>
-                <div class="spec-row"><span class="spec-label">Total / Available RAM:</span> <span id="detail-hw-ram" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Storage Capacity:</span> <span id="detail-hw-storage" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Fuel MIPS Benchmark:</span> <span id="detail-node-mips" class="spec-val font-bold text-cyan">-</span></div>
-                <div class="spec-row"><span class="spec-label">Vulkan GPU Support:</span> <span id="detail-hw-accel" class="spec-val text-emerald">Available</span></div>
-                <div class="spec-row"><span class="spec-label">Hardware NPU:</span> <span id="detail-hw-npu" class="spec-val text-muted">None / Reserved (HARDWARE-REQUIRED)</span></div>
+              <!-- Subtab 2: Performance & Capability Vector -->
+              <div id="devicetab-view-compute" class="device-pane">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                  <h4 style="color: var(--accent-cyan); margin: 0;">12-Dimensional Capability Vector (Normalized 0–100)</h4>
+                  <span id="detail-vector-summary" class="badge" style="background: rgba(6, 182, 212, 0.15); color: #06B6D4;">Edge Score: 85</span>
+                </div>
+
+                <div class="capability-grid" id="detail-capability-grid">
+                  <!-- Rendered dynamically by main.js -->
+                </div>
+
+                <div class="card p-3 mt-3" style="background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255,255,255,0.06);">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <h4 style="margin: 0; font-size: 0.9rem; color: #f8fafc;">Live Capacity &amp; Immediate Safeguards</h4>
+                    <span id="detail-live-multiplier" class="font-mono text-emerald" style="font-weight: bold;">Multiplier: 1.00x</span>
+                  </div>
+                  <div class="spec-list" style="font-size: 0.82rem;">
+                    <div class="spec-row"><span class="spec-label">Available Headroom:</span> <span id="detail-live-headroom" class="spec-val font-mono">RAM: 1800MB | CPU: 60% | Batt: 85%</span></div>
+                    <div class="spec-row"><span class="spec-label">Safeguards Active:</span> <span id="detail-live-safeguards" class="spec-val text-emerald">Charging AC (Safe) | Thermals Nominal | Network Unmetered</span></div>
+                  </div>
+                </div>
+
+                <div class="mt-3">
+                  <h4 style="color: var(--text-main); font-size: 0.9rem; margin-bottom: 0.5rem;">Unaltered Empirical Microbenchmarks (Raw Metrics)</h4>
+                  <div style="overflow-x: auto;">
+                    <table class="raw-benchmark-table">
+                      <thead>
+                        <tr>
+                          <th>Benchmark Metric</th>
+                          <th>Raw Empirical Measurement</th>
+                          <th>Unit / Environment</th>
+                        </tr>
+                      </thead>
+                      <tbody id="raw-benchmarks-table-body">
+                        <tr><td colspan="3" class="text-center text-muted">Run qualification to measure live hardware performance.</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
-            </div>
 
             <!-- Subtab 3: Power/Thermal -->
             <div id="devicetab-view-power" class="device-pane">
@@ -670,6 +731,7 @@
                 <button class="subtab-btn" data-jobtab="result">Execution Result</button>
                 <button class="subtab-btn" data-jobtab="verification">Verification &amp; Proof</button>
                 <button class="subtab-btn" data-jobtab="metering">Metering &amp; Economics</button>
+                <button class="subtab-btn" data-jobtab="scheduler-decision">Why this device?</button>
               </div>
             </div>
 
@@ -751,10 +813,67 @@
               <div class="spec-list">
                 <div class="spec-row"><span class="spec-label">Settlement Status:</span> <span class="spec-val text-emerald font-bold">SETTLED (Idempotent)</span></div>
                 <div class="spec-row"><span class="spec-label">Total Consumer Charge:</span> <span id="detail-job-credits" class="spec-val font-bold text-emerald">50 TEST CREDITS</span></div>
-                <div class="spec-row"><span class="spec-label">Formula Breakdown:</span> <span id="detail-job-formula" class="spec-val font-mono text-cyan">Base (10) + Fuel (35) + Mem-Time (5) = 50 TEST CREDITS</span></div>
-                <div class="spec-row"><span class="spec-label">Provider Payout (90%):</span> <span id="detail-job-provider-earned" class="spec-val font-bold text-emerald">45 TEST CREDITS</span></div>
-                <div class="spec-row"><span class="spec-label">Platform Test Fee (10%):</span> <span id="detail-job-platform-fee" class="spec-val text-muted">5 TEST CREDITS</span></div>
+                <div class="spec-row"><span class="spec-label">Formula Breakdown:</span> <span id="detail-job-formula" class="spec-val font-mono text-cyan">Base (1.0) + Fuel (35.0) + Mem-Time (5.0) + Bandwidth (0.0) = 41.0 TEST CREDITS</span></div>
+                <div class="spec-row"><span class="spec-label">Provider Credit (90%):</span> <span id="detail-job-provider-earned" class="spec-val font-bold text-emerald">36.9 TEST CREDITS</span></div>
+                <div class="spec-row"><span class="spec-label">Protocol Reserve (10%):</span> <span id="detail-job-platform-fee" class="spec-val text-muted">4.1 TEST CREDITS</span></div>
                 <div class="spec-row"><span class="spec-label">Idempotency Transaction Key:</span> <span id="detail-job-idempotency-key" class="spec-val font-mono text-cyan">-</span></div>
+              </div>
+            </div>
+
+            <!-- Sub-tab 7: Scheduler Decision & "Why this device?" -->
+            <div id="jobtab-view-scheduler-decision" class="jobtab-pane">
+              <div class="scheduler-decision-box">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                  <h4 style="color: var(--accent-cyan); margin: 0;">Autonomous Scheduler Decision &amp; Fit Scoring</h4>
+                  <span id="decision-score-badge" class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10B981; font-weight: bold;">Score: -</span>
+                </div>
+                <div class="spec-list" style="margin-bottom: 1rem;">
+                  <div class="spec-row"><span class="spec-label">Selected Node ID:</span> <span id="decision-selected-node-id" class="spec-val font-mono">-</span></div>
+                  <div class="spec-row"><span class="spec-label">Device Model / Nature:</span> <span id="decision-selected-model" class="spec-val font-bold text-emerald">-</span></div>
+                  <div class="spec-row"><span class="spec-label">Selection Rationale:</span> <span id="decision-rationale" class="spec-val text-cyan">-</span></div>
+                </div>
+
+                <h4 style="font-size: 0.85rem; color: #f8fafc; margin-top: 1rem; margin-bottom: 0.5rem;">Workload Dimension Requirements &amp; Weights</h4>
+                <div id="decision-weights-pills" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                  <!-- Dimension weights pills rendered here -->
+                </div>
+
+                <h4 style="font-size: 0.85rem; color: #f8fafc; margin-top: 1rem; margin-bottom: 0.5rem;">Ranked Eligible Candidates</h4>
+                <div style="overflow-x: auto; margin-bottom: 1rem;">
+                  <table class="raw-benchmark-table">
+                    <thead>
+                      <tr>
+                        <th>Rank</th>
+                        <th>Device Model</th>
+                        <th>Node ID</th>
+                        <th>Type</th>
+                        <th>Fit Score (0–100)</th>
+                        <th>Capability Dot Product Rationale</th>
+                      </tr>
+                    </thead>
+                    <tbody id="decision-candidates-table-body">
+                      <tr><td colspan="6" class="text-center text-muted">No candidate evaluation data recorded for this job.</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <h4 style="font-size: 0.85rem; color: #f8fafc; margin-top: 1rem; margin-bottom: 0.5rem;">Rejected Devices &amp; Safety Filter Violations</h4>
+                <div style="overflow-x: auto;">
+                  <table class="raw-benchmark-table">
+                    <thead>
+                      <tr>
+                        <th>Device Model</th>
+                        <th>Node ID</th>
+                        <th>Type</th>
+                        <th>Failed Policy / Filter</th>
+                        <th>Explanation</th>
+                      </tr>
+                    </thead>
+                    <tbody id="decision-rejections-table-body">
+                      <tr><td colspan="5" class="text-center text-muted">No devices rejected by safety policies for this workload.</td></tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>

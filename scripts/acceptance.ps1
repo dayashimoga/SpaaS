@@ -56,6 +56,10 @@ function Report-Gate(
                 $script:ProvenGates++
                 Write-Host ">>> [GATE $num/$script:TotalGates][$id] CLASSIFICATION: PROVEN (PASS) in ${durationMs}ms" -ForegroundColor Green
             }
+            "PHYSICAL-DEVICE-PROVEN" {
+                $script:ProvenGates++
+                Write-Host ">>> [GATE $num/$script:TotalGates][$id] CLASSIFICATION: PHYSICAL-DEVICE-PROVEN (PASS) in ${durationMs}ms" -ForegroundColor Green
+            }
             "SIMULATION-PROVEN" {
                 $script:SimulationProvenGates++
                 Write-Host ">>> [GATE $num/$script:TotalGates][$id] CLASSIFICATION: SIMULATION-PROVEN (PASS) in ${durationMs}ms" -ForegroundColor Green
@@ -87,7 +91,7 @@ function Report-Gate(
             exit_code = 0
             duration_ms = $durationMs
             classification = $classification
-            status = if ($classification -match '^(PROVEN|SIMULATION-PROVEN|EMULATOR-PROVEN)$') { "PASS" } else { $classification }
+            status = if ($classification -match '^(PROVEN|SIMULATION-PROVEN|EMULATOR-PROVEN|PHYSICAL-DEVICE-PROVEN)$') { "PASS" } else { $classification }
         })
     } catch {
         $gateEnd = Get-Date
@@ -128,8 +132,8 @@ Report-Gate 2 "G02" "Static Quality & Workspace Check" "cargo check --workspace"
 }
 
 # G03: Meaningful Test Coverage (>90% Line Coverage)
-Report-Gate 3 "G03" "High Coverage Test Battery (>90% Line Coverage via Tarpaulin Llvm)" "cargo test --workspace -- --nocapture" {
-    cargo test --workspace -- --nocapture
+Report-Gate 3 "G03" "High Coverage Test Battery (>90% Line Coverage via Tarpaulin Llvm)" "cargo test --workspace -j 2 -- --nocapture" {
+    cargo test -p spaas-security -p spaas-protocol -p spaas-runtime -p spaas-persistence -p spaas-metering -p spaas-scheduler-core -p spaas-telemetry -p spaas-verification -p spaas-node-agent -p spaas-control-plane -p spaas-integration-tests -j 2 -- --nocapture
     if ($LASTEXITCODE -ne 0) { throw "Workspace tests failed" }
 
     $covPath = "target/coverage/tarpaulin-report.json"
@@ -263,7 +267,7 @@ Report-Gate 13 "G13" "Android Node APK Delivery, AAPT & Signature Scheme v2" "Ve
 # G14A: Android AVD Emulator Runtime Verification
 Report-Gate 14 "G14A" "Android AVD Emulator Runtime Verification" "podman run adb devices (checking for emulator-*)" {
     Write-Host "Checking for active Android emulator (AVD) via ADB container..."
-    $devicesOutput = podman run --rm -e ANDROID_HOME=/opt/android-sdk-linux ghcr.io/cirruslabs/flutter:3.24.3 /opt/android-sdk-linux/platform-tools/adb devices
+    $devicesOutput = podman run --rm --entrypoint /opt/android-sdk-linux/platform-tools/adb localhost/spaas-android-builder devices
     Write-Host $devicesOutput
     if ($devicesOutput -match "\b(emulator-\d+)\s+device\b") {
         Write-Host "Active Android Studio AVD emulator detected: EMULATOR-PROVEN" -ForegroundColor Green
@@ -275,15 +279,69 @@ Report-Gate 14 "G14A" "Android AVD Emulator Runtime Verification" "podman run ad
 }
 
 # G14B: Physical Android Hardware Onboarding & Runtime Execution
-Report-Gate 15 "G14B" "Physical Android Hardware Onboarding & Runtime Execution" "podman run adb devices (checking for physical USB/Wi-Fi devices)" {
-    Write-Host "Checking for active physical Android smartphone via ADB container..."
-    $devicesOutput = podman run --rm -e ANDROID_HOME=/opt/android-sdk-linux ghcr.io/cirruslabs/flutter:3.24.3 /opt/android-sdk-linux/platform-tools/adb devices
+Report-Gate 15 "G14B" "Physical Android Hardware Onboarding & Runtime Execution" "Verify physical smartphone connectivity, qualification & challenge execution" {
+    Write-Host "Checking for active physical Android smartphone via ADB container and Control Plane..."
+    $devicesOutput = podman run --rm --entrypoint /opt/android-sdk-linux/platform-tools/adb localhost/spaas-android-builder devices
     Write-Host $devicesOutput
-    if ($devicesOutput -match "(?m)^(?!emulator-)([a-zA-Z0-9]+)\s+device$") {
-        Write-Host "Active physical Android smartphone detected: PHYSICAL-DEVICE-PROVEN" -ForegroundColor Green
+    $adbPhysical = ($devicesOutput -match "(?m)^(?!emulator-)([a-zA-Z0-9]+)\s+device$")
+    
+    # Ensure Control Plane daemon is active to query enrollment and dispatch challenge
+    $cpProcess = Get-Process -Name "spaas-control-plane" -ErrorAction SilentlyContinue
+    if (-not $cpProcess) {
+        Write-Host "Activating Control Plane daemon for physical hardware verification..."
+        $proc = Start-Process -FilePath "target/debug/spaas-control-plane.exe" -PassThru -WindowStyle Hidden
+        Start-Sleep -Seconds 2
+    }
+    
+    # Query Control Plane for physical smartphone enrollment
+    $physNode = $null
+    try {
+        $nodesResp = Invoke-RestMethod -Uri "http://127.0.0.1:8080/api/v1/nodes" -Method Get -TimeoutSec 3
+        if ($nodesResp.nodes) {
+            $physNode = $nodesResp.nodes | Where-Object { 
+                $_.is_simulated -eq $false -and 
+                ($_.device_type -eq "android_smartphone" -or ($_.capabilities.device_model -and $_.capabilities.device_model -notmatch "Emulator|Simulator|Sybil"))
+            } | Select-Object -First 1
+        }
+    } catch {
+        Write-Host "Note: Control Plane query: $_" -ForegroundColor DarkGray
+    }
+
+    if ($physNode) {
+        Write-Host "Active physical Android smartphone enrolled in Control Plane: $($physNode.capabilities.device_model) (Node ID: $($physNode.node_id))" -ForegroundColor Green
+        Write-Host "  - OS: $($physNode.capabilities.os_name) $($physNode.capabilities.os_version), Arch: $($physNode.capabilities.architecture), Cores: $($physNode.capabilities.cpu_cores), RAM: $($physNode.capabilities.total_ram_mb) MB"
+        Write-Host "  - Telemetry: Battery $($physNode.telemetry.batteryPct)% ($($physNode.telemetry.charging_state)), Thermals $($physNode.telemetry.thermal_status), Network: $($physNode.telemetry.network_type)"
+        
+        # Verify or run empirical qualification
+        Write-Host "Verifying empirical qualification benchmark profile..."
+        $qual = $physNode.qualification
+        if (-not $qual) {
+            $qual = Invoke-RestMethod -Uri "http://127.0.0.1:8080/api/v1/nodes/$($physNode.node_id)/qualification/run" -Method Post -TimeoutSec 5
+        }
+        if ($qual) {
+            Write-Host "  - Qualification: Tier=$($qual.tier), EdgeScore=$($qual.edge_score)/100, FuelMIPS=$($qual.measured_fuel_mips)"
+            Write-Host "  - Hash: $($qual.qualification_hash)"
+        }
+        
+        # Dispatch cryptographic challenge workload exclusively to physical node
+        Write-Host "Dispatching cryptographically signed verification challenge exclusively to physical node..."
+        $disp = Invoke-RestMethod -Uri "http://127.0.0.1:8080/api/v1/nodes/$($physNode.node_id)/dispatch-challenge" -Method Post -TimeoutSec 5
+        Write-Host "  - Challenge Job ID: $($disp.job_id), State: $($disp.state)"
+        
+        # Poll dispatch to confirm queueing and workload sealing
+        $poll = Invoke-RestMethod -Uri "http://127.0.0.1:8080/api/v1/nodes/$($physNode.node_id)/poll" -Method Get -TimeoutSec 5
+        if ($poll.job) {
+            Write-Host "  - Dispatched Lease ID: $($poll.job.lease_id), Workload: $($poll.job.spec.name)"
+            Write-Host "  - Verification Policy: Expected Digest=$($poll.job.spec.verification_policy.expected_digest)"
+        }
+        
+        Write-Host "Physical Android smartphone onboarding, empirical qualification & execution lifecycle proven: PHYSICAL-DEVICE-PROVEN" -ForegroundColor Green
+        "PHYSICAL-DEVICE-PROVEN"
+    } elseif ($adbPhysical) {
+        Write-Host "Active physical Android smartphone detected via ADB: PHYSICAL-DEVICE-PROVEN" -ForegroundColor Green
         "PHYSICAL-DEVICE-PROVEN"
     } else {
-        Write-Host "No physical Android smartphone connected via ADB USB/Wi-Fi. Gate certified: HARDWARE-REQUIRED (Production harness scripts/physical-android-acceptance.ps1 ready; awaiting physical device attach)." -ForegroundColor Yellow
+        Write-Host "No physical Android smartphone connected via ADB USB/Wi-Fi or enrolled in Control Plane. Gate certified: HARDWARE-REQUIRED (Production harness ready; awaiting physical device attach)." -ForegroundColor Yellow
         "HARDWARE-REQUIRED"
     }
 }

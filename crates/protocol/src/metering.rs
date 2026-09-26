@@ -29,6 +29,44 @@ impl ResourceUsage {
         // Minimum charge of 1 credit for any completed execution
         (fuel_credits + memory_mb_sec + bandwidth_credits).max(1)
     }
+
+    /// Computes detailed deterministic Test Credit breakdown with transparent formula components
+    pub fn breakdown(&self, idempotency_key: &str) -> MeteringBreakdown {
+        let fuel_credits = self.fuel_consumed / 100_000;
+        let memory_mb_sec = (self.memory_peak_bytes / (1024 * 1024)) * (self.wall_time_ms / 1000);
+        let bandwidth_credits =
+            (self.network_ingress_bytes + self.network_egress_bytes) / (100 * 1024);
+        let base_credits = 1;
+        let total = (base_credits + fuel_credits + memory_mb_sec + bandwidth_credits).max(1);
+        let provider_share = (total * 95) / 100;
+        let protocol_reserve = total - provider_share;
+
+        MeteringBreakdown {
+            base_credits,
+            fuel_credits,
+            memory_credits: memory_mb_sec,
+            bandwidth_credits,
+            total_test_credits: total,
+            provider_share: provider_share.max(1),
+            protocol_reserve,
+            formula_description: "Base(1) + Fuel(1/100k) + RAM*Duration(MB*s) + Bandwidth(1/100KB) [TEST CREDITS ONLY - No Fiat/INR/USD Equivalence]".into(),
+            idempotency_key: idempotency_key.to_string(),
+        }
+    }
+}
+
+/// Detailed transparent breakdown of Test Credits
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeteringBreakdown {
+    pub base_credits: u64,
+    pub fuel_credits: u64,
+    pub memory_credits: u64,
+    pub bandwidth_credits: u64,
+    pub total_test_credits: u64,
+    pub provider_share: u64,
+    pub protocol_reserve: u64,
+    pub formula_description: String,
+    pub idempotency_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

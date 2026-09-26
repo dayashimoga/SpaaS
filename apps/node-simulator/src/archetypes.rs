@@ -72,6 +72,7 @@ pub fn generate_device_profile(
                 max_cpu_pct: 70,
                 max_memory_mb: 1024,
                 is_user_paused: false,
+                ..Default::default()
             },
             is_adversarial: false,
             drop_probability_pct: 0,
@@ -118,6 +119,7 @@ pub fn generate_device_profile(
                 max_cpu_pct: 50,
                 max_memory_mb: 512,
                 is_user_paused: false,
+                ..Default::default()
             },
             is_adversarial: false,
             drop_probability_pct: 0,
@@ -164,6 +166,7 @@ pub fn generate_device_profile(
                 max_cpu_pct: 40,
                 max_memory_mb: 256,
                 is_user_paused: false,
+                ..Default::default()
             },
             is_adversarial: false,
             drop_probability_pct: 5,
@@ -210,6 +213,7 @@ pub fn generate_device_profile(
                 max_cpu_pct: 50,
                 max_memory_mb: 512,
                 is_user_paused: false,
+                ..Default::default()
             },
             is_adversarial: false,
             drop_probability_pct: 0,
@@ -276,6 +280,7 @@ pub fn generate_device_profile(
                 max_cpu_pct: 100,
                 max_memory_mb: 4096,
                 is_user_paused: false,
+                ..Default::default()
             },
             is_adversarial: true, // Deliberately returns forged result digest
             drop_probability_pct: 0,

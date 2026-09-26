@@ -86,22 +86,29 @@ class ComputeForegroundService : Service() {
 
                 // Check safety policy auto-yield
                 val yieldReason = safetyPolicy.evaluateYield(telemetry)
-                if (yieldReason != null) {
+                val isCurrentlyYielding = yieldReason != null || isPaused
+
+                if (isCurrentlyYielding) {
                     currentNodeState = "PAUSED"
-                    val reasonLabel = when (yieldReason) {
-                        YieldReason.USER_PAUSED -> "Paused by user"
-                        YieldReason.DEVICE_UNPLUGGED -> "Paused: Charger disconnected"
-                        YieldReason.METERED_CELLULAR -> "Paused: Cellular network detected"
-                        YieldReason.LOW_BATTERY -> "Paused: Low battery (${telemetry.batteryPct}%)"
-                        YieldReason.THERMAL_OVERHEAT -> "Paused: Thermal limit reached (${telemetry.thermalStatus})"
+                    val reasonLabel = when {
+                        isPaused -> "Paused by user"
+                        yieldReason == YieldReason.USER_PAUSED -> "Paused by user"
+                        yieldReason == YieldReason.DEVICE_UNPLUGGED -> "Paused: Charger disconnected (Plug in to compute)"
+                        yieldReason == YieldReason.METERED_CELLULAR -> "Paused: Cellular network detected"
+                        yieldReason == YieldReason.LOW_BATTERY -> "Paused: Low battery (${telemetry.batteryPct}%)"
+                        yieldReason == YieldReason.THERMAL_OVERHEAT -> "Paused: Thermal limit reached (${telemetry.thermalStatus})"
+                        else -> "Paused by safety policy"
                     }
                     updateNotification(reasonLabel)
-                } else if (!isPaused) {
-                    // Send outbound heartbeat
-                    if (ComputeWorkerClient.isPaired) {
-                        ComputeWorkerClient.sendHeartbeat(telemetry, safetyPolicy)
+                }
 
-                        // Poll and execute job
+                // Send outbound heartbeat CONTINUOUSLY whenever paired
+                if (ComputeWorkerClient.isPaired) {
+                    val effectivePolicy = safetyPolicy.copy(isUserPaused = isCurrentlyYielding)
+                    ComputeWorkerClient.sendHeartbeat(telemetry, effectivePolicy)
+
+                    // Only poll and execute jobs if not yielding
+                    if (!isCurrentlyYielding) {
                         val executed = ComputeWorkerClient.pollAndExecuteJob()
                         if (executed != null) {
                             currentActiveJob = executed.workloadName
@@ -111,15 +118,15 @@ class ComputeForegroundService : Service() {
                             currentActiveJob = null
                         }
                     }
+                }
 
-                    if (currentActiveJob != null) {
-                        currentNodeState = "ACTIVE"
-                        updateNotification("ACTIVE: Executing $currentActiveJob (Battery: ${telemetry.batteryPct}%)")
-                    } else {
-                        currentNodeState = "IDLE"
-                        val pairStatus = if (ComputeWorkerClient.isPaired) "Paired" else "Standby"
-                        updateNotification("IDLE ($pairStatus) - Monitoring for work (Battery: ${telemetry.batteryPct}%)")
-                    }
+                if (currentActiveJob != null) {
+                    currentNodeState = "ACTIVE"
+                    updateNotification("ACTIVE: Executing $currentActiveJob (Battery: ${telemetry.batteryPct}%)")
+                } else if (!isCurrentlyYielding) {
+                    currentNodeState = "IDLE"
+                    val pairStatus = if (ComputeWorkerClient.isPaired) "Paired" else "Standby"
+                    updateNotification("IDLE ($pairStatus) - Ready for workloads (Battery: ${telemetry.batteryPct}%)")
                 }
 
                 delay(2000)

@@ -139,8 +139,172 @@ pub enum WorkloadPriority {
     Critical = 30,
 }
 
+fn default_weight_one() -> f64 {
+    1.0
+}
+fn default_weight_half() -> f64 {
+    0.5
+}
+
+/// Workload-specific dimension requirements and preference weights for scheduler scoring
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkloadDimensionWeights {
+    #[serde(default = "default_weight_one")]
+    pub cpu: f64,
+    #[serde(default = "default_weight_one")]
+    pub wasm: f64,
+    #[serde(default = "default_weight_half")]
+    pub fp: f64,
+    #[serde(default = "default_weight_half")]
+    pub memory: f64,
+    #[serde(default)]
+    pub gpu: f64,
+    #[serde(default)]
+    pub npu: f64,
+    #[serde(default = "default_weight_half")]
+    pub storage: f64,
+    #[serde(default = "default_weight_half")]
+    pub network: f64,
+    #[serde(default = "default_weight_one")]
+    pub reliability: f64,
+    #[serde(default = "default_weight_half")]
+    pub energy_efficiency: f64,
+}
+
+impl Default for WorkloadDimensionWeights {
+    fn default() -> Self {
+        Self {
+            cpu: 1.0,
+            wasm: 1.0,
+            fp: 0.5,
+            memory: 0.5,
+            gpu: 0.0,
+            npu: 0.0,
+            storage: 0.5,
+            network: 0.5,
+            reliability: 1.0,
+            energy_efficiency: 0.5,
+        }
+    }
+}
+
+impl WorkloadDimensionWeights {
+    pub fn for_sha256() -> Self {
+        Self {
+            cpu: 2.0,
+            wasm: 2.0,
+            fp: 0.1,
+            memory: 0.4,
+            gpu: 0.0,
+            npu: 0.0,
+            storage: 0.2,
+            network: 0.3,
+            reliability: 1.5,
+            energy_efficiency: 0.8,
+        }
+    }
+
+    pub fn for_matrix() -> Self {
+        Self {
+            cpu: 1.5,
+            wasm: 1.2,
+            fp: 2.5,
+            memory: 2.0,
+            gpu: 1.0,
+            npu: 0.0,
+            storage: 0.3,
+            network: 0.2,
+            reliability: 1.2,
+            energy_efficiency: 0.7,
+        }
+    }
+
+    pub fn for_ai() -> Self {
+        Self {
+            cpu: 1.0,
+            wasm: 1.0,
+            fp: 2.0,
+            memory: 2.2,
+            gpu: 2.0,
+            npu: 3.0,
+            storage: 1.0,
+            network: 0.5,
+            reliability: 1.5,
+            energy_efficiency: 1.2,
+        }
+    }
+
+    pub fn for_compression() -> Self {
+        Self {
+            cpu: 2.2,
+            wasm: 1.5,
+            fp: 0.2,
+            memory: 1.8,
+            gpu: 0.0,
+            npu: 0.0,
+            storage: 1.5,
+            network: 0.6,
+            reliability: 1.2,
+            energy_efficiency: 0.8,
+        }
+    }
+
+    pub fn for_batch() -> Self {
+        Self {
+            cpu: 1.0,
+            wasm: 1.0,
+            fp: 1.0,
+            memory: 1.0,
+            gpu: 0.0,
+            npu: 0.0,
+            storage: 1.0,
+            network: 0.8,
+            reliability: 2.0,
+            energy_efficiency: 2.0,
+        }
+    }
+}
+
+/// Evaluated candidate node during scheduling pass
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CandidateEvaluation {
+    pub node_id: Uuid,
+    pub device_model: String,
+    pub device_type: String,
+    pub is_physical: bool,
+    pub score: f64,
+    pub rank: usize,
+    pub dimension_scores: std::collections::HashMap<String, f64>,
+    pub live_multiplier: f32,
+}
+
+/// Rejected node during scheduler constraint filtering
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RejectedNodeEvaluation {
+    pub node_id: Uuid,
+    pub device_model: String,
+    pub reason: String,
+    pub failed_constraint: String,
+}
+
+/// Structured explanation of why a device was selected or rejected
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SchedulerDecision {
+    pub job_id: Uuid,
+    pub workload_name: String,
+    pub selected_node_id: Option<Uuid>,
+    pub selected_node_model: Option<String>,
+    pub eligible_candidate_count: usize,
+    pub total_evaluated_nodes: usize,
+    pub weights_used: WorkloadDimensionWeights,
+    pub top_candidates: Vec<CandidateEvaluation>,
+    pub rejected_nodes: Vec<RejectedNodeEvaluation>,
+    pub decision_rationale: String,
+    pub decided_at_ms: i64,
+}
+
 /// Versioned Workload Specification (Section 6)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkloadSpec {
     /// Unique workload identifier (UUID v4)
     pub workload_id: Uuid,
@@ -168,6 +332,9 @@ pub struct WorkloadSpec {
     pub network_policy: NetworkPolicy,
     /// Scheduling node requirements
     pub required_capabilities: RequiredCapabilities,
+    /// Dimension requirements and preference weights
+    #[serde(default)]
+    pub dimension_weights: WorkloadDimensionWeights,
     /// Fault tolerance policy
     pub retry_policy: RetryPolicy,
     /// Result integrity policy
@@ -215,6 +382,7 @@ impl Default for WorkloadSpec {
             limits: ResourceLimits::default(),
             network_policy: NetworkPolicy::None,
             required_capabilities: RequiredCapabilities::default(),
+            dimension_weights: WorkloadDimensionWeights::default(),
             retry_policy: RetryPolicy::default(),
             verification_policy: VerificationPolicy::SingleNode,
             priority: WorkloadPriority::Normal,
@@ -341,6 +509,7 @@ mod tests {
             retry_policy: RetryPolicy::default(),
             verification_policy: VerificationPolicy::SingleNode,
             priority: WorkloadPriority::High,
+            dimension_weights: WorkloadDimensionWeights::default(),
             submitter_signature: "sig123".into(),
             submitter_pubkey: "pubkey123".into(),
             created_at_ms: 1727260800000,

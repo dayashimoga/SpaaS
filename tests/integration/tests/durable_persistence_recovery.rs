@@ -73,6 +73,7 @@ async fn test_control_plane_durable_restart_recovery() {
             retry_policy: RetryPolicy::default(),
             verification_policy: VerificationPolicy::SingleNode,
             priority: WorkloadPriority::High,
+            dimension_weights: Default::default(),
             submitter_signature: "sub_sig".into(),
             submitter_pubkey: "sub_pub".into(),
             created_at_ms: 1500,

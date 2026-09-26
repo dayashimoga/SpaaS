@@ -25,6 +25,7 @@ fn test_job_lease_lifecycle_and_late_result_rejection() {
         retry_policy: RetryPolicy::default(),
         verification_policy: VerificationPolicy::SingleNode,
         priority: WorkloadPriority::Normal,
+        dimension_weights: Default::default(),
         submitter_signature: "".into(),
         submitter_pubkey: "".into(),
         created_at_ms: 1000,

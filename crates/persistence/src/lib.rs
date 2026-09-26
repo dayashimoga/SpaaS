@@ -145,15 +145,22 @@ impl DurableStorage {
                     PersistenceError::CorruptWal(idx as u64, format!("JSON decode failed: {e}"))
                 })?;
 
-                // Validate checksum
+                // Validate checksum: extract raw event slice from line or reserialize to maintain forward/backward schema compatibility
+                let raw_slice_checksum = if let (Some(ev_start), Some(cs_start)) = (line.find("\"event\":"), line.rfind(",\"checksum\":")) {
+                    let ev_str = &line[ev_start + 8..cs_start];
+                    WalEntry::compute_checksum(entry.seq, entry.timestamp_ms, ev_str)
+                } else {
+                    0
+                };
                 let event_json = serde_json::to_string(&entry.event)?;
-                let expected =
+                let reserialized_expected =
                     WalEntry::compute_checksum(entry.seq, entry.timestamp_ms, &event_json);
-                if entry.checksum != expected {
+
+                if entry.checksum != raw_slice_checksum && entry.checksum != reserialized_expected {
                     return Err(PersistenceError::CorruptWal(
                         entry.seq,
                         format!(
-                            "Checksum mismatch: expected {expected}, got {}",
+                            "Checksum mismatch: expected {raw_slice_checksum} (or reserialized {reserialized_expected}), got {}",
                             entry.checksum
                         ),
                     ));
@@ -339,6 +346,7 @@ mod tests {
             retry_policy: Default::default(),
             verification_policy: Default::default(),
             priority: Default::default(),
+            dimension_weights: Default::default(),
             submitter_signature: "".into(),
             submitter_pubkey: "".into(),
             created_at_ms: 1000,

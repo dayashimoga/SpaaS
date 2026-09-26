@@ -1,6 +1,5 @@
 use crate::filter::evaluate_node_eligibility;
 use crate::policy::SchedulerConfig;
-use crate::scorer::score_node;
 use spaas_protocol::error::ProtocolError;
 use spaas_protocol::node::NodeRecord;
 use spaas_protocol::workload::{VerificationPolicy, WorkloadSpec};
@@ -34,32 +33,70 @@ impl EdgeScheduler {
         spec: &WorkloadSpec,
         nodes: &[NodeRecord],
     ) -> Result<Vec<Uuid>, ProtocolError> {
-        let mut candidates: Vec<ScoredCandidate> = Vec::new();
+        let (selected, _decision) = self.schedule_workload_with_decision(spec, nodes)?;
+        Ok(selected)
+    }
+
+    /// Evaluates all nodes with complete workload-dimension scoring and generates an auditable SchedulerDecision
+    pub fn schedule_workload_with_decision(
+        &self,
+        spec: &WorkloadSpec,
+        nodes: &[NodeRecord],
+    ) -> Result<(Vec<Uuid>, spaas_protocol::workload::SchedulerDecision), ProtocolError> {
+        use spaas_protocol::workload::{CandidateEvaluation, RejectedNodeEvaluation, SchedulerDecision};
+
+        let mut eligible_candidates: Vec<CandidateEvaluation> = Vec::new();
+        let mut rejected_nodes: Vec<RejectedNodeEvaluation> = Vec::new();
 
         for node in nodes {
-            if evaluate_node_eligibility(node, spec).is_ok() {
-                let score = score_node(node, &self.config.weights);
-                candidates.push(ScoredCandidate {
-                    node_id: node.node_id,
-                    score,
-                    reliability_score: node.telemetry.reliability_score,
-                });
+            match evaluate_node_eligibility(node, spec) {
+                Ok(()) => {
+                    let live = node.compute_live_capacity();
+                    let (score, dimension_scores) = crate::scorer::score_workload_fit(
+                        node,
+                        &spec.dimension_weights,
+                        &live,
+                    );
+                    let is_physical = !node.is_simulated
+                        && (node.device_type == spaas_protocol::node::NodeDeviceType::AndroidSmartphone
+                            || node.device_type == spaas_protocol::node::NodeDeviceType::LinuxDesktop
+                            || node.device_type == spaas_protocol::node::NodeDeviceType::WindowsDesktop
+                            || node.device_type == spaas_protocol::node::NodeDeviceType::MacDesktop);
+
+                    eligible_candidates.push(CandidateEvaluation {
+                        node_id: node.node_id,
+                        device_model: node.capabilities.device_model.clone(),
+                        device_type: format!("{:?}", node.device_type),
+                        is_physical,
+                        score,
+                        rank: 0,
+                        dimension_scores,
+                        live_multiplier: live.capacity_multiplier,
+                    });
+                }
+                Err(rejection) => {
+                    rejected_nodes.push(RejectedNodeEvaluation {
+                        node_id: node.node_id,
+                        device_model: node.capabilities.device_model.clone(),
+                        reason: rejection.description(),
+                        failed_constraint: rejection.failed_constraint().into(),
+                    });
+                }
             }
         }
 
-        if candidates.is_empty() {
-            debug!(workload_id = %spec.workload_id, "No eligible nodes matched workload requirements");
-            return Err(ProtocolError::NoEligibleNodeFound);
-        }
-
-        // Sort descending by score
-        candidates.sort_by(|a, b| {
+        // Sort candidates descending by fit score
+        eligible_candidates.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Determine how many nodes are needed based on verification policy
+        // Set 1-based ranks
+        for (idx, candidate) in eligible_candidates.iter_mut().enumerate() {
+            candidate.rank = idx + 1;
+        }
+
         let required_nodes_count = match &spec.verification_policy {
             VerificationPolicy::None => 1,
             VerificationPolicy::SingleNode => 1,
@@ -67,7 +104,13 @@ impl EdgeScheduler {
             VerificationPolicy::MOfN { replicas, .. } => *replicas as usize,
             VerificationPolicy::DeterministicReplay => 2,
             VerificationPolicy::TrustedNode { min_reputation } => {
-                candidates.retain(|c| (c.reliability_score * 100.0) >= *min_reputation as f32);
+                eligible_candidates.retain(|c| {
+                    if let Some(n) = nodes.iter().find(|node| node.node_id == c.node_id) {
+                        (n.telemetry.reliability_score * 100.0) >= *min_reputation as f32
+                    } else {
+                        false
+                    }
+                });
                 1
             }
             VerificationPolicy::CustomVerifier { .. } => 1,
@@ -75,23 +118,74 @@ impl EdgeScheduler {
             VerificationPolicy::TeeAttested => 1,
         };
 
-        if candidates.len() < required_nodes_count {
+        if eligible_candidates.len() < required_nodes_count {
+            debug!(
+                workload_id = %spec.workload_id,
+                eligible = eligible_candidates.len(),
+                required = required_nodes_count,
+                "No eligible nodes matched workload requirements"
+            );
+            let _decision = SchedulerDecision {
+                job_id: spec.workload_id,
+                workload_name: spec.name.clone(),
+                selected_node_id: None,
+                selected_node_model: None,
+                eligible_candidate_count: eligible_candidates.len(),
+                total_evaluated_nodes: nodes.len(),
+                weights_used: spec.dimension_weights.clone(),
+                top_candidates: eligible_candidates,
+                rejected_nodes,
+                decision_rationale: format!(
+                    "Scheduling failed: 0 of {} evaluated nodes satisfied all required hardware capabilities and owner policies.",
+                    nodes.len()
+                ),
+                decided_at_ms: chrono::Utc::now().timestamp_millis(),
+            };
             return Err(ProtocolError::NoEligibleNodeFound);
         }
 
-        let selected: Vec<Uuid> = candidates
-            .into_iter()
+        let selected: Vec<Uuid> = eligible_candidates
+            .iter()
             .take(required_nodes_count)
             .map(|c| c.node_id)
             .collect();
 
+        let top_winner = &eligible_candidates[0];
+        let rationale = format!(
+            "Selected '{}' (Node ID: {}) with highest multidimensional fit score {:.2}. \
+             Evaluated {} nodes ({} eligible, {} rejected). \
+             Live capacity multiplier: {:.2}. Physical device: {}.",
+            top_winner.device_model,
+            top_winner.node_id,
+            top_winner.score,
+            nodes.len(),
+            eligible_candidates.len(),
+            rejected_nodes.len(),
+            top_winner.live_multiplier,
+            top_winner.is_physical
+        );
+
+        let decision = SchedulerDecision {
+            job_id: spec.workload_id,
+            workload_name: spec.name.clone(),
+            selected_node_id: Some(top_winner.node_id),
+            selected_node_model: Some(top_winner.device_model.clone()),
+            eligible_candidate_count: eligible_candidates.len(),
+            total_evaluated_nodes: nodes.len(),
+            weights_used: spec.dimension_weights.clone(),
+            top_candidates: eligible_candidates.into_iter().take(5).collect(),
+            rejected_nodes,
+            decision_rationale: rationale,
+            decided_at_ms: chrono::Utc::now().timestamp_millis(),
+        };
+
         info!(
             workload_id = %spec.workload_id,
             nodes_assigned = ?selected,
-            "Workload scheduled successfully"
+            "Workload scheduled with multidimensional fit decision"
         );
 
-        Ok(selected)
+        Ok((selected, decision))
     }
 }
 
@@ -118,6 +212,7 @@ mod tests {
             limits: ResourceLimits::default(),
             network_policy: NetworkPolicy::None,
             required_capabilities: RequiredCapabilities::default(),
+            dimension_weights: WorkloadDimensionWeights::default(),
             retry_policy: RetryPolicy::default(),
             verification_policy: VerificationPolicy::SingleNode,
             priority: WorkloadPriority::Normal,
@@ -266,5 +361,94 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn test_scheduler_workload_fit_decision_and_rejection_tracking() {
+        let scheduler = EdgeScheduler::new(SchedulerConfig::default());
+
+        let mut spec = WorkloadSpec::default();
+        spec.name = "sha256_audit".into();
+        spec.dimension_weights = WorkloadDimensionWeights::for_sha256();
+
+        let eligible_node = NodeRecord {
+            node_id: Uuid::new_v4(),
+            public_key: "pub_el".into(),
+            device_type: NodeDeviceType::AndroidSmartphone,
+            enrollment: EnrollmentStatus::Enrolled,
+            state: NodeState::Idle,
+            capabilities: NodeHardwareCapabilities {
+                device_model: "Pixel 8 Physical".into(),
+                ..Default::default()
+            },
+            telemetry: NodeTelemetry {
+                battery_pct: 95,
+                charging_state: ChargingState::ChargingAc,
+                thermal_status: ThermalStatus::None,
+                ..Default::default()
+            },
+            policy: ProviderPolicy::default(),
+            qualification: Some(NodeQualificationProfile {
+                benchmark_version: "v1.2.0".into(),
+                qualified_at_ms: 1000,
+                runtime_environment: "Test Sandbox".into(),
+                wasm_conformance_passed: true,
+                wasi_preview1_passed: true,
+                measured_fuel_mips: 450.0,
+                measured_memory_max_pages: 512,
+                raw_metrics: RawBenchmarkMetrics::default(),
+                capability_vector: CapabilityVector {
+                    cpu: 90,
+                    wasm: 95,
+                    ..Default::default()
+                },
+                edge_score: 92,
+                tier: QualificationTier::Qualified,
+                qualification_hash: "hash".into(),
+                qualification_signature: "sig".into(),
+            }),
+            enrolled_at_ms: 0,
+            last_heartbeat_ms: 0,
+            region: "local".into(),
+            is_simulated: false,
+        };
+
+        let rejected_node = NodeRecord {
+            node_id: Uuid::new_v4(),
+            public_key: "pub_rej".into(),
+            device_type: NodeDeviceType::SimulatedNode,
+            enrollment: EnrollmentStatus::Enrolled,
+            state: NodeState::Idle,
+            capabilities: NodeHardwareCapabilities {
+                device_model: "Cold Dead Phone".into(),
+                ..Default::default()
+            },
+            telemetry: NodeTelemetry {
+                battery_pct: 10, // below 40 min threshold
+                charging_state: ChargingState::Discharging,
+                ..Default::default()
+            },
+            policy: ProviderPolicy::default(),
+            qualification: None,
+            enrolled_at_ms: 0,
+            last_heartbeat_ms: 0,
+            region: "local".into(),
+            is_simulated: true,
+        };
+
+        let nodes = vec![eligible_node.clone(), rejected_node.clone()];
+        let (selected, decision) = scheduler
+            .schedule_workload_with_decision(&spec, &nodes)
+            .expect("scheduling must succeed");
+
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0], eligible_node.node_id);
+        assert_eq!(decision.selected_node_id, Some(eligible_node.node_id));
+        assert_eq!(decision.selected_node_model, Some("Pixel 8 Physical".into()));
+        assert_eq!(decision.eligible_candidate_count, 1);
+        assert_eq!(decision.rejected_nodes.len(), 1);
+        assert_eq!(decision.rejected_nodes[0].node_id, rejected_node.node_id);
+        assert!(decision.decision_rationale.contains("Pixel 8 Physical"));
+        assert!(decision.decision_rationale.contains("multidimensional fit score"));
     }
 }

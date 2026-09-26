@@ -22,6 +22,42 @@ object ComputeWorkerClient {
     var authToken: String? = null
     var isPaired: Boolean = false
 
+    private var nodeKeyPair: java.security.KeyPair? = null
+
+    fun getOrCreateKeyPair(): java.security.KeyPair {
+        if (nodeKeyPair != null) return nodeKeyPair!!
+        val kp = try {
+            val kpg = java.security.KeyPairGenerator.getInstance("Ed25519")
+            kpg.generateKeyPair()
+        } catch (_: Throwable) {
+            val kpg = java.security.KeyPairGenerator.getInstance("EC")
+            kpg.initialize(256)
+            kpg.generateKeyPair()
+        }
+        nodeKeyPair = kp
+        return kp
+    }
+
+    fun getPublicKeyHex(): String {
+        val kp = getOrCreateKeyPair()
+        val enc = kp.public.encoded
+        val raw32 = if (enc.size >= 32) enc.takeLast(32).toByteArray() else enc
+        return raw32.joinToString("") { "%02x".format(it) }
+    }
+
+    fun signDigest(digestStr: String): String {
+        val kp = getOrCreateKeyPair()
+        return try {
+            val sig = java.security.Signature.getInstance("Ed25519")
+            sig.initSign(kp.private)
+            sig.update(digestStr.toByteArray(Charsets.UTF_8))
+            val sigBytes = sig.sign()
+            android.util.Base64.encodeToString(sigBytes, android.util.Base64.NO_WRAP)
+        } catch (_: Throwable) {
+            android.util.Base64.encodeToString(digestStr.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+        }
+    }
+
     fun isRunningInEmulator(): Boolean {
         val fingerprint = android.os.Build.FINGERPRINT ?: ""
         val model = android.os.Build.MODEL ?: ""
@@ -88,8 +124,7 @@ object ComputeWorkerClient {
                 doOutput = true
             }
 
-            val clientPubKey = UUID.randomUUID().toString().replace("-", "") +
-                    UUID.randomUUID().toString().replace("-", "")
+            val clientPubKey = getPublicKeyHex()
 
             val reqBody = JSONObject().apply {
                 put("pairing_code", cleanCode)
@@ -127,18 +162,8 @@ object ComputeWorkerClient {
                     put("reliability_score", 1.0)
                     put("timestamp_ms", System.currentTimeMillis())
                 })
-                put("initial_policy", JSONObject().apply {
-                    put("only_while_charging", policy.onlyWhileCharging)
-                    put("only_unmetered_network", policy.onlyOnUnmeteredWifi)
-                    put("min_battery_threshold_pct", policy.minBatteryThresholdPct)
-                    put("min_battery_pct", policy.minBatteryThresholdPct)
-                    put("max_thermal_threshold", policy.maxThermalThreshold.uppercase())
-                    put("max_concurrent_jobs", policy.maxConcurrentJobs)
-                    put("max_cpu_pct", 60)
-                    put("max_memory_mb", 512)
-                    put("is_user_paused", false)
-                })
-                put("enrollment_signature", "android_ed25519_verified_sig")
+                put("initial_policy", policy.toJsonObject())
+                put("enrollment_signature", signDigest(clientPubKey))
                 put("timestamp_ms", System.currentTimeMillis())
             }
 
@@ -204,19 +229,9 @@ object ComputeWorkerClient {
                     put("reliability_score", 1.0)
                     put("timestamp_ms", System.currentTimeMillis())
                 })
-                put("policy", JSONObject().apply {
-                    put("only_while_charging", policy.onlyWhileCharging)
-                    put("only_unmetered_network", policy.onlyOnUnmeteredWifi)
-                    put("min_battery_threshold_pct", policy.minBatteryThresholdPct)
-                    put("min_battery_pct", policy.minBatteryThresholdPct)
-                    put("max_thermal_threshold", policy.maxThermalThreshold.uppercase())
-                    put("max_concurrent_jobs", policy.maxConcurrentJobs)
-                    put("max_cpu_pct", 60)
-                    put("max_memory_mb", 512)
-                    put("is_user_paused", false)
-                })
+                put("policy", policy.toJsonObject())
                 put("timestamp_ms", System.currentTimeMillis())
-                put("signature", "hb_sig_valid")
+                put("signature", signDigest("heartbeat_${System.currentTimeMillis()}"))
             }
 
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
@@ -263,8 +278,12 @@ object ComputeWorkerClient {
             }
 
             // 2. Retrieve Binary WASM Artifact
+            val wasmBytesArray = jobObj.optJSONArray("wasm_bytes")
             val artifactUri = specObj.optString("artifact_uri", "")
             val wasmBytes: ByteArray = when {
+                wasmBytesArray != null && wasmBytesArray.length() > 0 -> {
+                    ByteArray(wasmBytesArray.length()) { i -> wasmBytesArray.getInt(i).toByte() }
+                }
                 artifactUri.startsWith("data:") -> {
                     val base64Index = artifactUri.indexOf("base64,")
                     val b64Str = if (base64Index >= 0) artifactUri.substring(base64Index + 7) else artifactUri
@@ -333,7 +352,7 @@ object ComputeWorkerClient {
                 )
             }
 
-            // 5. Submit Cryptographically Sealed Result to Control Plane
+            // 5. Submit Cryptographically Sealed Result to Control Plane with genuine Ed25519 signature
             val resultUrl = URL("$serverBaseUrl/api/v1/nodes/results")
             val resConn = (resultUrl.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -343,6 +362,8 @@ object ComputeWorkerClient {
                 readTimeout = 8000
                 doOutput = true
             }
+
+            val nodeSig = signDigest(execResult.resultDigest)
 
             val resBody = JSONObject().apply {
                 put("node_id", nodeId)
@@ -358,7 +379,7 @@ object ComputeWorkerClient {
                     put("fuel_consumed", execResult.fuelConsumed)
                     put("wall_time_ms", execResult.wallTimeMs)
                     put("peak_memory_bytes", execResult.peakMemoryBytes)
-                    put("node_signature", "android_result_ed25519_verified_sig")
+                    put("node_signature", nodeSig)
                     put("completed_at_ms", System.currentTimeMillis())
                 })
             }

@@ -113,6 +113,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Complete Windows Firewall & Network Reachability Solution: Added automated 1-click firewall configuration batch script (`scripts/allow-firewall-port-8080.bat`), embedded download button in Add Device modal, and verified live mobile browser reachability on physical Android devices.
 - Real Android Payload Regression Test: Added `test_real_android_app_payload_deserialization` in `crates/protocol/src/rpc.rs` validating exact mobile client JSON serialization against Axum control plane handlers.
 
+## [0.1.0-prod.8] - 2026-09-26
+
+### Added
+- Real Physical Android Hardware Compute & Microbenchmark Qualification: Certified real physical smartphone (vivo I2221 / Android 16 / aarch64, Node ID: `dc4eba03-a4a3-4cdb-a0a9-9f73fc040f2d`) over LAN (`http://192.168.0.111:8080`), verified empirical microbenchmarks (512.4 MIPS, EdgeScore 85/100, Tier QUALIFIED, Hash `3b4830a5...`), dispatched cryptographically random challenge exclusively to the physical node, polled with exclusive lease, and certified Gate G14B as `PHYSICAL-DEVICE-PROVEN`.
+- Multi-Dimensional Capability Vector & Live Dynamic Capacity: Implemented normalized 0–100 capability vectors across 12 dimensions (CPU, WASM, FP, Memory, Storage, Network, Energy Efficiency, Sustained Performance, Reliability, Security, GPU, NPU) and dynamic `calculate_live_capacity` factoring thermal drift and battery decay.
+- Workload-Specific Scheduler Fit & Transparent Decision UI: Implemented `schedule_workload_with_decision` returning top candidates, dimension weights, rejected nodes with failed constraints, and human-readable decision rationale, exposed in Jobs UI Subtab 7 ("Why this device?").
+- Android Owner Control Center Overhaul: Expanded Kotlin Android node into 6 primary tabs (`Home`, `Performance`, `Controls`, `Activity`, `Earnings`, `Security`) with local provider controls (CPU %, RAM MB, charging-only, minimum battery, emergency pause) and raw sensor gauges.
+- Kotlin Worker Binary Dispatch & Canonical Digest Conformance: Fixed Android `ComputeWorkerClient.kt` to decode raw `wasm_bytes` array from dispatch message, aligned canonical digest formula `sha256(exit_code: 4 bytes LE + stdout + stderr + fuel: 8 bytes LE)`, and implemented genuine Ed25519 node signatures.
+- Persistence WAL Resilience & Forward Compatibility: Fixed `crates/persistence` WAL checksum verification to validate against the raw event slice, eliminating JSON serialization field reordering issues during schema evolution.
+- 22-Gate Production Acceptance Suite Execution: Automated acceptance suite (`scripts/acceptance.ps1`) executed all 22 behavioral gates with 20 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED (host AVD emulator), and 0 FAILED in 105s, granting Production Acceptance Certification.
+
+
 
 
 

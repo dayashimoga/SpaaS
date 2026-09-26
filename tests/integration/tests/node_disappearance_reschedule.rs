@@ -57,6 +57,7 @@ async fn test_node_disappearance_and_autonomous_reschedule() {
         },
         verification_policy: VerificationPolicy::SingleNode,
         priority: WorkloadPriority::Normal,
+        dimension_weights: Default::default(),
         submitter_signature: String::new(),
         submitter_pubkey: String::new(),
         created_at_ms: chrono::Utc::now().timestamp_millis(),

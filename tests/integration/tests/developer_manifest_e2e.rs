@@ -82,6 +82,7 @@ spec:
         retry_policy: manifest.spec.retry,
         verification_policy: manifest.spec.verification,
         priority: manifest.spec.priority,
+        dimension_weights: Default::default(),
         submitter_signature: "sig".into(),
         submitter_pubkey: "pub".into(),
         created_at_ms: chrono::Utc::now().timestamp_millis(),

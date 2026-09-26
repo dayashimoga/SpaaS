@@ -29,6 +29,7 @@ fn make_test_spec() -> WorkloadSpec {
         retry_policy: RetryPolicy::default(),
         verification_policy: VerificationPolicy::SingleNode,
         priority: WorkloadPriority::Normal,
+        dimension_weights: Default::default(),
         submitter_signature: "sig".into(),
         submitter_pubkey: "pub".into(),
         created_at_ms: 1000,

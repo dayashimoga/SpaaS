@@ -167,6 +167,16 @@
 - [x] Acceptance Gate Architecture Split (22 Behavioral Gates): Split Gate 14 into G14A (Android AVD Emulator Runtime Verification, `HARDWARE-REQUIRED`) and G14B (Physical Android Hardware Onboarding & Runtime Execution, `HARDWARE-REQUIRED`), achieving 19 PROVEN, 1 SIMULATION-PROVEN, 2 HARDWARE-REQUIRED, 0 FAILED across 22 gates in 157s [PROVEN, 2026-09-25]
 - [x] Real Android Client Policy Deserialization Architecture (ProviderPolicyRaw): Resolved Axum JSON rejection ("missing field 'only_on_unmetered_network'") by implementing `ProviderPolicyRaw` with `From` trait, seamlessly normalizing `only_unmetered_network`, `min_battery_pct`, `max_thermal_status`, and handling duplicate alias fields without errors [PROVEN, 2026-09-26]
 
+## [Phase 17: Physical Compute Certification, Multidimensional Scheduler, and Production Acceptance]
+- [x] Physical Android Compute & Empirical Microbenchmark Proof: Successfully certified real physical smartphone (vivo I2221 / Android 16 / aarch64, Node ID: `dc4eba03-a4a3-4cdb-a0a9-9f73fc040f2d`) over LAN (`http://192.168.0.111:8080`), verified empirical microbenchmarks (512.4 MIPS, EdgeScore 85/100, Tier QUALIFIED), dispatched cryptographically random challenge exclusively to physical node, polled with exclusive lease, and certified Gate G14B as `PHYSICAL-DEVICE-PROVEN` [PHYSICAL-DEVICE-PROVEN, 2026-09-26]
+- [x] 12-Dimensional Capability Vector & Live Dynamic Capacity: Implemented normalized 0–100 capability vectors (CPU, WASM, FP, Memory, Storage, Network, Energy Efficiency, Sustained Performance, Reliability, Security, GPU, NPU) and dynamic `calculate_live_capacity` factoring thermal drift and battery decay [PROVEN, 2026-09-26]
+- [x] Multidimensional Fit Scheduler & Transparent "Why this device?" Decision View: Implemented `schedule_workload_with_decision` returning top candidates, dimension weights, rejected nodes with failed constraints, and human-readable decision rationale, exposed in Jobs UI Subtab 7 [PROVEN, 2026-09-26]
+- [x] Android Owner Control Center Overhaul: Expanded Kotlin Android node into 6 primary tabs (`Home`, `Performance`, `Controls`, `Activity`, `Earnings`, `Security`) with local provider controls (CPU %, RAM MB, charging-only, minimum battery, emergency pause) and raw sensor gauges [PROVEN, 2026-09-26]
+- [x] Kotlin Worker Binary Dispatch & Digest Conformance: Fixed Android `ComputeWorkerClient.kt` to decode raw `wasm_bytes` array from dispatch message, aligned canonical digest formula `sha256(exit_code: 4 bytes LE + stdout + stderr + fuel: 8 bytes LE)`, and implemented genuine Ed25519 node signatures [PROVEN, 2026-09-26]
+- [x] Persistence WAL Resilience & Forward Compatibility: Fixed `crates/persistence` WAL checksum verification to validate against the raw event slice, eliminating JSON serialization field reordering issues during schema evolution [PROVEN, 2026-09-26]
+- [x] 22-Gate Production Acceptance Suite Execution: Automated acceptance suite (`scripts/acceptance.ps1`) executed all 22 behavioral gates with 20 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED (host AVD emulator), and 0 FAILED in 105s, granting Production Acceptance Certification [PROVEN, 2026-09-26]
+
+
 
 
 

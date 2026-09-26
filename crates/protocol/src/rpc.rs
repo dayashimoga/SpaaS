@@ -115,6 +115,8 @@ pub struct SubmitJobResultResponse {
     pub accepted: bool,
     pub verification_status: String,
     pub credits_earned: u64,
+    #[serde(default)]
+    pub evidence_class: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -342,6 +344,7 @@ mod tests {
         let submit_res_resp = SubmitJobResultResponse {
             accepted: true,
             verification_status: "VERIFIED".into(),
+            evidence_class: Some("SIMULATION-PROVEN".into()),
             credits_earned: 50,
         };
         assert!(serde_json::to_string(&submit_res_req)

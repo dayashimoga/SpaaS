@@ -187,18 +187,33 @@ object WasmRuntimeEngine {
         val wallTimeMs = (System.currentTimeMillis() - startTime).coerceAtLeast(12)
         val fuelConsumed = (config.maxFuel - fuelRemaining).coerceAtLeast(10_000L)
 
-        // Compute SHA-256 of stdout for cryptographic result verification
-        val resultMd = MessageDigest.getInstance("SHA-256")
-        val resultDigest = resultMd.digest(stdoutStream.toByteArray()).joinToString("") { "%02x".format(it) }
+        val stdoutStr = stdoutStream.toString(Charsets.UTF_8.name())
+        val stderrStr = stderrStream.toString(Charsets.UTF_8.name())
+        val resultDigest = computeDigest(exitCode, stdoutStr, stderrStr, fuelConsumed)
 
         return WasmExecutionResult(
             exitCode = exitCode,
-            stdout = stdoutStream.toString(Charsets.UTF_8.name()),
-            stderr = stderrStream.toString(Charsets.UTF_8.name()),
+            stdout = stdoutStr,
+            stderr = stderrStr,
             fuelConsumed = fuelConsumed,
             wallTimeMs = wallTimeMs,
             peakMemoryBytes = peakMemory,
             resultDigest = resultDigest
         )
+    }
+
+    /**
+     * Canonical JobResult SHA-256 digest matching Rust protocol definition:
+     * exit_code (4 bytes LE) + stdout (UTF-8) + stderr (UTF-8) + fuel (8 bytes LE)
+     */
+    fun computeDigest(exitCode: Int, stdout: String, stderr: String, fuel: Long): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        val bbExit = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(exitCode).array()
+        val bbFuel = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(fuel).array()
+        md.update(bbExit)
+        md.update(stdout.toByteArray(Charsets.UTF_8))
+        md.update(stderr.toByteArray(Charsets.UTF_8))
+        md.update(bbFuel)
+        return md.digest().joinToString("") { "%02x".format(it) }
     }
 }

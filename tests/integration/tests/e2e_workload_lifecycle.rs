@@ -84,6 +84,7 @@ async fn test_full_e2e_workload_lifecycle() {
         retry_policy: RetryPolicy::default(),
         verification_policy: VerificationPolicy::SingleNode,
         priority: WorkloadPriority::High,
+        dimension_weights: Default::default(),
         submitter_signature: String::new(),
         submitter_pubkey: String::new(),
         created_at_ms: chrono::Utc::now().timestamp_millis(),
