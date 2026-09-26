@@ -260,6 +260,55 @@ impl AppState {
 
         Ok(updated)
     }
+
+    pub async fn purge_simulated_nodes(&self) -> (usize, usize) {
+        let purged_ids: Vec<Uuid> = {
+            let nodes = self.nodes.read().await;
+            nodes
+                .iter()
+                .filter(|(_, n)| {
+                    n.is_simulated
+                        || n.device_type == spaas_protocol::node::NodeDeviceType::SimulatedNode
+                })
+                .map(|(id, _)| *id)
+                .collect()
+        };
+
+        let purged_count = purged_ids.len();
+        {
+            let mut nodes = self.nodes.write().await;
+            for id in &purged_ids {
+                nodes.remove(id);
+            }
+        }
+
+        for id in &purged_ids {
+            let _ = self
+                .storage
+                .append_event(WalEvent::RemoveNode { node_id: *id })
+                .await;
+        }
+
+        let _ = self.storage.checkpoint_snapshot().await;
+
+        let remaining = self.nodes.read().await.len();
+        self.log_audit(
+            "SIMULATED_NODES_PURGED",
+            "cluster",
+            &format!("Purged {purged_count} simulated nodes. Remaining physical/desktop nodes: {remaining}"),
+        )
+        .await;
+
+        self.broadcast_event(
+            "SIMULATED_NODES_PURGED",
+            serde_json::json!({
+                "purged_count": purged_count,
+                "remaining_nodes": remaining,
+            }),
+        );
+
+        (purged_count, remaining)
+    }
 }
 
 impl Default for AppState {

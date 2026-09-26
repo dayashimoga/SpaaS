@@ -1072,6 +1072,115 @@ pub async fn get_system_network(
     }))
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SystemDiagnosticsInfo {
+    pub status: String,
+    pub version: String,
+    pub uptime_seconds: i64,
+    pub primary_lan_ip: Option<String>,
+    pub lan_url: Option<String>,
+    pub emulator_url: String,
+    pub localhost_url: String,
+    pub wi_fi_isolation_advisory: String,
+    pub node_counts: FleetNodeCounts,
+    pub active_jobs: usize,
+    pub completed_jobs: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FleetNodeCounts {
+    pub total: usize,
+    pub physical: usize,
+    pub desktop: usize,
+    pub emulator: usize,
+    pub simulated: usize,
+}
+
+pub async fn get_system_diagnostics(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<SystemDiagnosticsInfo>, (StatusCode, String)> {
+    let host_header_ip = headers
+        .get(axum::http::header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| {
+            let host_only = h.split(':').next().unwrap_or("").trim();
+            if !host_only.is_empty()
+                && host_only != "127.0.0.1"
+                && host_only != "localhost"
+                && host_only != "0.0.0.0"
+            {
+                Some(host_only.to_string())
+            } else {
+                None
+            }
+        });
+
+    let detected_ip = host_header_ip.or_else(detect_host_lan_ip);
+    let lan_url = detected_ip.as_ref().map(|ip| format!("http://{}:8080", ip));
+    let now = chrono::Utc::now().timestamp_millis();
+    let uptime_seconds = ((now - state.started_at_ms) / 1000).max(0);
+
+    let (total, physical, desktop, emulator, simulated) = {
+        let nodes = state.nodes.read().await;
+        let mut phys = 0;
+        let mut desk = 0;
+        let mut emu = 0;
+        let mut sim = 0;
+        for n in nodes.values() {
+            let is_sim = n.is_simulated
+                || n.device_type == spaas_protocol::node::NodeDeviceType::SimulatedNode;
+            let model = n.capabilities.device_model.to_lowercase();
+            let is_emu = !is_sim
+                && (model.contains("emulator")
+                    || model.contains("sdk")
+                    || model.contains("goldfish")
+                    || model.contains("ranchu"));
+            let is_desk = !is_sim
+                && !is_emu
+                && (n.device_type == spaas_protocol::node::NodeDeviceType::WindowsDesktop
+                    || n.device_type == spaas_protocol::node::NodeDeviceType::LinuxDesktop
+                    || n.device_type == spaas_protocol::node::NodeDeviceType::MacDesktop);
+            if is_sim {
+                sim += 1;
+            } else if is_emu {
+                emu += 1;
+            } else if is_desk {
+                desk += 1;
+            } else {
+                phys += 1;
+            }
+        }
+        (nodes.len(), phys, desk, emu, sim)
+    };
+
+    let active_jobs = state.jobs.read().await.len();
+    let completed_jobs = state
+        .metrics
+        .completed_jobs
+        .load(std::sync::atomic::Ordering::Relaxed);
+
+    Ok(Json(SystemDiagnosticsInfo {
+        status: "HEALTHY".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        uptime_seconds,
+        primary_lan_ip: detected_ip,
+        lan_url,
+        emulator_url: "http://10.0.2.2:8080".to_string(),
+        localhost_url: "http://127.0.0.1:8080".to_string(),
+        wi_fi_isolation_advisory: "NOTICE: If physical devices fail with 'Connection refused', check if host and phone are on a Guest Wi-Fi SSID. Router AP Isolation blocks inter-client communication. Use primary Wi-Fi, PC Mobile Hotspot, or Cloudflare Tunnel.".to_string(),
+        node_counts: FleetNodeCounts {
+            total,
+            physical,
+            desktop,
+            emulator,
+            simulated,
+        },
+        active_jobs,
+        completed_jobs,
+    }))
+}
+
 pub async fn create_pairing_token(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1402,6 +1511,30 @@ pub async fn start_demo_cluster(
         simulated_nodes_added: sim_count,
         desktop_nodes_added: desktop_count,
         total_nodes: total,
+    }))
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PurgeSimulatedNodesResponse {
+    pub success: bool,
+    pub purged_count: usize,
+    pub remaining_nodes: usize,
+    pub message: String,
+}
+
+pub async fn purge_simulated_nodes(
+    State(state): State<AppState>,
+) -> Result<Json<PurgeSimulatedNodesResponse>, (StatusCode, String)> {
+    let (purged_count, remaining_nodes) = state.purge_simulated_nodes().await;
+
+    Ok(Json(PurgeSimulatedNodesResponse {
+        success: true,
+        purged_count,
+        remaining_nodes,
+        message: format!(
+            "Purged {} simulated nodes from cluster. {} genuine nodes remain.",
+            purged_count, remaining_nodes
+        ),
     }))
 }
 

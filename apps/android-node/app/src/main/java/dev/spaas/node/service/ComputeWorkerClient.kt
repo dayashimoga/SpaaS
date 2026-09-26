@@ -71,6 +71,41 @@ object ComputeWorkerClient {
                 hardware.contains("ranchu")
     }
 
+    suspend fun testReachability(baseUrl: String): String = withContext(Dispatchers.IO) {
+        var cleanUrl = baseUrl.trim().trimEnd('/')
+        if (cleanUrl.contains("127.0.0.1") || cleanUrl.contains("localhost")) {
+            val suggestion = if (isRunningInEmulator()) "http://10.0.2.2:8080" else "your host PC's Wi-Fi IP (e.g. http://192.168.0.111:8080)"
+            return@withContext "INVALID IP: 127.0.0.1 is the phone's loopback! Use $suggestion."
+        }
+        if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+            cleanUrl = "http://$cleanUrl"
+        }
+        val start = System.currentTimeMillis()
+        try {
+            val endpoint = URL("$cleanUrl/health")
+            val conn = (endpoint.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 3500
+                readTimeout = 3500
+            }
+            val code = conn.responseCode
+            val latency = System.currentTimeMillis() - start
+            if (code in 200..299) {
+                "ONLINE: Control Plane reachable (${latency}ms)! Ready to pair."
+            } else {
+                "REACHABLE: HTTP $code in ${latency}ms"
+            }
+        } catch (e: Exception) {
+            val reason = when (e) {
+                is java.net.ConnectException -> "Connection refused: Host is unreachable. Note: Routers enforce AP Isolation on Guest Wi-Fi. Switch phone and PC to the primary Wi-Fi, PC Mobile Hotspot, or Cloudflare Tunnel."
+                is java.net.SocketTimeoutException -> "Connection timed out (3.5s): Packets dropped. Check for router AP Isolation or Windows Firewall on port 8080."
+                is java.net.UnknownHostException -> "Host unresolvable: ${e.message}."
+                else -> e.localizedMessage ?: e.message ?: "Network unreachable"
+            }
+            "OFFLINE: $reason"
+        }
+    }
+
     suspend fun pairWithCode(
         baseUrl: String,
         pairingCode: String,

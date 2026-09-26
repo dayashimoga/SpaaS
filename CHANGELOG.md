@@ -133,6 +133,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Windows Compiler Concurrency Safeguards: Limited compiler concurrency in `scripts/acceptance.ps1` (`-j 2` on G01 and G02) preventing memory mmap and paging file exhaustion (`os error 1455`) on Windows GNU toolchains.
 - Cloudflare Free Tier Deployment Compatibility: Verified that the Web Console (`apps/web-console`) is a static Single-Page Application deployable to Cloudflare Pages (100% free with custom domains and global edge caching), and documented Cloudflare Tunnel (`cloudflared`) architecture for free zero-trust exposure of the local control plane.
 
+## [0.1.0-prod.10] - 2026-09-26
+
+### Added
+- Authoritative 10-State Device Lifecycle: Extended `NodeState` in `crates/protocol/src/node.rs` with `Unpaired`, `Pairing`, `Authenticating`, `Qualifying`, `Ready` (aliased with `Idle`), `Running` (aliased with `Active`), `Paused`, `Degraded`, `Offline`, `Revoked`, complete with backwards-compatible serde deserializers and `is_schedulable()` helpers.
+- Network Diagnostics & Advisory Endpoint (`GET /api/v1/system/diagnostics`): Added system diagnostics handler returning uptime, version, primary LAN IP, local listener URLs, node counts disaggregated by type (physical, desktop, emulator, simulated), active job counts, and clear Wi-Fi AP isolation advisories.
+- Dynamic Simulated Fleet Purge (`POST /api/v1/demo/purge-simulated-nodes`): Added endpoint and WAL event processing that purges all synthetic nodes from control plane memory and disk snapshot on demand, wired to a `[Purge Simulated Fleet]` button in the Web Console simulation warning banner.
+- On-Device Reachability Diagnostic Pre-Flight: Implemented `testReachability` in `ComputeWorkerClient.kt` and an interactive `[⚡ Test Reachability / Ping]` button in `MainActivity.kt`, allowing physical phone owners to test socket reachability and detect AP isolation or firewall drops before pairing.
+- Zero-Synthetic Default Mode in Local Runner: Updated `scripts/start-local.ps1` so `-EnableSimulation` is strictly optional and off by default, ensuring local production clusters run exclusively with genuine hardware unless explicitly commanded.
+- Viewport & Zoom Overhaul for Device Enrollment: Redesigned `.modal-box` in `apps/web-console` with `max-height: 90vh (90dvh)`, `display: flex; flex-direction: column`, pinned header/actions, and independent `.modal-scroll-body`, eliminating clipping and inaccessible buttons across 100%–200% zoom levels.
+
+
 
 
 

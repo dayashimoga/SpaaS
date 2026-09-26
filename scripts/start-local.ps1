@@ -14,7 +14,7 @@
 param (
     [switch]$NoBrowser,
     [switch]$Build,
-    [int]$SimulatedNodes = 3,
+    [switch]$EnableSimulation,
     [switch]$Restart,
     [string]$Port = "8080"
 )
@@ -147,18 +147,20 @@ if (-not $isAlreadyHealthy) {
 # 7. Initialize Cluster Fleet & Self-Test
 Write-Host "`n>>> [STEP 6/6] Initializing compute nodes & running self-test..." -ForegroundColor Yellow
 
-# Start demo cluster if node count is low
-try {
-    $currentNodes = (Invoke-RestMethod -Uri "$LocalUrl/api/v1/nodes" -ErrorAction SilentlyContinue).nodes
-    if ($currentNodes.Count -lt 2) {
-        Write-Host "  Populating cluster fleet via demo endpoint..." -ForegroundColor DarkGray
-        $demoInit = Invoke-RestMethod -Uri "$LocalUrl/api/v1/demo/start-cluster" -Method Post -ErrorAction SilentlyContinue
-        Write-Host "  Enrolled $($demoInit.total_nodes) compute nodes." -ForegroundColor Green
-    } else {
-        Write-Host "  Cluster already has $($currentNodes.Count) registered compute nodes." -ForegroundColor Green
+# Populate demo cluster only when explicitly requested via -EnableSimulation
+if ($EnableSimulation) {
+    try {
+        $currentNodes = (Invoke-RestMethod -Uri "$LocalUrl/api/v1/nodes" -ErrorAction SilentlyContinue).nodes
+        if ($currentNodes.Count -lt 2) {
+            Write-Host "  Populating cluster fleet via demo endpoint (-EnableSimulation)..." -ForegroundColor DarkGray
+            $demoInit = Invoke-RestMethod -Uri "$LocalUrl/api/v1/demo/start-cluster" -Method Post -ErrorAction SilentlyContinue
+            Write-Host "  Enrolled $($demoInit.total_nodes) compute nodes." -ForegroundColor Green
+        }
+    } catch {
+        Write-Warning "  Demo cluster population skipped."
     }
-} catch {
-    Write-Warning "  Node population check skipped."
+} else {
+    Write-Host "  Production Mode: Zero synthetic/simulated nodes auto-seeded (Default)." -ForegroundColor Green
 }
 
 # Quick qualification/challenge verification test

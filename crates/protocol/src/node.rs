@@ -14,10 +14,52 @@ pub enum EnrollmentStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum NodeState {
-    Active,
+    #[serde(alias = "UNPAIRED", alias = "unpaired")]
+    Unpaired,
+    #[serde(alias = "PAIRING", alias = "pairing")]
+    Pairing,
+    #[serde(alias = "AUTHENTICATING", alias = "authenticating")]
+    Authenticating,
+    #[serde(alias = "QUALIFYING", alias = "qualifying")]
+    Qualifying,
+    #[serde(alias = "READY", alias = "ready", alias = "IDLE", alias = "idle")]
     Idle,
+    #[serde(
+        alias = "RUNNING",
+        alias = "running",
+        alias = "ACTIVE",
+        alias = "active"
+    )]
+    Active,
+    #[serde(alias = "PAUSED", alias = "paused")]
     Paused,
+    #[serde(alias = "DEGRADED", alias = "degraded")]
+    Degraded,
+    #[serde(alias = "OFFLINE", alias = "offline")]
     Offline,
+    #[serde(alias = "REVOKED", alias = "revoked")]
+    Revoked,
+}
+
+impl NodeState {
+    pub fn is_schedulable(&self) -> bool {
+        matches!(self, Self::Idle | Self::Active)
+    }
+
+    pub fn display_label(&self) -> &'static str {
+        match self {
+            Self::Unpaired => "UNPAIRED",
+            Self::Pairing => "PAIRING",
+            Self::Authenticating => "AUTHENTICATING",
+            Self::Qualifying => "QUALIFYING",
+            Self::Idle => "READY",
+            Self::Active => "RUNNING",
+            Self::Paused => "PAUSED",
+            Self::Degraded => "DEGRADED",
+            Self::Offline => "OFFLINE",
+            Self::Revoked => "REVOKED",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

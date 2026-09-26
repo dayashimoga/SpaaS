@@ -176,6 +176,15 @@ fun SpaasAppScaffold(
                     onServerUrlChange = { serverUrlInput = it },
                     isPairingLoading = isPairingLoading,
                     pairingStatusMsg = pairingStatusMsg,
+                    onTestReachability = {
+                        coroutineScope.launch {
+                            isPairingLoading = true
+                            pairingStatusMsg = "Checking network reachability to $serverUrlInput..."
+                            val res = ComputeWorkerClient.testReachability(serverUrlInput)
+                            isPairingLoading = false
+                            pairingStatusMsg = res
+                        }
+                    },
                     onPairClick = {
                         coroutineScope.launch {
                             isPairingLoading = true
@@ -258,6 +267,7 @@ fun HomeView(
     onServerUrlChange: (String) -> Unit,
     isPairingLoading: Boolean,
     pairingStatusMsg: String?,
+    onTestReachability: () -> Unit,
     onPairClick: () -> Unit,
     onUnpairClick: () -> Unit,
     onStart: () -> Unit,
@@ -503,6 +513,14 @@ fun HomeView(
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )
+
+                        OutlinedButton(
+                            onClick = onTestReachability,
+                            enabled = !isPairingLoading && serverUrl.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("⚡ Test Reachability / Ping", fontSize = 13.sp, color = Color(0xFF38BDF8))
+                        }
 
                         OutlinedTextField(
                             value = pairingCode,

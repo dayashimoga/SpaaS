@@ -41,6 +41,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/devices/pairing-token", post(create_pairing_token))
         .route("/api/v1/devices/pair", post(pair_device))
         .route("/api/v1/demo/start-cluster", post(start_demo_cluster))
+        .route(
+            "/api/v1/demo/purge-simulated-nodes",
+            post(purge_simulated_nodes),
+        )
         // Job Management & Leases
         .route("/api/v1/jobs", post(submit_job).get(list_jobs))
         .route("/api/v1/jobs/:job_id", get(get_job))
@@ -51,8 +55,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/jobs/:job_id/lease/renew", post(renew_job_lease))
         .route("/api/v1/jobs/:job_id/cancel", post(cancel_job))
         // System Observability, Live Events & Ledger
+        .route("/health", get(get_health))
         .route("/api/v1/system/health", get(get_health))
         .route("/api/v1/system/network", get(get_system_network))
+        .route("/api/v1/system/diagnostics", get(get_system_diagnostics))
         .route("/api/v1/events", get(get_events))
         .route("/api/v1/metering", get(get_metering))
         .route("/api/v1/audit", get(get_audit_log))

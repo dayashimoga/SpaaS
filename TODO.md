@@ -184,6 +184,18 @@
 - [x] Cloudflare Deployment Architecture Assessment: Analyzed deployment readiness for Cloudflare Free Tier; proved Web Console is 100% static SPA deployable to Cloudflare Pages (free unlimited bandwidth/global CDN) with configurable `API_BASE`, and documented Cloudflare Tunnel (`cloudflared`) architecture for free zero-trust access to the local control plane [PROVEN, 2026-09-26]
 - [x] 22-Gate Acceptance Audit Re-Certification: Executed full automated acceptance suite (`scripts/acceptance.ps1`) verifying all 22 gates with 20 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED in 132s [PROVEN, 2026-09-26]
 
+## [Phase 19: Authoritative Device Lifecycle, AP Isolation Resolution, Diagnostics API & Simulated Fleet Purge]
+- [x] Authoritative 10-State Machine Alignment: Expanded `NodeState` in `crates/protocol/src/node.rs` to support `Unpaired`, `Pairing`, `Authenticating`, `Qualifying`, `Ready` (aliased with `Idle`), `Running` (aliased with `Active`), `Paused`, `Degraded`, `Offline`, `Revoked` with backward-compatible aliases and `is_schedulable()` / `display_label()` helper methods [PROVEN, 2026-09-26]
+- [x] Guest Wi-Fi AP Isolation Forensic Diagnosis & Advisory: Identified that the physical Android `Connection refused` error on `192.168.0.111:8080` stemmed from router Access Point (AP) Isolation on `TP-Link_Guest_BEC7_5G`, which prohibits client-to-client traffic; documented actionable mitigations (switch to primary Wi-Fi, PC Mobile Hotspot, or Cloudflare Tunnel) [PROVEN, 2026-09-26]
+- [x] In-App Android Reachability Diagnostic Pre-Flight: Implemented `testReachability` in `ComputeWorkerClient.kt` and an interactive `[⚡ Test Reachability / Ping]` button in `MainActivity.kt`, allowing physical device owners to verify socket reachability and detect AP isolation or firewall blocks prior to entering pairing codes [PROVEN, 2026-09-26]
+- [x] Android Disconnection State & Standby Timer Integrity: Corrected Android UI state evaluation in `MainActivity.kt` to display `UNPAIRED` in slate grey rather than claiming `READY` when unpaired, and locked elapsed session timer to `00:00:00 (Standby)` when offline [PROVEN, 2026-09-26]
+- [x] Add Compute Device Viewport & Zoom Overhaul: Redesigned `.modal-box` in `apps/web-console` with `max-height: 90vh (90dvh)`, `display: flex; flex-direction: column`, pinned header and footer actions, and independent `.modal-scroll-body` container, eliminating UI clipping and hidden buttons across 100%–200% browser zoom levels [PROVEN, 2026-09-26]
+- [x] System Diagnostics & Reachability Endpoint (`GET /api/v1/system/diagnostics`): Added system diagnostics handler returning service uptime, version, primary LAN IP, local listener URLs, breakdown of node counts (physical, desktop, emulator, simulated), active job counts, and Wi-Fi AP isolation advisories [PROVEN, 2026-09-26]
+- [x] Synthetic Fleet Purge API (`POST /api/v1/demo/purge-simulated-nodes`): Added endpoint and WAL event processing to purge all `is_simulated == true` nodes from control plane memory and durable snapshot on demand, with a `[Purge Simulated Fleet]` button embedded directly in the Web Console simulation warning banner [PROVEN, 2026-09-26]
+- [x] Production Default Zero-Synthetic Fleet Mode: Updated `scripts/start-local.ps1` so `-EnableSimulation` is strictly optional and off by default, ensuring local production startup never seeds synthetic nodes unless explicitly commanded [PROVEN, 2026-09-26]
+- [x] 22-Gate Acceptance Audit Re-Certification: Executed full automated acceptance suite (`scripts/acceptance.ps1`) verifying all 22 gates with 20 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED in 150s [PROVEN, 2026-09-26]
+
+
 
 
 

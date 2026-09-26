@@ -2935,6 +2935,31 @@ function initSearchAndFilters() {
   const btnExcludeBanner = document.getElementById('btn-toggle-exclude-sim');
   if (btnExcludeBanner) btnExcludeBanner.addEventListener('click', toggleExcludeSim);
 
+  const btnPurgeSim = document.getElementById('btn-purge-sim-nodes');
+  if (btnPurgeSim) {
+    btnPurgeSim.addEventListener('click', async () => {
+      if (!confirm('Purge all simulated and synthetic nodes from the cluster? Genuine physical and desktop devices will be preserved.')) return;
+      try {
+        btnPurgeSim.disabled = true;
+        btnPurgeSim.textContent = 'Purging...';
+        const res = await fetch(`${API_BASE}/api/v1/demo/purge-simulated-nodes`, { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          alert(`Cluster Cleaned: ${data.purged_count} simulated nodes purged. ${data.remaining_nodes} physical/desktop nodes active.`);
+          await fetchNodes();
+          await fetchHealth();
+        } else {
+          alert('Failed to purge simulated nodes.');
+        }
+      } catch (err) {
+        alert('Error purging nodes: ' + err.message);
+      } finally {
+        btnPurgeSim.disabled = false;
+        btnPurgeSim.textContent = 'Purge Simulated Fleet';
+      }
+    });
+  }
+
   const applyNodeFilters = () => {
     const q = (nodeSearch?.value || '').toLowerCase();
     const st = nodeFilterState?.value || 'ALL';
