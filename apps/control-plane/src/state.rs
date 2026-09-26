@@ -39,7 +39,8 @@ pub struct AppState {
     pub server_keypair: Arc<KeyPair>,
     pub audit_log: Arc<RwLock<Vec<AuditRecord>>>,
     pub pairing_tokens: Arc<RwLock<HashMap<String, PairingTokenData>>>,
-    pub scheduler_decisions: Arc<RwLock<HashMap<Uuid, spaas_protocol::workload::SchedulerDecision>>>,
+    pub scheduler_decisions:
+        Arc<RwLock<HashMap<Uuid, spaas_protocol::workload::SchedulerDecision>>>,
     pub event_bus: tokio::sync::broadcast::Sender<String>,
     pub started_at_ms: i64,
 }
@@ -111,9 +112,14 @@ impl AppState {
         tokens.insert(token_data.pairing_code.clone(), token_data);
     }
 
-    pub async fn validate_and_consume_pairing_token(&self, code: &str) -> Result<PairingTokenData, String> {
+    pub async fn validate_and_consume_pairing_token(
+        &self,
+        code: &str,
+    ) -> Result<PairingTokenData, String> {
         let mut tokens = self.pairing_tokens.write().await;
-        let token = tokens.get_mut(code).ok_or_else(|| "Invalid pairing code".to_string())?;
+        let token = tokens
+            .get_mut(code)
+            .ok_or_else(|| "Invalid pairing code".to_string())?;
         let now = chrono::Utc::now().timestamp_millis();
         if token.used {
             return Err("Pairing code has already been used".to_string());
@@ -216,7 +222,9 @@ impl AppState {
     pub async fn revoke_node(&self, node_id: Uuid, reason: &str) -> Result<NodeRecord, String> {
         let (updated, active_job_leases) = {
             let mut nodes = self.nodes.write().await;
-            let node = nodes.get_mut(&node_id).ok_or_else(|| "Node not found".to_string())?;
+            let node = nodes
+                .get_mut(&node_id)
+                .ok_or_else(|| "Node not found".to_string())?;
             node.enrollment = spaas_protocol::node::EnrollmentStatus::Revoked;
             node.state = spaas_protocol::node::NodeState::Offline;
 

@@ -146,7 +146,9 @@ impl DurableStorage {
                 })?;
 
                 // Validate checksum: extract raw event slice from line or reserialize to maintain forward/backward schema compatibility
-                let raw_slice_checksum = if let (Some(ev_start), Some(cs_start)) = (line.find("\"event\":"), line.rfind(",\"checksum\":")) {
+                let raw_slice_checksum = if let (Some(ev_start), Some(cs_start)) =
+                    (line.find("\"event\":"), line.rfind(",\"checksum\":"))
+                {
                     let ev_str = &line[ev_start + 8..cs_start];
                     WalEntry::compute_checksum(entry.seq, entry.timestamp_ms, ev_str)
                 } else {

@@ -22,8 +22,14 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/nodes/:node_id/qualification",
             post(qualify_node).get(get_node_qualification),
         )
-        .route("/api/v1/nodes/:node_id/qualification/run", post(run_node_qualification))
-        .route("/api/v1/nodes/:node_id/dispatch-challenge", post(dispatch_challenge_workload))
+        .route(
+            "/api/v1/nodes/:node_id/qualification/run",
+            post(run_node_qualification),
+        )
+        .route(
+            "/api/v1/nodes/:node_id/dispatch-challenge",
+            post(dispatch_challenge_workload),
+        )
         .route("/api/v1/nodes/:node_id/revoke", post(revoke_node))
         .route("/api/v1/nodes/:node_id/rename", post(rename_node))
         .route("/api/v1/nodes/:node_id/policy", post(update_node_policy))
@@ -38,7 +44,10 @@ pub fn build_router(state: AppState) -> Router {
         // Job Management & Leases
         .route("/api/v1/jobs", post(submit_job).get(list_jobs))
         .route("/api/v1/jobs/:job_id", get(get_job))
-        .route("/api/v1/jobs/:job_id/scheduler-decision", get(get_job_scheduler_decision))
+        .route(
+            "/api/v1/jobs/:job_id/scheduler-decision",
+            get(get_job_scheduler_decision),
+        )
         .route("/api/v1/jobs/:job_id/lease/renew", post(renew_job_lease))
         .route("/api/v1/jobs/:job_id/cancel", post(cancel_job))
         // System Observability, Live Events & Ledger
@@ -49,7 +58,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/audit", get(get_audit_log))
         .route("/metrics", get(get_metrics))
         // Challenge & Real Verification
-        .route("/api/v1/workloads/challenge", post(create_challenge_workload))
+        .route(
+            "/api/v1/workloads/challenge",
+            post(create_challenge_workload),
+        )
         // APK Artifact Downloads & Delivery
         .route("/app-debug.apk", get(download_apk))
         .route("/downloads/spaas-android-node.apk", get(download_apk))

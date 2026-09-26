@@ -23,7 +23,11 @@ pub enum NodeState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeDeviceType {
-    #[serde(alias = "AndroidPhone", alias = "AndroidSmartphone", alias = "android_phone")]
+    #[serde(
+        alias = "AndroidPhone",
+        alias = "AndroidSmartphone",
+        alias = "android_phone"
+    )]
     AndroidSmartphone,
     #[serde(alias = "AndroidTablet", alias = "android_tablet")]
     AndroidTablet,
@@ -71,7 +75,9 @@ impl ChargingState {
 }
 
 /// Android PowerManager / Linux Thermal Status
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ThermalStatus {
     #[default]
@@ -339,10 +345,12 @@ impl From<ProviderPolicyRaw> for ProviderPolicy {
     fn from(raw: ProviderPolicyRaw) -> Self {
         Self {
             only_while_charging: raw.only_while_charging,
-            only_on_unmetered_network: raw.only_on_unmetered_network
+            only_on_unmetered_network: raw
+                .only_on_unmetered_network
                 .or(raw.only_unmetered_network)
                 .unwrap_or(true),
-            min_battery_threshold_pct: raw.min_battery_threshold_pct
+            min_battery_threshold_pct: raw
+                .min_battery_threshold_pct
                 .or(raw.min_battery_pct)
                 .unwrap_or(40),
             max_thermal_threshold: raw.max_thermal_threshold,
@@ -384,18 +392,13 @@ impl Default for ProviderPolicy {
 }
 
 /// Capability Status for specialized accelerators
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(tag = "status", content = "score", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CapabilityStatus {
     Score(u8),
+    #[default]
     Untested,
     Unavailable,
-}
-
-impl Default for CapabilityStatus {
-    fn default() -> Self {
-        Self::Untested
-    }
 }
 
 /// Normalized 0-100 multidimensional capability vector
@@ -581,14 +584,12 @@ impl NodeRecord {
             .policy
             .max_concurrent_jobs
             .saturating_sub(self.telemetry.active_job_count);
-        let cpu_headroom = (self.policy.max_cpu_pct)
-            .saturating_sub(self.telemetry.cpu_usage_pct as u8);
-        let battery_headroom = if self.telemetry.battery_pct > self.policy.min_battery_threshold_pct
-        {
-            self.telemetry.battery_pct - self.policy.min_battery_threshold_pct
-        } else {
-            0
-        };
+        let cpu_headroom =
+            (self.policy.max_cpu_pct).saturating_sub(self.telemetry.cpu_usage_pct as u8);
+        let battery_headroom = self
+            .telemetry
+            .battery_pct
+            .saturating_sub(self.policy.min_battery_threshold_pct);
 
         // Determine dynamic multiplier (0.0 to 1.0)
         let multiplier = if !self.is_ready_for_workload() {

@@ -202,14 +202,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 println!("{}", Table::new(rows));
             }
-            NodeCommands::Worker { name, duration_secs } => {
-                println!("{}", style("===========================================================").cyan());
-                println!("{}", style(format!(" Starting SPaaS Desktop Worker: {}", name)).bold().green());
-                println!("{}", style(format!(" Target Control Plane:          {}", cli.api_url)).cyan());
-                println!("{}", style(format!(" Session Duration:              {} seconds", duration_secs)).cyan());
-                println!("{}", style("===========================================================").cyan());
+            NodeCommands::Worker {
+                name,
+                duration_secs,
+            } => {
+                println!(
+                    "{}",
+                    style("===========================================================").cyan()
+                );
+                println!(
+                    "{}",
+                    style(format!(" Starting SPaaS Desktop Worker: {}", name))
+                        .bold()
+                        .green()
+                );
+                println!(
+                    "{}",
+                    style(format!(" Target Control Plane:          {}", cli.api_url)).cyan()
+                );
+                println!(
+                    "{}",
+                    style(format!(
+                        " Session Duration:              {} seconds",
+                        duration_secs
+                    ))
+                    .cyan()
+                );
+                println!(
+                    "{}",
+                    style("===========================================================").cyan()
+                );
 
-                let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) as u32;
+                let cpus = std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(4) as u32;
                 let caps = NodeHardwareCapabilities {
                     architecture: std::env::consts::ARCH.to_string(),
                     cpu_cores: cpus,
@@ -224,13 +250,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     supported_runtimes: vec!["wasm_wasi".into()],
                 };
 
-                let mut policy = ProviderPolicy::default();
-                policy.only_while_charging = false; // Desktops don't require battery charger check
+                let policy = ProviderPolicy {
+                    only_while_charging: false, // Desktops don't require battery charger check
+                    ..Default::default()
+                };
 
                 let mut agent = NodeAgent::new(caps.clone(), policy.clone(), false);
                 println!("Running empirical microbenchmark qualification...");
-                let qual = agent.run_qualification().await.map_err(|e| format!("Qualification failed: {e}"))?;
-                println!("  Measured Fuel MIPS:  {}", style(format!("{:.1}", qual.measured_fuel_mips)).green());
+                let qual = agent
+                    .run_qualification()
+                    .await
+                    .map_err(|e| format!("Qualification failed: {e}"))?;
+                println!(
+                    "  Measured Fuel MIPS:  {}",
+                    style(format!("{:.1}", qual.measured_fuel_mips)).green()
+                );
                 println!("  Linear Memory Pages: {}", qual.measured_memory_max_pages);
 
                 // Register with Control Plane
@@ -251,12 +285,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 let reg_url = format!("{}/api/v1/nodes/register", cli.api_url);
-                let reg_resp = client.post(&reg_url).json(&reg_req).send().await?
-                    .json::<RegisterNodeResponse>().await?;
-                println!("{}", style(format!("Worker successfully enrolled! Node ID: {}", reg_resp.node_id)).bold().green());
+                let reg_resp = client
+                    .post(&reg_url)
+                    .json(&reg_req)
+                    .send()
+                    .await?
+                    .json::<RegisterNodeResponse>()
+                    .await?;
+                println!(
+                    "{}",
+                    style(format!(
+                        "Worker successfully enrolled! Node ID: {}",
+                        reg_resp.node_id
+                    ))
+                    .bold()
+                    .green()
+                );
 
                 // Post qualification
-                let qual_url = format!("{}/api/v1/nodes/{}/qualification", cli.api_url, agent.node_id);
+                let qual_url = format!(
+                    "{}/api/v1/nodes/{}/qualification",
+                    cli.api_url, agent.node_id
+                );
                 let qual_req = serde_json::json!({ "profile": qual });
                 let _ = client.post(&qual_url).json(&qual_req).send().await;
 
@@ -264,7 +314,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let start_time = tokio::time::Instant::now();
                 let duration = std::time::Duration::from_secs(duration_secs);
 
-                println!("{}", style("Worker is ready and listening for compute jobs...").cyan());
+                println!(
+                    "{}",
+                    style("Worker is ready and listening for compute jobs...").cyan()
+                );
 
                 let run_forever = duration_secs == 0;
                 while run_forever || start_time.elapsed() < duration {
@@ -284,14 +337,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Ok(resp) = client.get(&poll_url).send().await {
                         if let Ok(poll_res) = resp.json::<PollJobResponse>().await {
                             if let Some(dispatch) = poll_res.job {
-                                println!("{}", style(format!(">>> Received job dispatch: {} ({})", dispatch.job_id, dispatch.spec.name)).bold().yellow());
+                                println!(
+                                    "{}",
+                                    style(format!(
+                                        ">>> Received job dispatch: {} ({})",
+                                        dispatch.job_id, dispatch.spec.name
+                                    ))
+                                    .bold()
+                                    .yellow()
+                                );
                                 let lease_id = dispatch.lease_id;
                                 let exec_res = agent.execute_dispatched_job(dispatch).await;
                                 if let Ok(job_result) = exec_res {
-                                    println!("  Execution completed with exit code {}", style(job_result.exit_code).green());
-                                    println!("  Fuel Consumed: {}", style(job_result.fuel_consumed).cyan());
+                                    println!(
+                                        "  Execution completed with exit code {}",
+                                        style(job_result.exit_code).green()
+                                    );
+                                    println!(
+                                        "  Fuel Consumed: {}",
+                                        style(job_result.fuel_consumed).cyan()
+                                    );
                                     if !job_result.stdout.is_empty() {
-                                        println!("  STDOUT: {}", style(&job_result.stdout).italic());
+                                        println!(
+                                            "  STDOUT: {}",
+                                            style(&job_result.stdout).italic()
+                                        );
                                     }
 
                                     let res_url = format!("{}/api/v1/nodes/results", cli.api_url);
@@ -300,9 +370,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         lease_id: Some(lease_id),
                                         result: job_result,
                                     };
-                                    if let Ok(res_resp) = client.post(&res_url).json(&submit_req).send().await {
-                                        if let Ok(data) = res_resp.json::<SubmitJobResultResponse>().await {
-                                            println!("{}", style(format!("  Result verified! Credits Earned: +{} CR", data.credits_earned)).bold().green());
+                                    if let Ok(res_resp) =
+                                        client.post(&res_url).json(&submit_req).send().await
+                                    {
+                                        if let Ok(data) =
+                                            res_resp.json::<SubmitJobResultResponse>().await
+                                        {
+                                            println!(
+                                                "{}",
+                                                style(format!(
+                                                    "  Result verified! Credits Earned: +{} CR",
+                                                    data.credits_earned
+                                                ))
+                                                .bold()
+                                                .green()
+                                            );
                                         }
                                     }
                                 }
@@ -316,7 +398,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}", style("Worker session finished.").cyan());
             }
             NodeCommands::Pair { code, name } => {
-                println!("{}", style("Pairing device with SPaaS Control Plane...").bold().cyan());
+                println!(
+                    "{}",
+                    style("Pairing device with SPaaS Control Plane...")
+                        .bold()
+                        .cyan()
+                );
                 println!("  Pairing Code: {}", style(&code).yellow());
                 println!("  Device Name:  {}", style(&name).cyan());
 

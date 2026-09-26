@@ -43,7 +43,9 @@ impl EdgeScheduler {
         spec: &WorkloadSpec,
         nodes: &[NodeRecord],
     ) -> Result<(Vec<Uuid>, spaas_protocol::workload::SchedulerDecision), ProtocolError> {
-        use spaas_protocol::workload::{CandidateEvaluation, RejectedNodeEvaluation, SchedulerDecision};
+        use spaas_protocol::workload::{
+            CandidateEvaluation, RejectedNodeEvaluation, SchedulerDecision,
+        };
 
         let mut eligible_candidates: Vec<CandidateEvaluation> = Vec::new();
         let mut rejected_nodes: Vec<RejectedNodeEvaluation> = Vec::new();
@@ -52,16 +54,17 @@ impl EdgeScheduler {
             match evaluate_node_eligibility(node, spec) {
                 Ok(()) => {
                     let live = node.compute_live_capacity();
-                    let (score, dimension_scores) = crate::scorer::score_workload_fit(
-                        node,
-                        &spec.dimension_weights,
-                        &live,
-                    );
+                    let (score, dimension_scores) =
+                        crate::scorer::score_workload_fit(node, &spec.dimension_weights, &live);
                     let is_physical = !node.is_simulated
-                        && (node.device_type == spaas_protocol::node::NodeDeviceType::AndroidSmartphone
-                            || node.device_type == spaas_protocol::node::NodeDeviceType::LinuxDesktop
-                            || node.device_type == spaas_protocol::node::NodeDeviceType::WindowsDesktop
-                            || node.device_type == spaas_protocol::node::NodeDeviceType::MacDesktop);
+                        && (node.device_type
+                            == spaas_protocol::node::NodeDeviceType::AndroidSmartphone
+                            || node.device_type
+                                == spaas_protocol::node::NodeDeviceType::LinuxDesktop
+                            || node.device_type
+                                == spaas_protocol::node::NodeDeviceType::WindowsDesktop
+                            || node.device_type
+                                == spaas_protocol::node::NodeDeviceType::MacDesktop);
 
                     eligible_candidates.push(CandidateEvaluation {
                         node_id: node.node_id,
@@ -367,9 +370,11 @@ mod tests {
     fn test_scheduler_workload_fit_decision_and_rejection_tracking() {
         let scheduler = EdgeScheduler::new(SchedulerConfig::default());
 
-        let mut spec = WorkloadSpec::default();
-        spec.name = "sha256_audit".into();
-        spec.dimension_weights = WorkloadDimensionWeights::for_sha256();
+        let spec = WorkloadSpec {
+            name: "sha256_audit".into(),
+            dimension_weights: WorkloadDimensionWeights::for_sha256(),
+            ..Default::default()
+        };
 
         let eligible_node = NodeRecord {
             node_id: Uuid::new_v4(),
@@ -444,11 +449,16 @@ mod tests {
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0], eligible_node.node_id);
         assert_eq!(decision.selected_node_id, Some(eligible_node.node_id));
-        assert_eq!(decision.selected_node_model, Some("Pixel 8 Physical".into()));
+        assert_eq!(
+            decision.selected_node_model,
+            Some("Pixel 8 Physical".into())
+        );
         assert_eq!(decision.eligible_candidate_count, 1);
         assert_eq!(decision.rejected_nodes.len(), 1);
         assert_eq!(decision.rejected_nodes[0].node_id, rejected_node.node_id);
         assert!(decision.decision_rationale.contains("Pixel 8 Physical"));
-        assert!(decision.decision_rationale.contains("multidimensional fit score"));
+        assert!(decision
+            .decision_rationale
+            .contains("multidimensional fit score"));
     }
 }

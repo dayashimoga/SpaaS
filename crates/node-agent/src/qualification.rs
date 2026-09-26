@@ -56,7 +56,9 @@ impl NodeQualificationEngine {
         let flops = (iterations as f64 * 8.0) / elapsed;
         let mflops = flops / 1_000_000.0;
         // prevent unused optimization
-        if x == 0.0 { println!("{y}"); }
+        if x == 0.0 {
+            println!("{y}");
+        }
         mflops
     }
 
@@ -192,7 +194,8 @@ impl NodeQualificationEngine {
         let (storage_w, storage_r) = Self::benchmark_storage();
 
         // 4. Vulkan & AI detection (honest reporting: do not claim benchmarked if only detected)
-        let vulkan_detected = cfg!(target_os = "android") || cfg!(target_os = "windows") || cfg!(target_os = "linux");
+        let vulkan_detected =
+            cfg!(target_os = "android") || cfg!(target_os = "windows") || cfg!(target_os = "linux");
         let ai_detected = false; // genuinely report false until NPU execution is verified
 
         // 5. Thermal and sustained performance
@@ -229,7 +232,9 @@ impl NodeQualificationEngine {
         let norm_wasm = ((measured_mips / 500.0) * 100.0).clamp(10.0, 100.0) as u8;
         let norm_fp = ((cpu_fp_mflops / 20.0) * 100.0).clamp(10.0, 100.0) as u8;
         let norm_mem = ((mem_bw_mb_s / 5000.0) * 100.0).clamp(15.0, 100.0) as u8;
-        let norm_storage = storage_w.map(|w| ((w / 200.0) * 100.0).clamp(10.0, 100.0) as u8).unwrap_or(70);
+        let norm_storage = storage_w
+            .map(|w| ((w / 200.0) * 100.0).clamp(10.0, 100.0) as u8)
+            .unwrap_or(70);
         let norm_net = 85u8;
         let norm_energy = 88u8;
         let norm_sustained = (throttling_ratio * 100.0).clamp(0.0, 100.0) as u8;
@@ -241,7 +246,11 @@ impl NodeQualificationEngine {
             wasm: norm_wasm,
             fp: norm_fp,
             memory: norm_mem,
-            gpu: if vulkan_detected { CapabilityStatus::Untested } else { CapabilityStatus::Unavailable },
+            gpu: if vulkan_detected {
+                CapabilityStatus::Untested
+            } else {
+                CapabilityStatus::Unavailable
+            },
             npu: CapabilityStatus::Unavailable,
             storage: norm_storage,
             network: norm_net,
@@ -252,14 +261,12 @@ impl NodeQualificationEngine {
         };
 
         // Edge score summary for UX (not used as primary scheduler rank)
-        let edge_score = (
-            (norm_cpu as f64 * 0.25)
+        let edge_score = ((norm_cpu as f64 * 0.25)
             + (norm_wasm as f64 * 0.25)
             + (norm_fp as f64 * 0.15)
             + (norm_mem as f64 * 0.15)
             + (norm_net as f64 * 0.10)
-            + (norm_rel as f64 * 0.10)
-        ) as u8;
+            + (norm_rel as f64 * 0.10)) as u8;
 
         // Hash and sign qualification output
         let qual_summary = format!(

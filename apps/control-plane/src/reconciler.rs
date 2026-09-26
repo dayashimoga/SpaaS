@@ -1,7 +1,7 @@
 use crate::state::AppState;
-use spaas_protocol::metering::ResourceUsage;
 use spaas_persistence::WalEvent;
 use spaas_protocol::job::{JobLease, JobResult, JobState};
+use spaas_protocol::metering::ResourceUsage;
 use spaas_protocol::node::{NodeRecord, NodeState};
 use spaas_protocol::rpc::JobDispatchMessage;
 use spaas_security::keys::KeyPair;
@@ -202,7 +202,13 @@ pub async fn run_reconciler_loop(state: AppState) {
                     if let Some(nid) = job.assigned_node_id {
                         if let Some(node) = nodes.get(&nid) {
                             if node.is_simulated {
-                                sim_jobs.push((*job_id, nid, node.public_key.clone(), job.spec.name.clone(), job.spec.submitter_pubkey.clone()));
+                                sim_jobs.push((
+                                    *job_id,
+                                    nid,
+                                    node.public_key.clone(),
+                                    job.spec.name.clone(),
+                                    job.spec.submitter_pubkey.clone(),
+                                ));
                             }
                         }
                     }

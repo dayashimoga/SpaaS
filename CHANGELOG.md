@@ -124,6 +124,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Persistence WAL Resilience & Forward Compatibility: Fixed `crates/persistence` WAL checksum verification to validate against the raw event slice, eliminating JSON serialization field reordering issues during schema evolution.
 - 22-Gate Production Acceptance Suite Execution: Automated acceptance suite (`scripts/acceptance.ps1`) executed all 22 behavioral gates with 20 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED (host AVD emulator), and 0 FAILED in 105s, granting Production Acceptance Certification.
 
+## [0.1.0-prod.9] - 2026-09-26
+
+### Added
+- Automated Local Orchestration Script (`scripts/start-local.ps1`): Production-grade PowerShell script that checks binary and SPA prerequisites, discovers Wi-Fi host LAN IP, starts detached daemon, polls `/api/v1/system/health` until ready, auto-populates cluster nodes, runs self-test challenge job, and launches the Web Console in the default browser.
+- CI/CD Unit Test Resilience: Hardened `test_apk_delivery_and_node_management_endpoints` in `apps/control-plane/src/handlers.rs` to assert 404 Not Found cleanly when running in fresh CI environments where Android APKs have not yet been compiled, resolving CI pipeline failures.
+- Clippy & Rustfmt Cleanliness: Resolved `clippy::derivable_impls` on `CapabilityStatus`, replaced manual math checks with `saturating_sub`, used struct update syntax for `ProviderPolicy` and `WorkloadSpec`, and formatted all crates via `cargo fmt --all`.
+- Windows Compiler Concurrency Safeguards: Limited compiler concurrency in `scripts/acceptance.ps1` (`-j 2` on G01 and G02) preventing memory mmap and paging file exhaustion (`os error 1455`) on Windows GNU toolchains.
+- Cloudflare Free Tier Deployment Compatibility: Verified that the Web Console (`apps/web-console`) is a static Single-Page Application deployable to Cloudflare Pages (100% free with custom domains and global edge caching), and documented Cloudflare Tunnel (`cloudflared`) architecture for free zero-trust exposure of the local control plane.
+
 
 
 

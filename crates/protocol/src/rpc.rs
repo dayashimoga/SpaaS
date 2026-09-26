@@ -388,7 +388,9 @@ mod tests {
             qr_payload: "spaas://pair?code=SP-8492".into(),
             server_public_key: Some("abcdef0123456789".into()),
         };
-        assert!(serde_json::to_string(&pair_resp).unwrap().contains("SP-8492"));
+        assert!(serde_json::to_string(&pair_resp)
+            .unwrap()
+            .contains("SP-8492"));
 
         let list_nodes = ListNodesResponse {
             nodes: vec![],
@@ -466,7 +468,11 @@ mod tests {
         }"#;
 
         let req: Result<PairDeviceRequest, _> = serde_json::from_str(raw_payload);
-        assert!(req.is_ok(), "Failed to deserialize real Android payload: {:?}", req.err());
+        assert!(
+            req.is_ok(),
+            "Failed to deserialize real Android payload: {:?}",
+            req.err()
+        );
         let req = req.unwrap();
         assert_eq!(req.pairing_code, "SP-9927");
         assert_eq!(req.device_name, "Xiaomi 23078PND5G");

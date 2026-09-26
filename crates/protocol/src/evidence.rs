@@ -32,7 +32,10 @@ impl VerificationEvidenceClass {
     pub fn is_test_verified(&self) -> bool {
         matches!(
             self,
-            Self::Proven | Self::PhysicalDeviceProven | Self::EmulatorProven | Self::SimulationProven
+            Self::Proven
+                | Self::PhysicalDeviceProven
+                | Self::EmulatorProven
+                | Self::SimulationProven
         )
     }
 
@@ -112,7 +115,8 @@ mod tests {
         let deserialized: VerificationEvidenceClass = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, VerificationEvidenceClass::SimulationProven);
 
-        let phys_json = serde_json::to_string(&VerificationEvidenceClass::PhysicalDeviceProven).unwrap();
+        let phys_json =
+            serde_json::to_string(&VerificationEvidenceClass::PhysicalDeviceProven).unwrap();
         assert_eq!(phys_json, "\"PHYSICAL_DEVICE_PROVEN\"");
         let phys_deser: VerificationEvidenceClass = serde_json::from_str(&phys_json).unwrap();
         assert_eq!(phys_deser, VerificationEvidenceClass::PhysicalDeviceProven);

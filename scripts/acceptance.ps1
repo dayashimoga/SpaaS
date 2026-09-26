@@ -118,15 +118,15 @@ function Report-Gate(
 }
 
 # G01: Clean Workspace Build
-Report-Gate 1 "G01" "Clean Workspace Build" "cargo build --workspace" {
-    cargo build --workspace
+Report-Gate 1 "G01" "Clean Workspace Build" "cargo build --workspace -j 2" {
+    cargo build --workspace -j 2
     if ($LASTEXITCODE -ne 0) { throw "Workspace cargo build failed" }
     "PROVEN"
 }
 
 # G02: Lint & Static Quality Check
-Report-Gate 2 "G02" "Static Quality & Workspace Check" "cargo check --workspace" {
-    cargo check --workspace
+Report-Gate 2 "G02" "Static Quality & Workspace Check" "cargo check --workspace -j 2" {
+    cargo check --workspace -j 2
     if ($LASTEXITCODE -ne 0) { throw "Workspace check failed" }
     "PROVEN"
 }
