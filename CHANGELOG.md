@@ -106,6 +106,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Provider & Consumer Guided Workflow Architecture: Restructured Overview into clear **Provide Compute (Earn Credits)** (`Add Device` -> `Set Limits` -> `Start Providing` -> `Earnings`) and **Use Compute (Dispatch Workloads)** (`Select Workload` -> `Configure Resources` -> `Run` -> `Result`) cards, abstracting low-level engineering jargon under the Advanced tab.
 - 22-Gate Acceptance Architecture: Split Gate 14 into Gate 14A (Android AVD Emulator Runtime Verification, `HARDWARE-REQUIRED`) and Gate 14B (Physical Android Hardware Onboarding & Runtime Execution, `HARDWARE-REQUIRED`). Verified all 22 production acceptance gates (19 PROVEN, 1 SIMULATION-PROVEN, 2 HARDWARE-REQUIRED, 0 FAILED) in 157s.
 
+## [0.1.0-prod.7] - 2026-09-26
+
+### Added
+- Resilient Android Client Policy Deserializer (`ProviderPolicyRaw`): Implemented `#[serde(from = "ProviderPolicyRaw")]` in `crates/protocol/src/node.rs`, seamlessly accepting all Android payload variants (`only_unmetered_network`, `only_on_wifi`, `only_on_unmetered_wifi`, `min_battery_pct`, `max_thermal_status`) and eliminating duplicate alias field rejections.
+- Complete Windows Firewall & Network Reachability Solution: Added automated 1-click firewall configuration batch script (`scripts/allow-firewall-port-8080.bat`), embedded download button in Add Device modal, and verified live mobile browser reachability on physical Android devices.
+- Real Android Payload Regression Test: Added `test_real_android_app_payload_deserialization` in `crates/protocol/src/rpc.rs` validating exact mobile client JSON serialization against Axum control plane handlers.
+
+
 
 
 

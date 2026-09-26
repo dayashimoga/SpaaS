@@ -165,6 +165,8 @@
 - [x] Provide Compute & Use Compute Guided Workflows: Refactored console Overview with distinct cards for providers (**Provide Compute / Earn Credits**: Add Device -> Set Limits -> Start Providing -> Earnings) and consumers (**Use Compute / Dispatch Workloads**: Select Workload -> Configure Resources -> Run -> Result), demoting low-level engineering jargon under Advanced [PROVEN, 2026-09-25]
 - [x] Add Device Modal Reachability & QR Overhaul: Embedded Host Network Reachability card displaying auto-detected host LAN IP, editable override field, quick copy buttons, dynamic SVG QR code encoding the unified `spaas://pair` URI, and direct browser download of `SPaaS-Node-v0.1.0.apk` [PROVEN, 2026-09-25]
 - [x] Acceptance Gate Architecture Split (22 Behavioral Gates): Split Gate 14 into G14A (Android AVD Emulator Runtime Verification, `HARDWARE-REQUIRED`) and G14B (Physical Android Hardware Onboarding & Runtime Execution, `HARDWARE-REQUIRED`), achieving 19 PROVEN, 1 SIMULATION-PROVEN, 2 HARDWARE-REQUIRED, 0 FAILED across 22 gates in 157s [PROVEN, 2026-09-25]
+- [x] Real Android Client Policy Deserialization Architecture (ProviderPolicyRaw): Resolved Axum JSON rejection ("missing field 'only_on_unmetered_network'") by implementing `ProviderPolicyRaw` with `From` trait, seamlessly normalizing `only_unmetered_network`, `min_battery_pct`, `max_thermal_status`, and handling duplicate alias fields without errors [PROVEN, 2026-09-26]
+
 
 
 
