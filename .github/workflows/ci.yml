@@ -41,6 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -63,7 +64,8 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/web-console/dist --project-name=spaas-console
+          preCommands: npx wrangler pages project create spaas-console --production-branch=main || true
+          command: pages deploy apps/web-console/dist --project-name=spaas-console --commit-dirty=true
 
   build-release-binaries:
     name: Build CLI & Server Binaries

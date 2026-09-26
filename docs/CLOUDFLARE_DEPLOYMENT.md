@@ -67,16 +67,29 @@ In `.github/workflows/ci.yml`, the `web-console-build` job automatically trigger
 
 ```yaml
       - name: Deploy to Cloudflare Pages
-        if: github.ref == 'refs/heads/main' && secrets.CLOUDFLARE_API_TOKEN != ''
+        if: github.ref == 'refs/heads/main' && env.CLOUDFLARE_API_TOKEN != ''
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/web-console/dist --project-name=spaas-console
+          preCommands: npx wrangler pages project create spaas-console --production-branch=main || true
+          command: pages deploy apps/web-console/dist --project-name=spaas-console --commit-dirty=true
 ```
+
+The workflow automatically initializes the `spaas-console` Pages project in your Cloudflare account if it does not exist yet (`preCommands`), and then deploys the production distribution (`apps/web-console/dist`) with commit verification.
 
 Your web console will be live at:
 **`https://spaas-console.pages.dev`** (with free SSL, instant global edge routing, and unlimited bandwidth).
+
+### First-Time Cloudflare Pages Project Creation
+If the project `spaas-console` does not already exist in your Cloudflare account:
+1. **Automated (Default):** The CI workflow attempts to create it automatically using your `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Ensure your API token has `Account -> Cloudflare Pages -> Edit` permissions.
+2. **Manual (Alternative 1-Click Setup):**
+   - In the [Cloudflare Dashboard](https://dash.cloudflare.com/), navigate to **Workers & Pages** &rarr; **Create application**.
+   - Click the **Pages** tab &rarr; choose **Direct Upload**.
+   - Set the **Project name** to: `spaas-console`.
+   - Click **Create project** (you can upload any folder or `apps/web-console/dist` or proceed).
+   - Once created, every GitHub push will deploy new releases to this project.
 
 ---
 
