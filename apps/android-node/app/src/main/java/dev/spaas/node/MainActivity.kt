@@ -47,10 +47,14 @@ enum class NodeNavTab(val title: String, val iconEmoji: String) {
 class MainActivity : ComponentActivity() {
 
     private lateinit var monitor: AndroidTelemetryMonitor
+    private var initialPairingCode by mutableStateOf("")
+    private var initialServerUrl by mutableStateOf("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ComputeWorkerClient.initPersistence(this)
         monitor = AndroidTelemetryMonitor(this)
+        handleDeepLink(intent)
 
         setContent {
             MaterialTheme(
@@ -70,6 +74,8 @@ class MainActivity : ComponentActivity() {
                     SpaasAppScaffold(
                         context = this,
                         monitor = monitor,
+                        initialPairingCode = initialPairingCode,
+                        initialServerUrl = initialServerUrl,
                         onStartService = {
                             val intent = Intent(this, ComputeForegroundService::class.java).apply {
                                 action = ComputeForegroundService.ACTION_START
@@ -98,6 +104,27 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    private fun handleDeepLink(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme == "spaas") {
+            val code = data.getQueryParameter("code")
+            val server = data.getQueryParameter("server")
+            if (!code.isNullOrBlank()) {
+                initialPairingCode = code
+            }
+            if (!server.isNullOrBlank()) {
+                initialServerUrl = server
+                ComputeWorkerClient.serverBaseUrl = server
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -105,6 +132,8 @@ class MainActivity : ComponentActivity() {
 fun SpaasAppScaffold(
     context: Context,
     monitor: AndroidTelemetryMonitor,
+    initialPairingCode: String = "",
+    initialServerUrl: String = "",
     onStartService: () -> Unit,
     onStopService: () -> Unit,
     onPauseToggle: () -> Unit
@@ -116,8 +145,15 @@ fun SpaasAppScaffold(
     val safetyPolicy = remember { ProviderSafetyPolicy() }
     var sessionStartTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-    var pairingCodeInput by remember { mutableStateOf("") }
-    var serverUrlInput by remember { mutableStateOf(ComputeWorkerClient.serverBaseUrl) }
+    var pairingCodeInput by remember(initialPairingCode) {
+        mutableStateOf(if (initialPairingCode.isNotBlank()) initialPairingCode else "")
+    }
+    var serverUrlInput by remember(initialServerUrl) {
+        mutableStateOf(
+            if (initialServerUrl.isNotBlank()) initialServerUrl
+            else ComputeWorkerClient.serverBaseUrl
+        )
+    }
     var pairingStatusMsg by remember { mutableStateOf<String?>(null) }
     var isPairingLoading by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
@@ -211,8 +247,7 @@ fun SpaasAppScaffold(
                         }
                     },
                     onUnpairClick = {
-                        ComputeWorkerClient.isPaired = false
-                        ComputeWorkerClient.pairedNodeId = null
+                        ComputeWorkerClient.clearIdentity()
                         pairingStatusMsg = "Device disconnected."
                         onStopService()
                     },

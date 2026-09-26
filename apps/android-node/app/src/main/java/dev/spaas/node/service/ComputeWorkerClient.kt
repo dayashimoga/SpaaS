@@ -48,7 +48,66 @@ object ComputeWorkerClient {
         }
     }
 
+    var appContext: android.content.Context? = null
     private var nodeKeyPair: java.security.KeyPair? = null
+
+    fun initPersistence(context: android.content.Context) {
+        appContext = context.applicationContext
+        val prefs = context.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE)
+        val savedNodeId = prefs.getString("paired_node_id", null)
+        val savedToken = prefs.getString("auth_token", null)
+        val savedUrl = prefs.getString("server_base_url", null)
+        val privB64 = prefs.getString("private_key_b64", null)
+        val pubB64 = prefs.getString("public_key_b64", null)
+        val algorithm = prefs.getString("key_algorithm", "Ed25519") ?: "Ed25519"
+
+        if (!savedUrl.isNullOrBlank()) {
+            serverBaseUrl = savedUrl
+        }
+        if (savedNodeId != null && savedToken != null) {
+            pairedNodeId = savedNodeId
+            authToken = savedToken
+            isPaired = true
+            connectionState = ConnectionState.CONNECTED
+        }
+        if (privB64 != null && pubB64 != null) {
+            try {
+                val kf = java.security.KeyFactory.getInstance(algorithm)
+                val privBytes = android.util.Base64.decode(privB64, android.util.Base64.NO_WRAP)
+                val pubBytes = android.util.Base64.decode(pubB64, android.util.Base64.NO_WRAP)
+                val privKey = kf.generatePrivate(java.security.spec.PKCS8EncodedKeySpec(privBytes))
+                val pubKey = kf.generatePublic(java.security.spec.X509EncodedKeySpec(pubBytes))
+                nodeKeyPair = java.security.KeyPair(pubKey, privKey)
+            } catch (_: Throwable) {
+                // Key format mismatch, will regenerate on demand
+            }
+        }
+    }
+
+    fun persistIdentity(context: android.content.Context) {
+        try {
+            val prefs = context.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE)
+            val kp = getOrCreateKeyPair()
+            val privB64 = android.util.Base64.encodeToString(kp.private.encoded, android.util.Base64.NO_WRAP)
+            val pubB64 = android.util.Base64.encodeToString(kp.public.encoded, android.util.Base64.NO_WRAP)
+            prefs.edit()
+                .putString("paired_node_id", pairedNodeId)
+                .putString("auth_token", authToken)
+                .putString("server_base_url", serverBaseUrl)
+                .putString("private_key_b64", privB64)
+                .putString("public_key_b64", pubB64)
+                .putString("key_algorithm", kp.private.algorithm)
+                .apply()
+        } catch (_: Throwable) {}
+    }
+
+    fun clearIdentity(context: android.content.Context) {
+        pairedNodeId = null
+        authToken = null
+        isPaired = false
+        connectionState = ConnectionState.DISCONNECTED
+        context.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE).edit().clear().apply()
+    }
 
     fun getOrCreateKeyPair(): java.security.KeyPair {
         if (nodeKeyPair != null) return nodeKeyPair!!
@@ -61,6 +120,7 @@ object ComputeWorkerClient {
             kpg.generateKeyPair()
         }
         nodeKeyPair = kp
+        appContext?.let { persistIdentity(it) }
         return kp
     }
 

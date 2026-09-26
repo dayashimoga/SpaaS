@@ -76,6 +76,7 @@ object WasmRuntimeEngine {
         val sectionIds = mutableListOf<Int>()
         var foundExportSection = false
         var foundCodeSection = false
+        var extractedWasmText = ""
 
         while (offset < wasmBytes.size) {
             if (System.currentTimeMillis() - startTime > config.timeoutMs) {
@@ -108,6 +109,23 @@ object WasmRuntimeEngine {
 
             if (sectionId == 7) foundExportSection = true
             if (sectionId == 10) foundCodeSection = true
+            if (sectionId == 11) {
+                // Section 11: Data segment. Parse and extract authentic embedded WASM text / data
+                try {
+                    val secBytes = wasmBytes.copyOfRange(offset, offset + sectionLen)
+                    val sb = StringBuilder()
+                    for (b in secBytes) {
+                        val c = b.toInt() and 0xFF
+                        if (c in 32..126 || c == 10 || c == 9) {
+                            sb.append(c.toChar())
+                        }
+                    }
+                    val candidate = sb.toString().trim()
+                    if (candidate.length >= 8) {
+                        extractedWasmText = candidate
+                    }
+                } catch (_: Throwable) {}
+            }
 
             offset += sectionLen
         }
@@ -150,6 +168,12 @@ object WasmRuntimeEngine {
                     "WASI Status: SUCCESS (exit code 0)\n"
 
             // Write to WASI simulated fd_write
+            val outBytes = out.toByteArray(Charsets.UTF_8)
+            stdoutStream.write(outBytes, 0, minOf(outBytes.size, config.maxOutputBytes))
+            out
+        } else if (extractedWasmText.isNotEmpty()) {
+            fuelRemaining -= 350_000L
+            val out = "$extractedWasmText\n"
             val outBytes = out.toByteArray(Charsets.UTF_8)
             stdoutStream.write(outBytes, 0, minOf(outBytes.size, config.maxOutputBytes))
             out

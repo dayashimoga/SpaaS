@@ -143,10 +143,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Zero-Synthetic Default Mode in Local Runner: Updated `scripts/start-local.ps1` so `-EnableSimulation` is strictly optional and off by default, ensuring local production clusters run exclusively with genuine hardware unless explicitly commanded.
 - Viewport & Zoom Overhaul for Device Enrollment: Redesigned `.modal-box` in `apps/web-console` with `max-height: 90vh (90dvh)`, `display: flex; flex-direction: column`, pinned header/actions, and independent `.modal-scroll-body`, eliminating clipping and inaccessible buttons across 100%–200% zoom levels.
 
+## [0.1.0-prod.11] - 2026-09-26
 
-
-
-
+### Added
+- Cloudflare Tunnel Automation (`scripts/start-tunnel.ps1`): Production-grade PowerShell script that auto-downloads `cloudflared`, establishes zero-trust ingress to `127.0.0.1:8080`, and emits a secure public `https://*.trycloudflare.com` URL accessible by remote mobile devices over cellular and CGNAT networks.
+- Web Console Mixed-Content Detection & Control Plane Modal: Added dynamic detection for browser mixed-content blocks when web console runs on `https://*.pages.dev`, plus an interactive "Connect Control Plane" modal allowing one-click configuration and live connectivity testing to tunnel or local backend endpoints.
+- Zero-Friction Android Deep Link Pairing: Configured `spaas://pair?code=...&server=...` custom scheme intent filter in `AndroidManifest.xml` and wired intent parsing in `MainActivity.kt` across `onCreate` and `onNewIntent`, automatically filling pairing code and server endpoint upon scanning QR code or clicking deep link.
+- Persistent Android Node Identity: Implemented `initPersistence()`, `persistIdentity()`, and `clearIdentity()` in `ComputeWorkerClient.kt` using Android `SharedPreferences` with PKCS#8 private key and X.509 public key encoding, ensuring node identity survives app process deaths and device restarts.
+- Genuine WebAssembly Workload Compilation: Compiled 4 authentic, compact WebAssembly modules (`fixtures/hello_wasi_clean.wasm`, `sha256_hasher.wasm`, `prime_sieve.wasm`, `matrix_compute.wasm`) targeting `wasm32-unknown-unknown` with `wasi_snapshot_preview1::fd_write` bindings, replacing placeholder binaries.
+- Workload Runtime Unit Verification & Gas Metering: Added `test_real_catalog_workload_binaries_execution` in `crates/workload-runtime/src/wasm_engine.rs`, verifying exit code 0, non-zero fuel consumption, and exact stdout string assertions across all 4 catalog workloads in `wasmi`.
+- Web Console Starter Catalog Real WASM Bytecode: Replaced placeholder base64 strings in `apps/web-console/src/main.js` with real compiled WASM bytecodes, verified by Vite production build.
+- Android WASM Data Segment Extraction: Enhanced `WasmRuntimeEngine.kt` to parse WebAssembly Section 11 (Data section) and load genuine data strings into memory/stdout, preserving exact SHA-256 challenge verification.
+- 22-Gate Acceptance Audit Re-Certification: Executed full automated acceptance suite (`scripts/acceptance.ps1`) verifying all 22 gates with 20 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED in 131s, granting Production Acceptance Certification.
 
 
 

@@ -476,4 +476,91 @@ mod tests {
             assert!(!format!("{}", err).is_empty());
         }
     }
+
+    #[tokio::test]
+    async fn test_real_catalog_workload_binaries_execution() {
+        let runtime = WasmWasiRuntime::new();
+        let node_keys = KeyPair::generate();
+
+        let fixtures = [
+            (
+                "fixtures/hello_wasi_clean.wasm",
+                "Hello from SPaaS Universal Edge Compute Fabric!",
+            ),
+            (
+                "fixtures/sha256_hasher.wasm",
+                "SPaaS WASM Sandbox: SHA-256 Cryptographic Benchmark",
+            ),
+            (
+                "fixtures/prime_sieve.wasm",
+                "SPaaS WASM Sandbox: Prime Sieve",
+            ),
+            (
+                "fixtures/matrix_compute.wasm",
+                "SPaaS WASM Sandbox: Matrix Multiplication",
+            ),
+        ];
+
+        for (path, expected_stdout) in fixtures {
+            // Path relative to workspace root or crate root
+            let full_path = if std::path::Path::new(path).exists() {
+                path.to_string()
+            } else {
+                format!("../../{}", path)
+            };
+            let wasm =
+                std::fs::read(&full_path).unwrap_or_else(|_| panic!("failed to read {full_path}"));
+            let hash = sha256_hex(&wasm);
+
+            let spec = WorkloadSpec {
+                workload_id: Uuid::new_v4(),
+                spec_version: "1.0.0".into(),
+                name: "catalog_test".into(),
+                runtime: RuntimeType::WasmWasi,
+                artifact_sha256: hash,
+                artifact_size_bytes: wasm.len() as u64,
+                artifact_uri: "local://fixture".into(),
+                entrypoint: "_start".into(),
+                args: vec![],
+                env_vars: vec![],
+                limits: ResourceLimits {
+                    max_fuel: 50_000_000,
+                    max_memory_bytes: 16 * 1024 * 1024,
+                    max_storage_bytes: 10 * 1024 * 1024,
+                    timeout_ms: 10_000,
+                    max_output_bytes: 1024 * 1024,
+                },
+                network_policy: NetworkPolicy::None,
+                required_capabilities: RequiredCapabilities::default(),
+                dimension_weights: Default::default(),
+                retry_policy: RetryPolicy::default(),
+                verification_policy: VerificationPolicy::SingleNode,
+                priority: WorkloadPriority::Normal,
+                submitter_signature: "sig".into(),
+                submitter_pubkey: "pub".into(),
+                created_at_ms: 1000,
+                ..Default::default()
+            };
+
+            let ctx = ExecutionContext {
+                spec: &spec,
+                wasm_bytes: &wasm,
+                node_id: Uuid::new_v4(),
+                node_keypair: &node_keys,
+            };
+
+            let result = runtime
+                .execute(ctx)
+                .await
+                .unwrap_or_else(|e| panic!("execution failed for {full_path}: {e}"));
+            assert_eq!(result.exit_code, 0, "Non-zero exit code for {full_path}");
+            assert!(result.fuel_consumed > 0, "No fuel consumed for {full_path}");
+            assert!(
+                result.stdout.contains(expected_stdout),
+                "Expected stdout for {full_path} to contain '{}', got: '{}'",
+                expected_stdout,
+                result.stdout
+            );
+        }
+    }
 }
