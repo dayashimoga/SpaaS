@@ -247,6 +247,7 @@ mod tests {
             submitter_signature: String::new(),
             submitter_pubkey: String::new(),
             created_at_ms: 1000,
+            ..Default::default()
         };
         sign_workload(&submitter_key, &mut spec);
 
@@ -337,6 +338,7 @@ mod tests {
             submitter_signature: String::new(),
             submitter_pubkey: String::new(),
             created_at_ms: 1000,
+            ..Default::default()
         };
         sign_workload(&submitter_key, &mut spec);
 

@@ -544,6 +544,15 @@ function initNavigation() {
   if (btnCopyDiag) {
     btnCopyDiag.addEventListener('click', () => copyDiagnosticsReport());
   }
+
+  const btnFetchConsumer = document.getElementById('btn-fetch-consumer-balance');
+  if (btnFetchConsumer) {
+    btnFetchConsumer.addEventListener('click', () => {
+      const input = document.getElementById('consumer-pubkey-input');
+      const key = input ? input.value.trim() : '';
+      fetchConsumerBalance(key);
+    });
+  }
 }
 
 async function runDiagnostics() {
@@ -1728,6 +1737,28 @@ function renderJobDetails(job) {
     elJobFuel.textContent = job.result ? (job.result.fuel_consumed || 0).toLocaleString() : '-';
   }
 
+  // Calculate actual fuel-based compute time vs wall-clock time (GB-03) and Estimated Energy
+  const elComputeTime = document.getElementById('detail-job-compute-time');
+  const elWallTime = document.getElementById('detail-job-wall-time');
+  const elEnergy = document.getElementById('detail-job-energy');
+  if (job.result) {
+    const fuel = job.result.fuel_consumed || 0;
+    const node = cachedNodes.find(n => n.node_id === job.assigned_node_id);
+    const mips = node?.qualification?.measured_fuel_mips || 150;
+    const computeMs = Math.max(1, Math.round((fuel / (mips * 1000000)) * 1000));
+    if (elComputeTime) elComputeTime.textContent = `${computeMs}ms (${fuel.toLocaleString()} fuel @ ${mips} MIPS)`;
+    if (elWallTime) elWallTime.textContent = `${job.result.wall_time_ms}ms (Elapsed)`;
+    if (elEnergy) {
+      const energyMwh = ((fuel * 0.0000000008) * 1000).toFixed(4);
+      const joules = (fuel * 0.0000000008 * 3600).toFixed(4);
+      elEnergy.textContent = `${energyMwh} mWh (~${joules} J)`;
+    }
+  } else {
+    if (elComputeTime) elComputeTime.textContent = '-';
+    if (elWallTime) elWallTime.textContent = '-';
+    if (elEnergy) elEnergy.textContent = '-';
+  }
+
   // Sub-tab 2: Lifecycle Timeline (10 visible steps)
   const steps = ['tl-step-1', 'tl-step-2', 'tl-step-3', 'tl-step-4', 'tl-step-5', 'tl-step-6', 'tl-step-7', 'tl-step-8', 'tl-step-9', 'tl-step-10'];
   let completedCount = 1;
@@ -1967,8 +1998,39 @@ async function fetchMetering() {
     document.getElementById('usage-tx-count').textContent = cachedMetering.length;
 
     renderMeteringTable(cachedMetering);
+    fetchConsumerBalance();
   } catch (err) {
     console.warn('Error fetching metering:', err);
+  }
+}
+
+function getConsumerPublicKey() {
+  let key = localStorage.getItem('spaas_consumer_pubkey');
+  if (!key) {
+    key = 'consumer-ed25519-' + Math.random().toString(36).substring(2, 10);
+    localStorage.setItem('spaas_consumer_pubkey', key);
+  }
+  return key;
+}
+
+async function fetchConsumerBalance(pubkey) {
+  const targetKey = (pubkey && pubkey.trim()) || getConsumerPublicKey();
+  const inputEl = document.getElementById('consumer-pubkey-input');
+  if (inputEl && (!inputEl.value || inputEl.value !== targetKey)) {
+    inputEl.value = targetKey;
+  }
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/metering/consumer/${encodeURIComponent(targetKey)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const elBal = document.getElementById('consumer-balance-credits');
+    const elSpent = document.getElementById('consumer-total-spent');
+    const elJobs = document.getElementById('consumer-jobs-submitted');
+    if (elBal) elBal.textContent = (data.balance_credits || 0).toLocaleString();
+    if (elSpent) elSpent.textContent = (data.total_spent || 0).toLocaleString();
+    if (elJobs) elJobs.textContent = (data.total_jobs_submitted || 0).toLocaleString();
+  } catch (err) {
+    console.warn('Error fetching consumer balance:', err);
   }
 }
 
@@ -2253,7 +2315,7 @@ async function submitCurrentWorkload() {
       },
       priority: 'normal',
       submitter_signature: 'portal-auto-sign',
-      submitter_pubkey: '',
+      submitter_pubkey: getConsumerPublicKey(),
       created_at_ms: Date.now()
     },
     wasm_binary_base64: preset.wasm_base64
@@ -2276,6 +2338,7 @@ async function submitCurrentWorkload() {
 
     // Refresh data immediately
     await refreshAllData();
+    await fetchConsumerBalance(getConsumerPublicKey());
 
     // Switch to Jobs tab and select this job
     switchTab('jobs');

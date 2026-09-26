@@ -29,6 +29,7 @@ fn test_job_lease_lifecycle_and_late_result_rejection() {
         submitter_signature: "".into(),
         submitter_pubkey: "".into(),
         created_at_ms: 1000,
+        ..Default::default()
     };
 
     let mut job = JobRecord::new(spec);

@@ -42,6 +42,8 @@ pub struct AppState {
     pub scheduler_decisions:
         Arc<RwLock<HashMap<Uuid, spaas_protocol::workload::SchedulerDecision>>>,
     pub event_bus: tokio::sync::broadcast::Sender<String>,
+    pub is_simulation_active: Arc<std::sync::atomic::AtomicBool>,
+    pub pending_node_commands: Arc<RwLock<HashMap<Uuid, spaas_protocol::rpc::NodeRemoteCommand>>>,
     pub started_at_ms: i64,
 }
 
@@ -79,6 +81,105 @@ impl AppState {
 
         let (event_bus, _) = tokio::sync::broadcast::channel(2048);
 
+        let metrics = Arc::new(MetricsRegistry::new());
+
+        // Recompute metric gauges from recovered WAL state (Sprint 2: GB-01 fix)
+        {
+            let node_states = recovered.nodes.values().map(|n| {
+                let is_dead = n.state == spaas_protocol::node::NodeState::Offline
+                    || n.state == spaas_protocol::node::NodeState::Revoked
+                    || n.enrollment == spaas_protocol::node::EnrollmentStatus::Revoked;
+                let label = n.state.display_label();
+                (is_dead, label)
+            });
+            let job_states = recovered.jobs.values().map(|j| match j.state {
+                spaas_protocol::job::JobState::Queued => "Queued",
+                spaas_protocol::job::JobState::Scheduled => "Scheduled",
+                spaas_protocol::job::JobState::Running => "Running",
+                spaas_protocol::job::JobState::Completed => "Completed",
+                spaas_protocol::job::JobState::Failed => "Failed",
+                spaas_protocol::job::JobState::TimedOut => "TimedOut",
+                spaas_protocol::job::JobState::Cancelled => "Cancelled",
+                _ => "Unknown",
+            });
+            metrics.recompute_from_recovered_state(node_states, job_states);
+            info!(
+                active = metrics
+                    .active_nodes
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                idle = metrics
+                    .idle_nodes
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                offline = metrics
+                    .offline_nodes
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                running = metrics
+                    .running_jobs
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                "Metric counters recomputed from recovered WAL state"
+            );
+        }
+
+        let key_path = data_dir.as_ref().join("server_key.json");
+        let server_keypair = if key_path.exists() {
+            match std::fs::read_to_string(&key_path) {
+                Ok(content) => {
+                    #[derive(serde::Deserialize)]
+                    struct KeyFile {
+                        secret_key_hex: String,
+                    }
+                    match serde_json::from_str::<KeyFile>(&content) {
+                        Ok(kf) => match KeyPair::from_secret_hex(&kf.secret_key_hex) {
+                            Ok(kp) => {
+                                info!(
+                                    public_key = %kp.public_key_hex(),
+                                    path = ?key_path,
+                                    "Loaded persisted server Ed25519 keypair"
+                                );
+                                kp
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to parse secret key hex from {:?}: {e}. Generating new keypair.", key_path);
+                                KeyPair::generate()
+                            }
+                        },
+                        Err(e) => {
+                            tracing::warn!("Failed to deserialize server key file {:?}: {e}. Generating new keypair.", key_path);
+                            KeyPair::generate()
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to read server key file {:?}: {e}. Generating new keypair.",
+                        key_path
+                    );
+                    KeyPair::generate()
+                }
+            }
+        } else {
+            let kp = KeyPair::generate();
+            let json_data = serde_json::json!({
+                "public_key_hex": kp.public_key_hex(),
+                "secret_key_hex": kp.secret_key_hex(),
+                "created_at_utc": chrono::Utc::now().to_rfc3339(),
+            });
+            let _ = std::fs::create_dir_all(data_dir.as_ref());
+            if let Err(e) = std::fs::write(
+                &key_path,
+                serde_json::to_string_pretty(&json_data).unwrap_or_default(),
+            ) {
+                tracing::warn!("Failed to save server keypair to {:?}: {e}", key_path);
+            } else {
+                info!(
+                    public_key = %kp.public_key_hex(),
+                    path = ?key_path,
+                    "Generated and persisted fresh server Ed25519 keypair"
+                );
+            }
+            kp
+        };
+
         Self {
             storage,
             nodes: Arc::new(RwLock::new(recovered.nodes)),
@@ -88,12 +189,14 @@ impl AppState {
             scheduler: Arc::new(EdgeScheduler::new(Default::default())),
             verification: Arc::new(VerificationEngine::new()),
             ledger: Arc::new(RwLock::new(ledger)),
-            metrics: Arc::new(MetricsRegistry::new()),
-            server_keypair: Arc::new(KeyPair::generate()),
+            metrics,
+            server_keypair: Arc::new(server_keypair),
             audit_log: Arc::new(RwLock::new(recovered.audit_log)),
             pairing_tokens: Arc::new(RwLock::new(HashMap::new())),
             scheduler_decisions: Arc::new(RwLock::new(HashMap::new())),
             event_bus,
+            is_simulation_active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            pending_node_commands: Arc::new(RwLock::new(HashMap::new())),
             started_at_ms: chrono::Utc::now().timestamp_millis(),
         }
     }
@@ -275,6 +378,8 @@ impl AppState {
         };
 
         let purged_count = purged_ids.len();
+        self.is_simulation_active
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         {
             let mut nodes = self.nodes.write().await;
             for id in &purged_ids {

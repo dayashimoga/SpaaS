@@ -77,6 +77,7 @@ async fn test_control_plane_durable_restart_recovery() {
             submitter_signature: "sub_sig".into(),
             submitter_pubkey: "sub_pub".into(),
             created_at_ms: 1500,
+            ..Default::default()
         };
 
         let mut job = JobRecord::new(spec);

@@ -325,6 +325,8 @@ pub struct ProviderPolicy {
     pub bandwidth_cap_kbps: u64,
     /// Temporary share duration in hours (0 = continuous/manual)
     pub temporary_share_hours: u32,
+    /// Allowed workload categories (empty = accept all) (Sprint 5: GE-04)
+    pub allowed_categories: Vec<String>,
 }
 
 fn default_max_threads() -> u32 {
@@ -381,6 +383,8 @@ struct ProviderPolicyRaw {
     bandwidth_cap_kbps: u64,
     #[serde(default, alias = "temporaryShareHours")]
     temporary_share_hours: u32,
+    #[serde(default, alias = "allowedCategories")]
+    allowed_categories: Vec<String>,
 }
 
 impl From<ProviderPolicyRaw> for ProviderPolicy {
@@ -407,6 +411,7 @@ impl From<ProviderPolicyRaw> for ProviderPolicy {
             allow_mobile_data: raw.allow_mobile_data,
             bandwidth_cap_kbps: raw.bandwidth_cap_kbps,
             temporary_share_hours: raw.temporary_share_hours,
+            allowed_categories: raw.allowed_categories,
         }
     }
 }
@@ -429,6 +434,7 @@ impl Default for ProviderPolicy {
             allow_mobile_data: false,
             bandwidth_cap_kbps: 0,
             temporary_share_hours: 0,
+            allowed_categories: vec![],
         }
     }
 }

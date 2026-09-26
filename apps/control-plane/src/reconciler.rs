@@ -22,13 +22,30 @@ pub async fn run_reconciler_loop(state: AppState) {
         // 1. Detect disconnected nodes & maintain simulated nodes
         let mut offline_node_ids = Vec::new();
         {
+            let is_sim_active = state.is_simulation_active.load(Ordering::Relaxed);
             let mut nodes = state.nodes.write().await;
             for (node_id, node) in nodes.iter_mut() {
                 if node.is_simulated {
-                    // Keep simulated demo nodes actively healthy
-                    node.last_heartbeat_ms = now;
-                    if node.state == NodeState::Offline {
-                        node.state = NodeState::Idle;
+                    if is_sim_active {
+                        // Keep simulated demo nodes actively healthy
+                        node.last_heartbeat_ms = now;
+                        if node.state == NodeState::Offline {
+                            node.state = NodeState::Idle;
+                        }
+                    } else if node.state != NodeState::Offline
+                        && node.last_heartbeat_ms < timeout_thresh
+                    {
+                        node.state = NodeState::Offline;
+                        offline_node_ids.push(*node_id);
+                        state.metrics.offline_nodes.fetch_add(1, Ordering::Relaxed);
+                        state.metrics.active_nodes.fetch_sub(1, Ordering::Relaxed);
+                        warn!(node_id = %node_id, "Simulated node missed heartbeats (simulation inactive); marked OFFLINE");
+
+                        let updated = node.clone();
+                        let _ = state
+                            .storage
+                            .append_event(WalEvent::UpsertNode { node: updated })
+                            .await;
                     }
                     continue;
                 }

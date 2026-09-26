@@ -105,10 +105,25 @@ class ComputeForegroundService : Service() {
                 // Send outbound heartbeat CONTINUOUSLY whenever paired
                 if (ComputeWorkerClient.isPaired) {
                     val effectivePolicy = safetyPolicy.copy(isUserPaused = isCurrentlyYielding)
-                    ComputeWorkerClient.sendHeartbeat(telemetry, effectivePolicy)
+                    val hbSuccess = ComputeWorkerClient.sendHeartbeat(telemetry, effectivePolicy)
 
-                    // Only poll and execute jobs if not yielding
-                    if (!isCurrentlyYielding) {
+                    if (!hbSuccess && ComputeWorkerClient.connectionState == ComputeWorkerClient.ConnectionState.RECONNECTING) {
+                        val attempts = ComputeWorkerClient.consecutiveHeartbeatFailures
+                        val maxAttempts = ComputeWorkerClient.MAX_RECONNECT_ATTEMPTS
+                        val backoff = ComputeWorkerClient.calculateBackoffDelayMs(attempts)
+                        currentNodeState = "RECONNECTING"
+                        updateNotification("RECONNECTING ($attempts/$maxAttempts) - Backing off ${backoff / 1000}s...")
+                        delay(backoff)
+                        continue
+                    } else if (!hbSuccess && ComputeWorkerClient.connectionState == ComputeWorkerClient.ConnectionState.DISCONNECTED) {
+                        currentNodeState = "DISCONNECTED"
+                        updateNotification("DISCONNECTED - Max reconnection attempts reached. Check network.")
+                        delay(30000)
+                        continue
+                    }
+
+                    // Only poll and execute jobs if connected and not yielding
+                    if (!isCurrentlyYielding && ComputeWorkerClient.connectionState == ComputeWorkerClient.ConnectionState.CONNECTED) {
                         val executed = ComputeWorkerClient.pollAndExecuteJob()
                         if (executed != null) {
                             currentActiveJob = executed.workloadName

@@ -17,10 +17,36 @@ import java.util.UUID
 
 object ComputeWorkerClient {
 
+    enum class ConnectionState {
+        CONNECTED,
+        RECONNECTING,
+        DISCONNECTED
+    }
+
     var serverBaseUrl: String = if (isRunningInEmulator()) "http://10.0.2.2:8080" else "http://192.168.0.111:8080"
     var pairedNodeId: String? = null
     var authToken: String? = null
     var isPaired: Boolean = false
+    val cancelledJobIds: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    var connectionState: ConnectionState = ConnectionState.DISCONNECTED
+    var consecutiveHeartbeatFailures: Int = 0
+    const val MAX_RECONNECT_ATTEMPTS: Int = 20
+
+    fun calculateBackoffDelayMs(failures: Int): Long {
+        val exponent = failures.coerceIn(0, 5)
+        val baseDelay = 1000L * (1L shl exponent) // 1s, 2s, 4s, 8s, 16s, 32s
+        return baseDelay.coerceAtMost(30000L) // max 30s
+    }
+
+    fun handleHeartbeatFailure() {
+        consecutiveHeartbeatFailures++
+        connectionState = if (consecutiveHeartbeatFailures >= MAX_RECONNECT_ATTEMPTS) {
+            ConnectionState.DISCONNECTED
+        } else {
+            ConnectionState.RECONNECTING
+        }
+    }
 
     private var nodeKeyPair: java.security.KeyPair? = null
 
@@ -62,13 +88,22 @@ object ComputeWorkerClient {
         val fingerprint = android.os.Build.FINGERPRINT ?: ""
         val model = android.os.Build.MODEL ?: ""
         val hardware = android.os.Build.HARDWARE ?: ""
+        val product = android.os.Build.PRODUCT ?: ""
+        val brand = android.os.Build.BRAND ?: ""
+        val device = android.os.Build.DEVICE ?: ""
         return fingerprint.startsWith("generic") ||
                 fingerprint.startsWith("unknown") ||
-                model.contains("google_sdk") ||
-                model.contains("Emulator") ||
-                model.contains("Android SDK built for x86") ||
+                fingerprint.contains("emulator", ignoreCase = true) ||
+                model.contains("google_sdk", ignoreCase = true) ||
+                model.contains("Emulator", ignoreCase = true) ||
+                model.contains("Android SDK built for x86", ignoreCase = true) ||
                 hardware.contains("goldfish") ||
-                hardware.contains("ranchu")
+                hardware.contains("ranchu") ||
+                product.contains("sdk") ||
+                product.contains("google_sdk") ||
+                product.contains("emulator") ||
+                brand.startsWith("generic") ||
+                device.startsWith("generic")
     }
 
     suspend fun testReachability(baseUrl: String): String = withContext(Dispatchers.IO) {
@@ -214,6 +249,8 @@ object ComputeWorkerClient {
                 pairedNodeId = nodeId
                 authToken = token
                 isPaired = true
+                consecutiveHeartbeatFailures = 0
+                connectionState = ConnectionState.CONNECTED
 
                 PairResult.Success(nodeId, token)
             } else {
@@ -270,8 +307,30 @@ object ComputeWorkerClient {
             }
 
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
-            conn.responseCode in 200..299
+            val ok = conn.responseCode in 200..299
+            if (ok) {
+                consecutiveHeartbeatFailures = 0
+                connectionState = ConnectionState.CONNECTED
+                try {
+                    val respText = conn.inputStream.bufferedReader().use { it.readText() }
+                    val respObj = JSONObject(respText)
+                    val cmdObj = respObj.optJSONObject("command")
+                    if (cmdObj != null) {
+                        val action = cmdObj.optString("action")
+                        if (action == "cancel_job") {
+                            val cancelJobId = cmdObj.optString("job_id")
+                            if (cancelJobId.isNotBlank()) {
+                                cancelledJobIds.add(cancelJobId)
+                            }
+                        }
+                    }
+                } catch (_: Throwable) {}
+            } else {
+                handleHeartbeatFailure()
+            }
+            ok
         } catch (_: Exception) {
+            handleHeartbeatFailure()
             false
         }
     }
@@ -297,6 +356,11 @@ object ComputeWorkerClient {
             val leaseId = jobObj.getString("lease_id")
             val specObj = jobObj.getJSONObject("spec")
             val workloadName = specObj.optString("name", "Edge Workload")
+
+            // 0. Check if job was cancelled prior to execution (Sprint 5: GE-02)
+            if (cancelledJobIds.remove(jobId)) {
+                return@withContext null
+            }
 
             // 1. Extract Workload Limits and Arguments
             val limitsObj = specObj.optJSONObject("limits")

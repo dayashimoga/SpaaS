@@ -88,6 +88,7 @@ async fn test_full_e2e_workload_lifecycle() {
         submitter_signature: String::new(),
         submitter_pubkey: String::new(),
         created_at_ms: chrono::Utc::now().timestamp_millis(),
+        ..Default::default()
     };
     sign_workload(&dev_key, &mut spec);
 

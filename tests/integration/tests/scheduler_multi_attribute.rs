@@ -33,6 +33,7 @@ fn make_test_spec() -> WorkloadSpec {
         submitter_signature: "sig".into(),
         submitter_pubkey: "pub".into(),
         created_at_ms: 1000,
+        ..Default::default()
     }
 }
 
@@ -218,5 +219,105 @@ fn test_scheduler_high_scale_latency_and_throughput_benchmarks() {
     assert!(
         elapsed_5k_ms < 50.0,
         "5,000-node evaluation must be under 50ms"
+    );
+}
+
+#[test]
+fn test_scheduler_100_node_benchmark() {
+    let scheduler = EdgeScheduler::new(SchedulerConfig::default());
+    let spec = make_test_spec();
+
+    let mut cluster_100: Vec<NodeRecord> = Vec::with_capacity(100);
+    for i in 0..100 {
+        let mut node = make_base_node(Uuid::new_v4());
+        node.telemetry.battery_pct = ((i * 31) % 100) as u8;
+        node.telemetry.cpu_usage_pct = ((i * 19) % 100) as f32;
+        node.telemetry.reliability_score = 0.6 + (((i * 11) % 40) as f32 / 100.0);
+        node.telemetry.charging_state = if i % 2 == 0 {
+            ChargingState::ChargingAc
+        } else {
+            ChargingState::Discharging
+        };
+        node.telemetry.thermal_status = match i % 3 {
+            0 => ThermalStatus::None,
+            1 => ThermalStatus::Light,
+            _ => ThermalStatus::Moderate,
+        };
+        cluster_100.push(node);
+    }
+
+    let start = std::time::Instant::now();
+    let iterations = 500;
+    for _ in 0..iterations {
+        let selected = scheduler.schedule_workload(&spec, &cluster_100).unwrap();
+        assert_eq!(selected.len(), 1);
+    }
+    let total_elapsed = start.elapsed();
+    let per_op_us = total_elapsed.as_micros() as f64 / iterations as f64;
+    let ops_per_sec = (iterations as f64 / total_elapsed.as_secs_f64()) as u64;
+
+    println!("\n=======================================================");
+    println!(" SCHEDULER 100-NODE SCALE BENCHMARK (500 Iterations)");
+    println!(
+        " Latency per evaluation: {:.3} µs ({:.4} ms)",
+        per_op_us,
+        per_op_us / 1000.0
+    );
+    println!(" Throughput: {} schedule decisions/sec", ops_per_sec);
+    println!("=======================================================");
+
+    assert!(
+        per_op_us < 500.0,
+        "100-node evaluation must be under 500µs (got {:.2}µs)",
+        per_op_us
+    );
+    assert!(
+        ops_per_sec > 2000,
+        "Throughput must exceed 2,000 decisions/sec"
+    );
+}
+
+#[test]
+fn test_scheduler_10_000_node_scale_benchmark() {
+    let scheduler = EdgeScheduler::new(SchedulerConfig::default());
+    let spec = make_test_spec();
+
+    let mut cluster_10k: Vec<NodeRecord> = Vec::with_capacity(10000);
+    for i in 0..10000 {
+        let mut node = make_base_node(Uuid::new_v4());
+        node.telemetry.battery_pct = ((i * 43) % 100) as u8;
+        node.telemetry.cpu_usage_pct = ((i * 29) % 100) as f32;
+        node.telemetry.reliability_score = 0.5 + (((i * 13) % 50) as f32 / 100.0);
+        node.telemetry.charging_state = if i % 2 == 0 {
+            ChargingState::ChargingAc
+        } else {
+            ChargingState::Discharging
+        };
+        node.telemetry.thermal_status = match i % 4 {
+            0 => ThermalStatus::None,
+            1 => ThermalStatus::Light,
+            2 => ThermalStatus::Moderate,
+            _ => ThermalStatus::Severe,
+        };
+        cluster_10k.push(node);
+    }
+
+    let start = std::time::Instant::now();
+    let selected = scheduler.schedule_workload(&spec, &cluster_10k).unwrap();
+    let elapsed = start.elapsed();
+    let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+
+    println!("\n=======================================================");
+    println!(" SCHEDULER 10,000-NODE SCALE TEST");
+    println!(" Candidates Evaluated: {}", cluster_10k.len());
+    println!(" Single Dispatch Latency: {:.3} ms", elapsed_ms);
+    println!(" Selected Winner: {:?}", selected[0]);
+    println!("=======================================================");
+
+    assert_eq!(selected.len(), 1);
+    assert!(
+        elapsed_ms < 100.0,
+        "10,000-node evaluation must be under 100ms (got {:.3}ms)",
+        elapsed_ms
     );
 }

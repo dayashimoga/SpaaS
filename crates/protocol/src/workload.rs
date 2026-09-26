@@ -276,6 +276,10 @@ pub struct CandidateEvaluation {
     pub rank: usize,
     pub dimension_scores: std::collections::HashMap<String, f64>,
     pub live_multiplier: f32,
+    #[serde(default)]
+    pub estimated_execution_ms: u64,
+    #[serde(default)]
+    pub estimated_cost_credits: u64,
 }
 
 /// Rejected node during scheduler constraint filtering
@@ -347,6 +351,21 @@ pub struct WorkloadSpec {
     pub submitter_pubkey: String,
     /// Timestamp of submission (Unix epoch milliseconds)
     pub created_at_ms: i64,
+    /// Preferred geographic regions for node selection (Sprint 4: GD-01)
+    #[serde(default)]
+    pub preferred_regions: Vec<String>,
+    /// Hard deadline in Unix epoch milliseconds; scheduler rejects if infeasible (Sprint 4: GD-03)
+    #[serde(default)]
+    pub deadline_ms: Option<i64>,
+    /// Workload category for owner-controlled filtering (Sprint 5: GE-04)
+    #[serde(default)]
+    pub category: String,
+    /// Maximum cost in TEST CREDITS the consumer is willing to pay (Sprint 4: GD-04)
+    #[serde(default)]
+    pub max_cost_credits: Option<u64>,
+    /// Data locality hint for caching and proximity preference (Sprint 4: GD-02)
+    #[serde(default)]
+    pub data_locality_hint: Option<String>,
 }
 
 impl WorkloadSpec {
@@ -389,6 +408,11 @@ impl Default for WorkloadSpec {
             submitter_signature: "".into(),
             submitter_pubkey: "".into(),
             created_at_ms: 1000,
+            preferred_regions: vec![],
+            deadline_ms: None,
+            category: "general".into(),
+            max_cost_credits: None,
+            data_locality_hint: None,
         }
     }
 }
@@ -513,6 +537,7 @@ mod tests {
             submitter_signature: "sig123".into(),
             submitter_pubkey: "pubkey123".into(),
             created_at_ms: 1727260800000,
+            ..Default::default()
         };
 
         let json = serde_json::to_string_pretty(&spec).unwrap();

@@ -86,6 +86,7 @@ spec:
         submitter_signature: "sig".into(),
         submitter_pubkey: "pub".into(),
         created_at_ms: chrono::Utc::now().timestamp_millis(),
+        ..Default::default()
     };
 
     // 3. Execute in runtime sandbox

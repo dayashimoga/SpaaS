@@ -747,6 +747,9 @@
                 <div class="spec-row"><span class="spec-label">Lease Expiry:</span> <span id="detail-job-lease-expiry" class="spec-val">-</span></div>
                 <div class="spec-row"><span class="spec-label">Exit Code:</span> <span id="detail-job-exit" class="spec-val font-mono">-</span></div>
                 <div class="spec-row"><span class="spec-label">Fuel Consumed:</span> <span id="detail-job-fuel" class="spec-val font-mono text-cyan">-</span></div>
+                <div class="spec-row"><span class="spec-label">Compute Time:</span> <span id="detail-job-compute-time" class="spec-val font-mono text-emerald">-</span></div>
+                <div class="spec-row"><span class="spec-label">Wall-Clock Time:</span> <span id="detail-job-wall-time" class="spec-val font-mono text-muted">-</span></div>
+                <div class="spec-row"><span class="spec-label">Estimated Energy:</span> <span id="detail-job-energy" class="spec-val font-mono text-cyan">-</span></div>
               </div>
             </div>
 
@@ -925,6 +928,35 @@
               <div class="spec-row"><span class="spec-label">Memory-Time Allocation:</span> <span class="spec-val font-mono">ceil((peak_memory_mb) * (wall_time_sec)) TEST CREDITS</span></div>
               <div class="spec-row"><span class="spec-label">Provider Payout Ratio:</span> <span class="spec-val text-emerald font-bold">90% of total settlement</span></div>
               <div class="spec-row"><span class="spec-label">Protocol Safety Reserve:</span> <span class="spec-val text-muted">10% retained for zero-trust arbitration</span></div>
+            </div>
+          <!-- Consumer Account & Balance Section -->
+          <div class="card mt-4 p-3" style="border-top: 3px solid var(--accent-cyan);">
+            <div class="flex items-center justify-between mb-3" style="flex-wrap: wrap; gap: 0.75rem;">
+              <div>
+                <h4 class="text-cyan">Workload Submitter / Consumer Account</h4>
+                <p class="text-sub">View consumer credit balance, compute expenditures, and submitter job records.</p>
+              </div>
+              <div class="flex gap-2" style="align-items: center;">
+                <input type="text" id="consumer-pubkey-input" placeholder="Consumer Public Key" class="input-search font-mono" style="width: 280px;" />
+                <button type="button" id="btn-fetch-consumer-balance" class="btn btn-xs btn-primary">Check Balance</button>
+              </div>
+            </div>
+            <div class="kpi-grid">
+              <div class="kpi-card">
+                <div class="kpi-header"><span class="kpi-label">Available Consumer Balance</span> <span class="kpi-icon">💰</span></div>
+                <div class="kpi-value"><span id="consumer-balance-credits">1,000</span> <span class="kpi-sub">TEST CR</span></div>
+                <div class="kpi-footer text-emerald">Available for workload submission</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-header"><span class="kpi-label">Total Credits Spent</span> <span class="kpi-icon">💸</span></div>
+                <div class="kpi-value"><span id="consumer-total-spent">0</span> <span class="kpi-sub">TEST CR</span></div>
+                <div class="kpi-footer text-cyan">Paid to volunteer edge nodes</div>
+              </div>
+              <div class="kpi-card">
+                <div class="kpi-header"><span class="kpi-label">Jobs Dispatched</span> <span class="kpi-icon">📦</span></div>
+                <div class="kpi-value"><span id="consumer-jobs-submitted">0</span> <span class="kpi-sub">workloads</span></div>
+                <div class="kpi-footer text-emerald">Cryptographically signed</div>
+              </div>
             </div>
           </div>
 

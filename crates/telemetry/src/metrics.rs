@@ -24,6 +24,57 @@ impl MetricsRegistry {
         Self::default()
     }
 
+    /// Recomputes gauge metrics from recovered WAL state so dashboard
+    /// shows correct counts immediately after restart (fixes GB-01).
+    pub fn recompute_from_recovered_state<'a>(
+        &self,
+        node_states: impl Iterator<Item = (bool, &'a str)>, // (is_offline_or_revoked, state_label)
+        job_states: impl Iterator<Item = &'a str>,
+    ) {
+        let mut active = 0usize;
+        let mut idle = 0usize;
+        let mut paused = 0usize;
+        let mut offline = 0usize;
+
+        for (is_dead, state) in node_states {
+            if is_dead {
+                offline += 1;
+            } else {
+                match state {
+                    "IDLE" | "READY" => idle += 1,
+                    "ACTIVE" | "RUNNING" => active += 1,
+                    "PAUSED" => paused += 1,
+                    _ => offline += 1,
+                }
+            }
+        }
+
+        self.active_nodes.store(active, Ordering::Relaxed);
+        self.idle_nodes.store(idle, Ordering::Relaxed);
+        self.paused_nodes.store(paused, Ordering::Relaxed);
+        self.offline_nodes.store(offline, Ordering::Relaxed);
+
+        let mut queue = 0usize;
+        let mut running = 0usize;
+        let mut completed = 0u64;
+        let mut failed = 0u64;
+
+        for state in job_states {
+            match state {
+                "Pending" | "Queued" => queue += 1,
+                "Scheduled" | "Running" => running += 1,
+                "Completed" | "Verified" => completed += 1,
+                "Failed" | "TimedOut" | "Cancelled" => failed += 1,
+                _ => {}
+            }
+        }
+
+        self.queue_depth.store(queue, Ordering::Relaxed);
+        self.running_jobs.store(running, Ordering::Relaxed);
+        self.completed_jobs.store(completed, Ordering::Relaxed);
+        self.failed_jobs.store(failed, Ordering::Relaxed);
+    }
+
     /// Exports standard Prometheus metrics format exposition
     pub fn render_prometheus(&self) -> String {
         format!(

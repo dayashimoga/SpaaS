@@ -29,6 +29,7 @@ fn make_spec(name: &str, wasm_bytes: &[u8], limits: ResourceLimits) -> WorkloadS
         submitter_signature: "test_sig".into(),
         submitter_pubkey: "test_pub".into(),
         created_at_ms: chrono::Utc::now().timestamp_millis(),
+        ..Default::default()
     }
 }
 

@@ -61,6 +61,7 @@ async fn test_adversarial_infinite_loop_mitigation() {
         submitter_signature: String::new(),
         submitter_pubkey: String::new(),
         created_at_ms: chrono::Utc::now().timestamp_millis(),
+        ..Default::default()
     };
     sign_workload(&dev_key, &mut spec);
 
@@ -104,6 +105,7 @@ async fn test_adversarial_tampered_workload_rejected() {
         submitter_signature: String::new(),
         submitter_pubkey: String::new(),
         created_at_ms: chrono::Utc::now().timestamp_millis(),
+        ..Default::default()
     };
     sign_workload(&dev_key, &mut spec);
 

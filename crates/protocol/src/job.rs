@@ -178,6 +178,12 @@ pub struct JobRecord {
     pub result: Option<JobResult>,
     pub error_message: Option<String>,
     pub credit_cost: Option<u64>,
+    #[serde(default)]
+    pub estimated_execution_ms: Option<u64>,
+    #[serde(default)]
+    pub estimated_cost_credits: Option<u64>,
+    #[serde(default)]
+    pub actual_execution_ms: Option<u64>,
 }
 
 impl JobRecord {
@@ -197,6 +203,9 @@ impl JobRecord {
             result: None,
             error_message: None,
             credit_cost: None,
+            estimated_execution_ms: None,
+            estimated_cost_credits: None,
+            actual_execution_ms: None,
         }
     }
 
@@ -256,6 +265,7 @@ mod tests {
             submitter_signature: "sig".into(),
             submitter_pubkey: "pub".into(),
             created_at_ms: 1000,
+            ..Default::default()
         });
 
         assert_eq!(job.state, JobState::Queued);
@@ -313,6 +323,7 @@ mod tests {
             submitter_signature: "sig".into(),
             submitter_pubkey: "pub".into(),
             created_at_ms: 1000,
+            ..Default::default()
         });
 
         job.transition_to(JobState::Scheduled).unwrap();

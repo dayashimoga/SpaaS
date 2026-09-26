@@ -529,6 +529,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         submitter_signature: String::new(),
                         submitter_pubkey: String::new(),
                         created_at_ms: chrono::Utc::now().timestamp_millis(),
+                        ..Default::default()
                     };
                     (s, bytes)
                 } else if ext == "json" {
@@ -569,6 +570,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         submitter_signature: String::new(),
                         submitter_pubkey: String::new(),
                         created_at_ms: chrono::Utc::now().timestamp_millis(),
+                        ..Default::default()
                     };
                     (s, bytes)
                 } else {
@@ -606,6 +608,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         submitter_signature: String::new(),
                         submitter_pubkey: String::new(),
                         created_at_ms: chrono::Utc::now().timestamp_millis(),
+                        ..Default::default()
                     };
                     (s, bytes)
                 };

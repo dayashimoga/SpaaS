@@ -230,6 +230,7 @@ mod tests {
             submitter_signature: "sig".into(),
             submitter_pubkey: "pub".into(),
             created_at_ms: 1000,
+            ..Default::default()
         };
 
         let node_keys = KeyPair::generate();
@@ -291,6 +292,7 @@ mod tests {
             submitter_signature: "sig".into(),
             submitter_pubkey: "pub".into(),
             created_at_ms: 1000,
+            ..Default::default()
         };
 
         let node_keys = KeyPair::generate();
@@ -437,6 +439,7 @@ mod tests {
             submitter_signature: "sig".into(),
             submitter_pubkey: "pub".into(),
             created_at_ms: 1000,
+            ..Default::default()
         };
 
         let node_keys = KeyPair::generate();

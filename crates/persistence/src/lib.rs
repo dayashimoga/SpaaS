@@ -352,6 +352,7 @@ mod tests {
             submitter_signature: "".into(),
             submitter_pubkey: "".into(),
             created_at_ms: 1000,
+            ..Default::default()
         });
 
         storage

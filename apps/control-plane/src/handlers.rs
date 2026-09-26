@@ -111,13 +111,27 @@ pub async fn heartbeat(
 
     let _ = state
         .storage
-        .append_event(WalEvent::UpsertNode { node: updated_node })
+        .append_event(WalEvent::UpsertNode {
+            node: updated_node.clone(),
+        })
         .await;
+
+    let pending_cmd = {
+        let mut cmds = state.pending_node_commands.write().await;
+        cmds.remove(&payload.node_id)
+    };
+    let command = pending_cmd.or_else(|| {
+        if updated_node.qualification.is_none() {
+            Some(spaas_protocol::rpc::NodeRemoteCommand::ReEnumerateCapabilities)
+        } else {
+            None
+        }
+    });
 
     Ok(Json(HeartbeatResponse {
         acknowledged: true,
         pending_jobs_count: if has_pending { 1 } else { 0 },
-        command: None,
+        command,
     }))
 }
 
@@ -193,6 +207,15 @@ pub async fn submit_job(
             let primary_node = selected_nodes[0];
             let lease = JobLease::new(job_id, primary_node, 30_000);
             job.assigned_node_id = Some(primary_node);
+            job.scheduled_at_ms = Some(chrono::Utc::now().timestamp_millis());
+            if let Some(candidate) = decision
+                .top_candidates
+                .iter()
+                .find(|c| c.node_id == primary_node)
+            {
+                job.estimated_execution_ms = Some(candidate.estimated_execution_ms);
+                job.estimated_cost_credits = Some(candidate.estimated_cost_credits);
+            }
             job.current_lease = Some(lease.clone());
             job.transition_to(JobState::Scheduled).map_err(|e| {
                 (
@@ -421,6 +444,8 @@ pub async fn submit_result(
         }
 
         job.result = Some(payload.result.clone());
+        job.completed_at_ms = Some(now);
+        job.actual_execution_ms = Some(payload.result.wall_time_ms);
         let _ = job.transition_to(JobState::Completed);
         (job.spec.submitter_pubkey.clone(), job.clone())
     };
@@ -752,6 +777,7 @@ pub async fn dispatch_challenge_workload(
         submitter_signature: String::new(),
         submitter_pubkey: state.server_keypair.public_key_hex(),
         created_at_ms: chrono::Utc::now().timestamp_millis(),
+        ..Default::default()
     };
     spaas_security::signing::sign_workload(&state.server_keypair, &mut spec);
 
@@ -804,6 +830,8 @@ pub async fn dispatch_challenge_workload(
             rank: 1,
             dimension_scores: std::collections::HashMap::new(),
             live_multiplier: 1.0,
+            estimated_execution_ms: 100,
+            estimated_cost_credits: 10,
         }],
         rejected_nodes: vec![],
         decision_rationale: rationale,
@@ -905,6 +933,17 @@ pub async fn cancel_job(
 
     job.transition_to(JobState::Cancelled)
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Cannot cancel job: {e}")))?;
+
+    // If assigned to a node, clean up dispatch and queue CancelJob remote command (Sprint 5: GE-02)
+    if let Some(assigned_node) = job.assigned_node_id {
+        let mut dispatches = state.dispatches.write().await;
+        dispatches.remove(&assigned_node);
+        let mut cmds = state.pending_node_commands.write().await;
+        cmds.insert(
+            assigned_node,
+            spaas_protocol::rpc::NodeRemoteCommand::CancelJob { job_id },
+        );
+    }
 
     let cancelled_job = job.clone();
     state
@@ -1009,6 +1048,38 @@ pub async fn get_metering(
 ) -> Result<Json<Vec<spaas_protocol::metering::MeteringRecord>>, (StatusCode, String)> {
     let ledger = state.ledger.read().await;
     Ok(Json(ledger.all_records()))
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConsumerBalanceResponse {
+    pub public_key: String,
+    pub balance_credits: i64,
+    pub total_spent: u64,
+    pub total_earned: u64,
+    pub total_jobs_submitted: u64,
+    pub records: Vec<spaas_protocol::metering::MeteringRecord>,
+}
+
+pub async fn get_consumer_balance(
+    State(state): State<AppState>,
+    axum::extract::Path(pubkey): axum::extract::Path<String>,
+) -> Result<Json<ConsumerBalanceResponse>, (StatusCode, String)> {
+    let ledger = state.ledger.read().await;
+    let account = ledger.get_account(&pubkey);
+    let all_records = ledger.all_records();
+    let consumer_records: Vec<_> = all_records
+        .into_iter()
+        .filter(|r| r.submitter_public_key == pubkey)
+        .collect();
+
+    Ok(Json(ConsumerBalanceResponse {
+        public_key: pubkey.clone(),
+        balance_credits: account.map(|a| a.balance_credits).unwrap_or(1000),
+        total_spent: account.map(|a| a.total_spent).unwrap_or(0),
+        total_earned: account.map(|a| a.total_earned).unwrap_or(0),
+        total_jobs_submitted: account.map(|a| a.total_jobs_submitted).unwrap_or(0),
+        records: consumer_records,
+    }))
 }
 
 pub async fn get_audit_log(
@@ -1497,6 +1568,9 @@ pub async fn start_demo_cluster(
         );
     }
 
+    state
+        .is_simulation_active
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let total = state.nodes.read().await.len();
     state
         .log_audit(
@@ -1614,6 +1688,7 @@ pub async fn create_challenge_workload(
         submitter_signature: String::new(),
         submitter_pubkey: state.server_keypair.public_key_hex(),
         created_at_ms: now,
+        ..Default::default()
     };
 
     let submit_req = SubmitJobRequest {
@@ -2000,6 +2075,7 @@ mod tests {
             submitter_signature: "portal-auto-sign".into(),
             submitter_pubkey: String::new(),
             created_at_ms: chrono::Utc::now().timestamp_millis(),
+            ..Default::default()
         };
 
         let submit_req = SubmitJobRequest {

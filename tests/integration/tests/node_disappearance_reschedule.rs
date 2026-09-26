@@ -61,6 +61,7 @@ async fn test_node_disappearance_and_autonomous_reschedule() {
         submitter_signature: String::new(),
         submitter_pubkey: String::new(),
         created_at_ms: chrono::Utc::now().timestamp_millis(),
+        ..Default::default()
     };
     sign_workload(&dev_key, &mut spec);
 

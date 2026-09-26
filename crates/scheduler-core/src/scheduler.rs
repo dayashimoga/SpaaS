@@ -66,6 +66,17 @@ impl EdgeScheduler {
                             || node.device_type
                                 == spaas_protocol::node::NodeDeviceType::MacDesktop);
 
+                    let mips = node
+                        .qualification
+                        .as_ref()
+                        .map(|q| q.measured_fuel_mips)
+                        .unwrap_or(150.0)
+                        .max(1.0);
+                    let estimated_execution_ms =
+                        ((spec.limits.max_fuel as f64 / (mips * 1_000_000.0)) * 1000.0).max(1.0)
+                            as u64;
+                    let estimated_cost_credits = 10 + (spec.limits.max_fuel / 100_000);
+
                     eligible_candidates.push(CandidateEvaluation {
                         node_id: node.node_id,
                         device_model: node.capabilities.device_model.clone(),
@@ -75,6 +86,8 @@ impl EdgeScheduler {
                         rank: 0,
                         dimension_scores,
                         live_multiplier: live.capacity_multiplier,
+                        estimated_execution_ms,
+                        estimated_cost_credits,
                     });
                 }
                 Err(rejection) => {
@@ -222,6 +235,7 @@ mod tests {
             submitter_signature: "sig".into(),
             submitter_pubkey: "pub".into(),
             created_at_ms: 1000,
+            ..Default::default()
         };
 
         let node1 = NodeRecord {

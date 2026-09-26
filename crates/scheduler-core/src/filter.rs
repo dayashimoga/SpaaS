@@ -28,6 +28,22 @@ pub enum FilterRejectionReason {
     AcceleratorNotSupported {
         required: String,
     },
+    RegionMismatch {
+        preferred: Vec<String>,
+        actual: String,
+    },
+    CategoryNotAllowed {
+        workload_category: String,
+        allowed_categories: Vec<String>,
+    },
+    DeadlineInfeasible {
+        deadline_ms: i64,
+        estimated_finish_ms: i64,
+    },
+    CostExceedsMax {
+        estimated_cost: u64,
+        max_cost: u64,
+    },
 }
 
 impl FilterRejectionReason {
@@ -44,6 +60,10 @@ impl FilterRejectionReason {
             Self::UnmeteredNetworkRequiredNotMet => "UNMETERED_NETWORK",
             Self::ThermalThrottled { .. } => "THERMAL_LIMIT",
             Self::AcceleratorNotSupported { .. } => "ACCELERATOR_REQUIRED",
+            Self::RegionMismatch { .. } => "REGION_MISMATCH",
+            Self::CategoryNotAllowed { .. } => "CATEGORY_NOT_ALLOWED",
+            Self::DeadlineInfeasible { .. } => "DEADLINE_INFEASIBLE",
+            Self::CostExceedsMax { .. } => "COST_EXCEEDS_MAX",
         }
     }
 
@@ -100,6 +120,39 @@ impl FilterRejectionReason {
                 format!(
                     "Required accelerator '{}' not supported or denied by owner policy",
                     required
+                )
+            }
+            Self::RegionMismatch { preferred, actual } => {
+                format!(
+                    "Node region '{}' not in preferred regions {:?}",
+                    actual, preferred
+                )
+            }
+            Self::CategoryNotAllowed {
+                workload_category,
+                allowed_categories,
+            } => {
+                format!(
+                    "Workload category '{}' not in owner's allowed categories {:?}",
+                    workload_category, allowed_categories
+                )
+            }
+            Self::DeadlineInfeasible {
+                deadline_ms,
+                estimated_finish_ms,
+            } => {
+                format!(
+                    "Workload deadline {} cannot be met; estimated completion is {}",
+                    deadline_ms, estimated_finish_ms
+                )
+            }
+            Self::CostExceedsMax {
+                estimated_cost,
+                max_cost,
+            } => {
+                format!(
+                    "Estimated cost of {} credits exceeds consumer max ({} credits)",
+                    estimated_cost, max_cost
                 )
             }
         }
@@ -197,6 +250,65 @@ pub fn evaluate_node_eligibility(
         if acc_lower == "npu" && (!node.capabilities.has_npu || !node.policy.allow_npu) {
             return Err(FilterRejectionReason::AcceleratorNotSupported {
                 required: "NPU/AI".into(),
+            });
+        }
+    }
+
+    // 12. Region-based filtering (Sprint 4: GD-01)
+    if !spec.preferred_regions.is_empty()
+        && !spec
+            .preferred_regions
+            .iter()
+            .any(|r| r.eq_ignore_ascii_case(&node.region) || r == "*")
+    {
+        return Err(FilterRejectionReason::RegionMismatch {
+            preferred: spec.preferred_regions.clone(),
+            actual: node.region.clone(),
+        });
+    }
+
+    // 13. Workload category filtering (Sprint 5: GE-04)
+    if !node.policy.allowed_categories.is_empty()
+        && !spec.category.is_empty()
+        && !node
+            .policy
+            .allowed_categories
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(&spec.category) || c == "*")
+    {
+        return Err(FilterRejectionReason::CategoryNotAllowed {
+            workload_category: spec.category.clone(),
+            allowed_categories: node.policy.allowed_categories.clone(),
+        });
+    }
+
+    // 14. Deadline feasibility check (Sprint 4: GD-03)
+    if let Some(deadline) = spec.deadline_ms {
+        let now = chrono::Utc::now().timestamp_millis();
+        let mips = node
+            .qualification
+            .as_ref()
+            .map(|q| q.measured_fuel_mips)
+            .unwrap_or(150.0)
+            .max(1.0);
+        let est_ms =
+            ((spec.limits.max_fuel as f64 / (mips * 1_000_000.0)) * 1000.0).max(1.0) as i64;
+        let est_finish = now + est_ms;
+        if est_finish > deadline {
+            return Err(FilterRejectionReason::DeadlineInfeasible {
+                deadline_ms: deadline,
+                estimated_finish_ms: est_finish,
+            });
+        }
+    }
+
+    // 15. Consumer cost budget check (Sprint 4: GD-04)
+    if let Some(max_cost) = spec.max_cost_credits {
+        let estimated_cost = 10 + (spec.limits.max_fuel / 100_000);
+        if estimated_cost > max_cost {
+            return Err(FilterRejectionReason::CostExceedsMax {
+                estimated_cost,
+                max_cost,
             });
         }
     }
@@ -334,6 +446,40 @@ mod tests {
         assert!(matches!(
             evaluate_node_eligibility(&node, &spec),
             Err(FilterRejectionReason::ThermalThrottled { .. })
+        ));
+        node.telemetry.thermal_status = ThermalStatus::None;
+
+        // 12. Region mismatch (Sprint 4: GD-01)
+        spec.preferred_regions = vec!["eu-central".into()];
+        assert!(matches!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::RegionMismatch { .. })
+        ));
+        spec.preferred_regions = vec![];
+
+        // 13. Category not allowed (Sprint 5: GE-04)
+        node.policy.allowed_categories = vec!["ai_inference".into()];
+        spec.category = "crypto_mining".into();
+        assert!(matches!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::CategoryNotAllowed { .. })
+        ));
+        node.policy.allowed_categories = vec![];
+        spec.category = "general".into();
+
+        // 14. Deadline infeasible (Sprint 4: GD-03)
+        spec.deadline_ms = Some(100);
+        assert!(matches!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::DeadlineInfeasible { .. })
+        ));
+        spec.deadline_ms = None;
+
+        // 15. Cost budget exceeded (Sprint 4: GD-04)
+        spec.max_cost_credits = Some(5);
+        assert!(matches!(
+            evaluate_node_eligibility(&node, &spec),
+            Err(FilterRejectionReason::CostExceedsMax { .. })
         ));
     }
 }

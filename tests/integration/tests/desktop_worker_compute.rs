@@ -112,6 +112,7 @@ async fn test_desktop_physical_compute_worker() {
         submitter_signature: "".into(),
         submitter_pubkey: "".into(),
         created_at_ms: chrono::Utc::now().timestamp_millis(),
+        ..Default::default()
     };
     sign_workload(&dev_key, &mut spec);
 
