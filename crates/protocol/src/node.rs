@@ -41,9 +41,10 @@ pub enum NodeDeviceType {
     SimulatedNode,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ChargingState {
+    #[default]
     #[serde(alias = "Discharging", alias = "discharging")]
     Discharging,
     #[serde(alias = "ChargingAc", alias = "charging_ac")]
@@ -70,9 +71,10 @@ impl ChargingState {
 }
 
 /// Android PowerManager / Linux Thermal Status
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ThermalStatus {
+    #[default]
     #[serde(alias = "None", alias = "none")]
     None = 0,
     #[serde(alias = "Light", alias = "light")]
@@ -95,9 +97,10 @@ impl ThermalStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum NetworkType {
+    #[default]
     #[serde(alias = "WifiUnmetered", alias = "WIFI_UNMETERED")]
     WifiUnmetered,
     #[serde(alias = "Ethernet", alias = "ETHERNET")]
@@ -155,17 +158,29 @@ impl Default for NodeHardwareCapabilities {
 /// Real-time reported node telemetry updated via heartbeat
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NodeTelemetry {
+    #[serde(default = "default_battery")]
     pub battery_pct: u8,
+    #[serde(default)]
     pub charging_state: ChargingState,
+    #[serde(default)]
     pub thermal_status: ThermalStatus,
+    #[serde(default)]
     pub temperature_celsius: Option<f32>,
+    #[serde(default = "default_avail_ram")]
     pub available_ram_mb: u64,
+    #[serde(default = "default_avail_storage")]
     pub available_storage_mb: u64,
+    #[serde(default)]
     pub network_type: NetworkType,
+    #[serde(default)]
     pub downlink_kbps: Option<u32>,
+    #[serde(default)]
     pub uplink_kbps: Option<u32>,
+    #[serde(default)]
     pub round_trip_ping_ms: Option<u32>,
+    #[serde(default)]
     pub cpu_usage_pct: f32,
+    #[serde(default)]
     pub active_job_count: u32,
     #[serde(default)]
     pub total_jobs_completed: u64,
@@ -177,6 +192,21 @@ pub struct NodeTelemetry {
     pub timestamp_ms: i64,
 }
 
+fn default_true() -> bool {
+    true
+}
+fn default_battery() -> u8 {
+    85
+}
+fn default_avail_ram() -> u64 {
+    4096
+}
+fn default_avail_storage() -> u64 {
+    32000
+}
+fn default_max_thermal() -> ThermalStatus {
+    ThermalStatus::Moderate
+}
 fn default_reliability_score() -> f32 {
     1.0
 }
@@ -215,28 +245,78 @@ impl Default for NodeTelemetry {
 
 /// User-controlled resource limits and safety policies configured in the mobile app
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "ProviderPolicyRaw")]
 pub struct ProviderPolicy {
     /// Only accept workloads when plugged into AC / wireless charging
     pub only_while_charging: bool,
     /// Only accept workloads on unmetered Wi-Fi / Ethernet connections
     pub only_on_unmetered_network: bool,
     /// Minimum battery percentage required to accept work (e.g. 50%)
-    #[serde(alias = "min_battery_pct")]
     pub min_battery_threshold_pct: u8,
     /// Cutoff thermal status; auto-pause if temperature exceeds this level
     pub max_thermal_threshold: ThermalStatus,
     /// Maximum concurrent jobs allowed on this device (default 1 for phones)
-    #[serde(default = "default_max_concurrent_jobs")]
     pub max_concurrent_jobs: u32,
     /// Maximum percentage of CPU allowed for workloads (e.g. 50%)
-    #[serde(default = "default_max_cpu_pct")]
     pub max_cpu_pct: u8,
     /// Maximum RAM allocated to workloads in MB (e.g. 512 MB)
-    #[serde(default = "default_max_memory_mb")]
     pub max_memory_mb: u64,
     /// User explicit pause switch
-    #[serde(default)]
     pub is_user_paused: bool,
+}
+
+#[derive(Deserialize)]
+struct ProviderPolicyRaw {
+    #[serde(default = "default_true", alias = "onlyWhileCharging")]
+    only_while_charging: bool,
+    #[serde(
+        default,
+        alias = "only_on_wifi",
+        alias = "only_on_unmetered_wifi",
+        alias = "onlyOnUnmeteredWifi",
+        alias = "onlyUnmeteredNetwork"
+    )]
+    only_on_unmetered_network: Option<bool>,
+    #[serde(default)]
+    only_unmetered_network: Option<bool>,
+    #[serde(default, alias = "minBatteryThresholdPct", alias = "minBatteryPct")]
+    min_battery_threshold_pct: Option<u8>,
+    #[serde(default)]
+    min_battery_pct: Option<u8>,
+    #[serde(
+        default = "default_max_thermal",
+        alias = "max_thermal_status",
+        alias = "maxThermalThreshold",
+        alias = "maxThermalStatus"
+    )]
+    max_thermal_threshold: ThermalStatus,
+    #[serde(default = "default_max_concurrent_jobs", alias = "maxConcurrentJobs")]
+    max_concurrent_jobs: u32,
+    #[serde(default = "default_max_cpu_pct", alias = "maxCpuPct")]
+    max_cpu_pct: u8,
+    #[serde(default = "default_max_memory_mb", alias = "maxMemoryMb")]
+    max_memory_mb: u64,
+    #[serde(default, alias = "isUserPaused")]
+    is_user_paused: bool,
+}
+
+impl From<ProviderPolicyRaw> for ProviderPolicy {
+    fn from(raw: ProviderPolicyRaw) -> Self {
+        Self {
+            only_while_charging: raw.only_while_charging,
+            only_on_unmetered_network: raw.only_on_unmetered_network
+                .or(raw.only_unmetered_network)
+                .unwrap_or(true),
+            min_battery_threshold_pct: raw.min_battery_threshold_pct
+                .or(raw.min_battery_pct)
+                .unwrap_or(40),
+            max_thermal_threshold: raw.max_thermal_threshold,
+            max_concurrent_jobs: raw.max_concurrent_jobs,
+            max_cpu_pct: raw.max_cpu_pct,
+            max_memory_mb: raw.max_memory_mb,
+            is_user_paused: raw.is_user_paused,
+        }
+    }
 }
 
 impl Default for ProviderPolicy {

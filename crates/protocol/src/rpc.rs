@@ -408,4 +408,67 @@ mod tests {
             0
         );
     }
+
+    #[test]
+    fn test_real_android_app_payload_deserialization() {
+        let raw_payload = r#"{
+            "pairing_code": "SP-9927",
+            "device_name": "Xiaomi 23078PND5G",
+            "device_type": "android_smartphone",
+            "public_key": "1234567890abcdef1234567890abcdef",
+            "capabilities": {
+                "architecture": "aarch64",
+                "cpu_cores": 8,
+                "total_ram_mb": 7680,
+                "total_storage_mb": 64000,
+                "device_model": "Xiaomi 23078PND5G",
+                "os_name": "Android",
+                "os_version": "14",
+                "has_npu": true,
+                "has_gpu_vulkan": true,
+                "agent_version": "0.1.0",
+                "supported_runtimes": ["wasm_wasi"]
+            },
+            "initial_telemetry": {
+                "battery_pct": 99,
+                "charging_state": "DISCHARGING",
+                "thermal_status": "NONE",
+                "temperature_celsius": 30.3,
+                "available_ram_mb": 3450,
+                "available_storage_mb": 32000,
+                "network_type": "wifi_unmetered",
+                "downlink_kbps": 80000,
+                "uplink_kbps": 25000,
+                "round_trip_ping_ms": 18,
+                "cpu_usage_pct": 5.0,
+                "active_job_count": 0,
+                "total_jobs_completed": 0,
+                "total_jobs_failed": 0,
+                "reliability_score": 1.0,
+                "timestamp_ms": 1790389332000
+            },
+            "initial_policy": {
+                "only_while_charging": true,
+                "only_unmetered_network": true,
+                "min_battery_threshold_pct": 40,
+                "min_battery_pct": 40,
+                "max_thermal_threshold": "MODERATE",
+                "max_concurrent_jobs": 1,
+                "max_cpu_pct": 60,
+                "max_memory_mb": 512,
+                "is_user_paused": false
+            },
+            "enrollment_signature": "android_ed25519_verified_sig",
+            "timestamp_ms": 1790389332000
+        }"#;
+
+        let req: Result<PairDeviceRequest, _> = serde_json::from_str(raw_payload);
+        assert!(req.is_ok(), "Failed to deserialize real Android payload: {:?}", req.err());
+        let req = req.unwrap();
+        assert_eq!(req.pairing_code, "SP-9927");
+        assert_eq!(req.device_name, "Xiaomi 23078PND5G");
+        assert!(req.initial_policy.only_on_unmetered_network);
+        assert_eq!(req.initial_policy.min_battery_threshold_pct, 40);
+        assert_eq!(req.initial_telemetry.battery_pct, 99);
+    }
 }
