@@ -68,8 +68,68 @@ if (-not $cloudflaredExe) {
 }
 
 Write-Host "`n>>> [TUNNEL] Starting Cloudflare Tunnel to http://127.0.0.1:$LocalPort..." -ForegroundColor Cyan
-Write-Host ">>> Press Ctrl+C at any time to terminate the tunnel." -ForegroundColor DarkGray
-Write-Host "---------------------------------------------------------------------" -ForegroundColor DarkGray
+Write-Host ">>> Initializing secure edge route..." -ForegroundColor DarkGray
 
-# Launch tunnel and stream log to extract public URL
-& $cloudflaredExe tunnel --url "http://127.0.0.1:$LocalPort"
+$TunnelLog = Join-Path $env:TEMP "spaas_cloudflared_tunnel.log"
+if (Test-Path $TunnelLog) { Remove-Item $TunnelLog -Force }
+
+$proc = Start-Process -FilePath $cloudflaredExe `
+    -ArgumentList "tunnel", "--url", "http://127.0.0.1:$LocalPort" `
+    -RedirectStandardError $TunnelLog `
+    -PassThru `
+    -NoNewWindow
+
+$tunnelUrl = $null
+$maxWaitSec = 20
+$startTime = Get-Date
+
+while (($null -eq $tunnelUrl) -and ((Get-Date) - $startTime).TotalSeconds -lt $maxWaitSec) {
+    Start-Sleep -Milliseconds 800
+    if (Test-Path $TunnelLog) {
+        $content = Get-Content $TunnelLog -Raw -ErrorAction SilentlyContinue
+        if ($content -match 'https://[a-zA-Z0-9-]+\.trycloudflare\.com') {
+            $tunnelUrl = $matches[0]
+        }
+    }
+    if ($proc.HasExited) {
+        Write-Error "cloudflared exited unexpectedly with code $($proc.ExitCode). Check $TunnelLog"
+        exit 1
+    }
+}
+
+if ($tunnelUrl) {
+    try { Set-Clipboard -Value $tunnelUrl } catch {}
+
+    $PagesConsoleUrl = "https://e3f684e4.spaas-console.pages.dev"
+    $DirectConsoleUrl = "$PagesConsoleUrl/?api=$tunnelUrl"
+
+    Write-Host "`n=====================================================================" -ForegroundColor Green
+    Write-Host "  PUBLIC SECURE INGRESS TUNNEL ONLINE!" -ForegroundColor Green
+    Write-Host "=====================================================================" -ForegroundColor Green
+    Write-Host "  Public HTTPS Endpoint:  $tunnelUrl" -ForegroundColor Cyan
+    Write-Host "  Direct Web Console URL: $DirectConsoleUrl" -ForegroundColor Yellow
+    Write-Host "  (Copied to clipboard!)" -ForegroundColor DarkGray
+    Write-Host "=====================================================================" -ForegroundColor Green
+    Write-Host "`n  For Android Smartphone Pairing:" -ForegroundColor White
+    Write-Host "  Enter Server URL: $tunnelUrl" -ForegroundColor Cyan
+    Write-Host "  (Supports 4G/5G Cellular, Wi-Fi, CGNAT, and Guest Networks)" -ForegroundColor DarkGray
+    Write-Host "---------------------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host "  Opening Cloudflare Pages Console in default browser..." -ForegroundColor Green
+
+    Start-Process $DirectConsoleUrl
+
+    Write-Host "`n>>> Tunnel is active and proxying traffic to http://127.0.0.1:$LocalPort." -ForegroundColor Green
+    Write-Host ">>> Press Ctrl+C at any time to stop the tunnel." -ForegroundColor DarkGray
+
+    try {
+        $proc.WaitForExit()
+    } finally {
+        if (-not $proc.HasExited) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+} else {
+    Write-Warning "Timed out waiting for trycloudflare.com URL. Outputting log:"
+    Get-Content $TunnelLog | Select-Object -Last 20
+    $proc.Kill()
+}

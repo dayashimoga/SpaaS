@@ -3,9 +3,39 @@
 // smartphone-first pairing, dual-mode manifest studio, and unified jobs view.
 
 function getApiBase() {
+  // 1. Allow URL query parameter to configure endpoint: ?api=... or ?backend=...
+  if (typeof window !== 'undefined' && window.location) {
+    const params = new URLSearchParams(window.location.search);
+    const qApi = params.get('api') || params.get('backend') || params.get('endpoint');
+    if (qApi) {
+      const clean = qApi.trim().replace(/\/+$/, '');
+      localStorage.setItem('spaas_api_url', clean);
+      try {
+        const cleanUrl = window.location.protocol + '//' + window.location.host + window.location.pathname;
+        window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
+      } catch (_) {}
+      return clean;
+    }
+  }
+
+  // 2. Saved endpoint in localStorage
   const stored = localStorage.getItem('spaas_api_url');
   if (stored) return stored.trim();
+
+  // 3. If running inside local control plane server (port 8080)
   if (window.location.port === '8080') return '';
+
+  // 4. Local dev on localhost or 127.0.0.1
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'http://127.0.0.1:8080';
+  }
+
+  // 5. When served over HTTPS on a remote domain (e.g., Cloudflare Pages *.pages.dev)
+  // Never default to unencrypted http://127.0.0.1:8080 because browsers block mixed content!
+  if (window.location.protocol === 'https:') {
+    return '';
+  }
+
   return 'http://127.0.0.1:8080';
 }
 
@@ -290,8 +320,14 @@ function setConnectionState(newState, reason) {
   const walIntegrity = document.getElementById('wal-integrity-val');
   const workerChanMetric = document.getElementById('metric-worker-channel');
 
+  const isUnconfigured = mode === 'UNCONFIGURED' || (!API_BASE && window.location.protocol === 'https:' && !localStorage.getItem('spaas_api_url'));
+
   if (endpointLabel) {
-    endpointLabel.textContent = API_BASE || window.location.origin;
+    if (isUnconfigured) {
+      endpointLabel.textContent = '(Click to Connect Backend)';
+    } else {
+      endpointLabel.textContent = API_BASE || window.location.origin;
+    }
   }
 
   if (newState === 'OPERATIONAL') {
@@ -305,6 +341,7 @@ function setConnectionState(newState, reason) {
     if (alertsBanner) {
       alertsBanner.classList.add('hidden');
       alertsBanner.classList.remove('alert-danger');
+      alertsBanner.classList.remove('alert-warning');
     }
     if (healthBadge) {
       healthBadge.className = 'status-badge status-healthy';
@@ -324,35 +361,35 @@ function setConnectionState(newState, reason) {
     reconnectBackoffMs = 1000;
   } else if (newState === 'DISCONNECTED') {
     if (pulseDot) {
-      pulseDot.className = 'pulse-dot disconnected';
+      pulseDot.className = isUnconfigured ? 'pulse-dot unconfigured' : 'pulse-dot disconnected';
     }
     if (connectionLabel) {
-      connectionLabel.textContent = 'Control Plane Disconnected';
+      connectionLabel.textContent = isUnconfigured ? 'No Backend Connected' : 'Control Plane Disconnected';
     }
     if (alertsBanner) {
-      alertsBanner.className = 'alert-banner alert-danger';
+      alertsBanner.className = isUnconfigured ? 'alert-banner alert-warning' : 'alert-banner alert-danger';
       if (alertsText) {
         alertsText.textContent = lastSyncTimestamp
           ? `OFFLINE — Showing last known state (Last synchronized: ${lastSyncTimestamp}). Workload submission and cluster operations disabled.`
-          : (reason || 'Control Plane unavailable — workload submission and live node management disabled');
+          : (reason || (isUnconfigured ? 'No backend connected — click "Connect Control Plane" to link your Cloudflare Tunnel or local cluster.' : 'Control Plane unavailable — workload submission and live node management disabled'));
       }
       alertsBanner.classList.remove('hidden');
     }
     if (healthBadge) {
-      healthBadge.className = 'status-badge status-error';
-      healthBadge.textContent = 'OFFLINE';
+      healthBadge.className = isUnconfigured ? 'status-badge status-warning' : 'status-badge status-error';
+      healthBadge.textContent = isUnconfigured ? 'UNCONNECTED' : 'OFFLINE';
     }
     if (subsystemBadge) {
       subsystemBadge.className = 'badge badge-sim';
-      subsystemBadge.textContent = 'OFFLINE';
+      subsystemBadge.textContent = isUnconfigured ? 'NOT CONFIGURED' : 'OFFLINE';
     }
     if (subGateway) {
-      subGateway.textContent = 'DISCONNECTED (Upstream Unreachable)';
-      subGateway.className = 'spec-val text-red';
+      subGateway.textContent = isUnconfigured ? 'NOT CONFIGURED' : 'DISCONNECTED (Upstream Unreachable)';
+      subGateway.className = 'spec-val text-muted';
     }
     if (subControlPlane) {
-      subControlPlane.textContent = reason || 'UNAVAILABLE (Failed to fetch)';
-      subControlPlane.className = 'spec-val text-red';
+      subControlPlane.textContent = reason || (isUnconfigured ? 'NOT LINKED (Click "Connect Control Plane")' : 'UNAVAILABLE (Failed to fetch)');
+      subControlPlane.className = isUnconfigured ? 'spec-val text-amber' : 'spec-val text-red';
     }
     if (subScheduler) {
       subScheduler.textContent = 'UNKNOWN';
@@ -371,7 +408,7 @@ function setConnectionState(newState, reason) {
       walIntegrity.className = 'spec-val text-muted';
     }
     if (workerChanMetric) {
-      workerChanMetric.textContent = 'OFFLINE';
+      workerChanMetric.textContent = isUnconfigured ? 'UNCONNECTED' : 'OFFLINE';
     }
 
     if (btnSubmitTop) btnSubmitTop.disabled = true;
@@ -969,11 +1006,17 @@ async function fetchSystemHealth() {
       if (workerChanMetric) workerChanMetric.textContent = sub.worker_channel;
     }
   } catch (err) {
+    const isHttpsPagesWithoutBackend = window.location.protocol === 'https:' && !localStorage.getItem('spaas_api_url') && (!API_BASE || API_BASE === 'http://127.0.0.1:8080');
     const isHttpsMixedContent = window.location.protocol === 'https:' && (API_BASE.startsWith('http://127.0.0.1') || API_BASE.startsWith('http://localhost') || API_BASE.startsWith('http://'));
-    const reason = isHttpsMixedContent
-      ? `🔒 HTTPS Mixed-Content Block: Cloudflare Pages (HTTPS) cannot reach unencrypted ${API_BASE} directly. Click "Connect Control Plane" to see quick solutions.`
-      : `Control Plane unavailable at ${API_BASE} (${err.message}) — workload submission disabled`;
-    setConnectionState('DISCONNECTED', reason);
+    let reason;
+    if (isHttpsPagesWithoutBackend) {
+      reason = '🌐 Cloudflare Pages Console Active — Connect your local or remote SPaaS Control Plane by clicking [Connect Control Plane].';
+    } else if (isHttpsMixedContent) {
+      reason = `🔒 HTTPS Mixed-Content Block: Cloudflare Pages (HTTPS) cannot reach unencrypted ${API_BASE} directly. Click "Connect Control Plane" to see quick solutions.`;
+    } else {
+      reason = `Control Plane unavailable at ${API_BASE || 'current origin'} (${err.message}) — workload submission disabled`;
+    }
+    setConnectionState('DISCONNECTED', reason, isHttpsPagesWithoutBackend ? 'UNCONFIGURED' : 'DISCONNECTED');
   }
 }
 
@@ -2522,6 +2565,13 @@ function initModals() {
 
   if (btnOpenConnectGuide) {
     btnOpenConnectGuide.addEventListener('click', () => {
+      openConnectGuideModal();
+    });
+  }
+
+  const sidebarFooter = document.querySelector('.sidebar-footer');
+  if (sidebarFooter) {
+    sidebarFooter.addEventListener('click', () => {
       openConnectGuideModal();
     });
   }
