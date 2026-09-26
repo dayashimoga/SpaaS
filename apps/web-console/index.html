@@ -1169,7 +1169,13 @@
                   <strong>Guest Wi-Fi &amp; Firewall Notice:</strong>
                   <ul style="margin: 0.25rem 0 0.25rem 1rem; padding: 0; line-height: 1.4;">
                     <li><strong>Avoid "Guest" Wi-Fi networks (e.g. <code>TP-Link_Guest</code>):</strong> Routers isolate devices on guest Wi-Fi (AP Isolation), blocking phone-to-PC communication. Connect both PC and phone to your <strong>primary home Wi-Fi</strong> (e.g. <code>TP-Link_BEC7</code>) or turn on <strong>Mobile Hotspot</strong> on Windows.</li>
-                    <li><strong>Windows Firewall:</strong> If your connection is blocked, allow port 8080 in an Administrator PowerShell:
+                    <li><strong>Windows Firewall (Site can't be reached fix):</strong> Windows blocks port 8080 on new networks by default. Either:
+                      <div style="margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+                        <a href="/downloads/allow-firewall-8080.bat" download="allow-firewall-8080.bat" class="btn btn-xs btn-outline-cyan" style="text-decoration: none; padding: 2px 6px; font-weight: bold;">
+                          🛡️ Download 1-Click Firewall Fix (.bat)
+                        </a>
+                        <span class="text-sub" style="font-size: 0.72rem;">or run in Administrator PowerShell:</span>
+                      </div>
                       <code style="background: rgba(0,0,0,0.4); padding: 2px 4px; border-radius: 3px; font-size: 0.72rem; display: block; margin-top: 2px;">netsh advfirewall firewall add rule name="SPaaS Port 8080" dir=in action=allow protocol=TCP localport=8080</code>
                     </li>
                   </ul>
