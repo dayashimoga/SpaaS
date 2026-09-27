@@ -121,9 +121,13 @@ export class SPaaSCoordinator {
     this.sqlExec(`
       CREATE TABLE IF NOT EXISTS ledger (
         id TEXT PRIMARY KEY,
+        tx_id TEXT,
         idempotency_key TEXT UNIQUE,
         epoch INTEGER DEFAULT 1,
         job_id TEXT,
+        entry_type TEXT,
+        account TEXT,
+        counterparty TEXT,
         consumer_pubkey TEXT,
         provider_pubkey TEXT,
         amount_credits REAL,
@@ -489,27 +493,60 @@ export class SPaaSCoordinator {
       this.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ?`, node_id);
     }
 
-    // Dynamic credit calculation (base + fuel fee)
+    // Dynamic credit calculation (base + fuel fee) with paired double-entry ledger
     const amountCredits = Number((10.0 + (actualFuel / 25000)).toFixed(4));
-    const idempotencyKey = `settle_${job_id}_epoch${this.epoch}`;
+    const txId = `tx_${crypto.randomUUID()}`;
+    const debitKey = `settle_${job_id}_epoch${this.epoch}_debit`;
+    const creditKey = `settle_${job_id}_epoch${this.epoch}_credit`;
+    const consumerAccount = "consumer_verified_pubkey";
+    const providerAccount = node_id || "provider_node_pubkey";
 
     try {
+      // 1. DEBIT consumer account
       this.sqlExec(
-        `INSERT OR IGNORE INTO ledger (id, idempotency_key, epoch, job_id, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SETTLED', ?)`,
+        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
-        idempotencyKey,
+        txId,
+        debitKey,
         this.epoch,
         job_id,
-        "consumer_verified_pubkey",
-        node_id || "provider_node_pubkey",
+        "DEBIT",
+        consumerAccount,
+        providerAccount,
+        consumerAccount,
+        providerAccount,
         amountCredits,
         actualFuel,
         duration_ms || 1200,
         memory_mb || 64,
+        "SETTLED",
         now
       );
-      this.logAudit("CREDIT_SETTLED", `Settled ${amountCredits} TEST CREDITS for Job ${job_id} to Node ${node_id}`);
+
+      // 2. CREDIT provider account
+      this.sqlExec(
+        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        crypto.randomUUID(),
+        txId,
+        creditKey,
+        this.epoch,
+        job_id,
+        "CREDIT",
+        providerAccount,
+        consumerAccount,
+        consumerAccount,
+        providerAccount,
+        amountCredits,
+        actualFuel,
+        duration_ms || 1200,
+        memory_mb || 64,
+        "SETTLED",
+        now
+      );
+
+      this.logAudit("CREDIT_SETTLED", `Settled ${amountCredits} TEST CREDITS (Tx: ${txId}) | DEBIT: ${consumerAccount} | CREDIT: ${providerAccount}`);
     } catch (err) {
       console.warn(`Duplicate settlement prevented for job ${job_id}: ${err.message}`);
     }
@@ -1048,16 +1085,57 @@ export class SPaaSCoordinator {
       return json({ job_id: jobId, nonce, expected_digest: "sha256_challenge_ready" }, 201);
     }
 
-    // 8. Metering Ledger
+    // 8. Metering Ledger & Double-Entry Accounting
     if (path === "/api/v1/metering" && method === "GET") {
       const entries = this.sqlExec(`SELECT * FROM ledger ORDER BY timestamp DESC`);
-      const totalCredits = entries.reduce((acc, r) => acc + (r.amount_credits || 0), 0);
+      let totalDebits = 0;
+      let totalCredits = 0;
+      const accountBalances = {};
+
+      for (const r of entries) {
+        const amt = Number(r.amount_credits) || 0;
+        const acc = r.account || (r.entry_type === "DEBIT" ? r.consumer_pubkey : r.provider_pubkey) || "unknown";
+        if (!accountBalances[acc]) accountBalances[acc] = 0;
+
+        if (r.entry_type === "DEBIT") {
+          totalDebits += amt;
+          accountBalances[acc] -= amt;
+        } else {
+          totalCredits += amt;
+          accountBalances[acc] += amt;
+        }
+      }
+
       return json({
         transactions: entries,
         summary: {
-          total_settled_credits: totalCredits,
+          total_settled_credits: Number(totalCredits.toFixed(4)),
+          total_debits: Number(totalDebits.toFixed(4)),
+          total_credits: Number(totalCredits.toFixed(4)),
+          is_balanced: Math.abs(totalDebits - totalCredits) < 0.0001,
           transaction_count: entries.length,
-          epoch: this.epoch
+          epoch: this.epoch,
+          account_balances: accountBalances
+        }
+      });
+    }
+
+    if ((path === "/api/v1/ledger/download" || path === "/api/v1/ledger/export") && method === "GET") {
+      const entries = this.sqlExec(`SELECT * FROM ledger ORDER BY timestamp DESC`);
+      const csvHeader = "id,tx_id,timestamp_iso,epoch,job_id,entry_type,account,counterparty,amount_credits,fuel_used,duration_ms,status\n";
+      const csvRows = entries.map(e => {
+        const iso = new Date(e.timestamp || Date.now()).toISOString();
+        return `"${e.id || ''}","${e.tx_id || ''}","${iso}",${e.epoch || 1},"${e.job_id || ''}","${e.entry_type || 'CREDIT'}","${e.account || ''}","${e.counterparty || ''}",${e.amount_credits || 0},${e.fuel_used || 0},${e.duration_ms || 0},"${e.status || 'SETTLED'}"`;
+      }).join("\n");
+
+      return new Response(csvHeader + csvRows, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          "Content-Disposition": `attachment; filename="spaas-ledger-epoch-${this.epoch}.csv"`
         }
       });
     }

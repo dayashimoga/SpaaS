@@ -723,3 +723,91 @@ test("SPaaSCoordinator — Ledger, Demo Simulated Cluster & Audit Log", async ()
   );
   assert.equal(badJsonRes.status, 400);
 });
+
+test("SPaaSCoordinator — True Double-Entry Ledger & CSV Download (GAP-M06)", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  // 1. Pair a test node
+  const token = (await (await coordinator.fetch(
+    new Request("http://localhost/api/v1/devices/pairing-token", { method: "POST", headers: ADMIN_HEADERS })
+  )).json()).token;
+
+  const pairData = await (await coordinator.fetch(
+    new Request("http://localhost/api/v1/devices/pair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pairing_token: token,
+        node_id: "double-entry-test-node",
+        device_name: "Ledger Worker",
+        device_type: "Desktop"
+      })
+    })
+  )).json();
+
+  // 2. Submit a job
+  const jobSubmit = await (await coordinator.fetch(
+    new Request("http://localhost/api/v1/jobs", {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({
+        job_id: "double-entry-job-1",
+        workload_id: "matrix_compute",
+        assigned_node_id: "double-entry-test-node",
+        status: "assigned"
+      })
+    })
+  )).json();
+
+  // 3. Submit result for settlement
+  const settleRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/nodes/results", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${pairData.auth_token}`
+      },
+      body: JSON.stringify({
+        job_id: "double-entry-job-1",
+        node_id: "double-entry-test-node",
+        exit_code: 0,
+        fuel_consumed: 50000,
+        duration_ms: 250,
+        result_digest: "sha256_mock_valid_digest"
+      })
+    })
+  );
+  assert.equal(settleRes.status, 200);
+
+  // 4. Query metering ledger — verify true double-entry balance
+  const meterRes = await coordinator.fetch(new Request("http://localhost/api/v1/metering"));
+  assert.equal(meterRes.status, 200);
+  const meterData = await meterRes.json();
+
+  assert.ok(meterData.summary);
+  assert.equal(meterData.summary.is_balanced, true);
+  assert.ok(meterData.summary.total_debits > 0);
+  assert.equal(meterData.summary.total_debits, meterData.summary.total_credits);
+
+  // Check paired transactions
+  const debits = meterData.transactions.filter(t => t.entry_type === "DEBIT");
+  const credits = meterData.transactions.filter(t => t.entry_type === "CREDIT");
+  assert.ok(debits.length >= 1);
+  assert.ok(credits.length >= 1);
+  assert.equal(debits[0].tx_id, credits[0].tx_id);
+  assert.equal(debits[0].amount_credits, credits[0].amount_credits);
+
+  // 5. Query CSV download endpoint
+  const downloadRes = await coordinator.fetch(new Request("http://localhost/api/v1/ledger/download"));
+  assert.equal(downloadRes.status, 200);
+  assert.ok(downloadRes.headers.get("content-type").includes("text/csv"));
+  assert.ok(downloadRes.headers.get("content-disposition").includes("spaas-ledger-epoch-"));
+  const csvText = await downloadRes.text();
+  assert.ok(csvText.includes("id,tx_id,timestamp_iso"));
+  assert.ok(csvText.includes("DEBIT"));
+  assert.ok(csvText.includes("CREDIT"));
+});
+

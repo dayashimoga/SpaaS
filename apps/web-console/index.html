@@ -267,7 +267,10 @@
           <div class="fleet-filter-bar mb-3">
             <div class="fleet-filter-pills">
               <button type="button" class="btn btn-sm btn-filter-tab active" data-fleet-tab="physical" id="tab-filter-physical">
-                📱 Physical Devices (<span id="tab-count-physical">0</span>)
+                📱 Physical Android (<span id="tab-count-physical">0</span>)
+              </button>
+              <button type="button" class="btn btn-sm btn-filter-tab" data-fleet-tab="ios" id="tab-filter-ios">
+                🍎 iOS Nodes (<span id="tab-count-ios">0</span>)
               </button>
               <button type="button" class="btn btn-sm btn-filter-tab" data-fleet-tab="desktop" id="tab-filter-desktop">
                 💻 Desktops (<span id="tab-count-desktop">0</span>)
@@ -283,6 +286,9 @@
               </button>
             </div>
             <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <button type="button" id="btn-compare-devices-open" class="btn btn-xs btn-outline-cyan">
+                ⚖️ Compare Devices
+              </button>
               <button type="button" id="btn-exclude-sim-global" class="btn btn-xs btn-outline-cyan">
                 🛡️ Exclude Simulated Compute
               </button>
@@ -962,24 +968,50 @@
 
           <div class="card mt-4">
             <div class="table-header">
-              <h3>Verifiable Credit Ledger &amp; Usage Accounting</h3>
-              <input type="text" id="metering-search" placeholder="Search by record ID, job or key..." class="input-search" />
+              <div>
+                <h3>Verifiable Double-Entry Credit Ledger &amp; Usage Accounting</h3>
+                <p class="text-sub">Every job settlement generates paired DEBIT (Consumer) and CREDIT (Provider) records with cryptographic idempotency</p>
+              </div>
+              <div class="flex gap-2" style="align-items: center; flex-wrap: wrap;">
+                <span id="ledger-balance-badge" class="badge badge-success font-mono">⚖️ 100% BALANCED</span>
+                <input type="text" id="metering-search" placeholder="Search by Tx, job or account..." class="input-search" />
+                <button type="button" id="btn-download-ledger-csv" class="btn btn-xs btn-outline-cyan">📥 Export CSV</button>
+              </div>
             </div>
+
+            <!-- Double-Entry Accounting Invariant & Balance Card -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; padding: 0.85rem 1.25rem; background: rgba(15, 23, 42, 0.4); border-bottom: 1px solid var(--border-color);">
+              <div>
+                <span class="text-sub text-xs">Total Debited (Consumers):</span>
+                <div class="font-mono text-rose font-bold" id="ledger-total-debits">-0.0000 TEST CR</div>
+              </div>
+              <div>
+                <span class="text-sub text-xs">Total Credited (Providers):</span>
+                <div class="font-mono text-emerald font-bold" id="ledger-total-credits">+0.0000 TEST CR</div>
+              </div>
+              <div>
+                <span class="text-sub text-xs">Double-Entry Accounting Invariant:</span>
+                <div class="font-mono text-cyan" id="ledger-invariant-status">∑ Debits + ∑ Credits = 0.0000 (Exact)</div>
+              </div>
+            </div>
+
             <div class="table-container">
               <table class="data-table">
                 <thead>
                   <tr>
-                    <th>Record ID</th>
-                    <th>Idempotency Key</th>
+                    <th>Type</th>
+                    <th>Tx ID / Entry ID</th>
+                    <th>Account</th>
+                    <th>Counterparty</th>
                     <th>Job ID</th>
-                    <th>Credits Earned</th>
+                    <th>Amount</th>
                     <th>Fuel Consumed</th>
                     <th>Duration</th>
                     <th>Status</th>
                   </tr>
                 </thead>
                 <tbody id="metering-table-body">
-                  <tr><td colspan="7" class="text-center text-muted">No metering records logged yet.</td></tr>
+                  <tr><td colspan="9" class="text-center text-muted">No metering records logged yet.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -1565,6 +1597,40 @@
 
         <div class="modal-actions" style="border-top: 1px solid var(--border-color, #1e293b); padding: 0.875rem 1.25rem;">
           <button type="button" id="btn-modal-connect-guide-close" class="btn btn-secondary">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Compare Devices Side-by-Side -->
+    <div id="modal-compare-devices" class="modal-overlay hidden">
+      <div class="modal-card" style="max-width: 900px; width: 95%;">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span style="font-size: 1.5rem;">⚖️</span>
+            <div>
+              <h2 style="margin: 0; font-size: 1.25rem;">Edge Compute Device Comparison</h2>
+              <span class="text-sub" style="font-size: 0.8rem;">Evaluate multi-attribute capabilities, battery, thermals, and qualification scores</span>
+            </div>
+          </div>
+          <button id="modal-compare-devices-close" class="modal-close-btn" title="Close">&times;</button>
+        </div>
+        <div class="modal-scroll-body" style="padding: 1.25rem;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem;">
+            <div>
+              <label class="form-label" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Device A:</label>
+              <select id="compare-select-device-a" class="input-control font-mono" style="width: 100%;"></select>
+            </div>
+            <div>
+              <label class="form-label" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Device B:</label>
+              <select id="compare-select-device-b" class="input-control font-mono" style="width: 100%;"></select>
+            </div>
+          </div>
+          <div id="compare-table-container">
+            <!-- Dynamic comparison content rendered by JS -->
+          </div>
+        </div>
+        <div class="modal-actions" style="border-top: 1px solid var(--border-color, #1e293b); padding: 0.875rem 1.25rem;">
+          <button type="button" id="btn-modal-compare-close" class="btn btn-secondary">Close</button>
         </div>
       </div>
     </div>

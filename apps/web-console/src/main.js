@@ -311,6 +311,7 @@ window.addEventListener('DOMContentLoaded', () => {
   initSettings();
   initSearchAndFilters();
   initSubTabs();
+  initDeviceComparison();
 
   // Initial Fetch & Connect Live Event Stream
   refreshAllData();
@@ -1054,6 +1055,7 @@ async function fetchNodes() {
 
     // Categorize nodes by real-world nature
     let physicalCount = 0;
+    let iosCount = 0;
     let emulatorCount = 0;
     let desktopCount = 0;
     let simulatedCount = 0;
@@ -1069,7 +1071,13 @@ async function fetchNodes() {
         model.includes('ranchu') ||
         (n.node_id || '').includes('avd')
       );
-      const isDesk = !isSim && !isEmu && (
+      const isIos = !isSim && (
+        (n.device_type || '').toLowerCase().includes('ios') ||
+        (n.capabilities?.os_name || '').toLowerCase().includes('ios') ||
+        model.includes('iphone') ||
+        model.includes('ipad')
+      );
+      const isDesk = !isSim && !isEmu && !isIos && (
         n.device_type === 'windows_desktop' ||
         n.device_type === 'linux_desktop' ||
         n.device_type === 'mac_desktop' ||
@@ -1078,6 +1086,7 @@ async function fetchNodes() {
 
       if (isSim) simulatedCount++;
       else if (isEmu) emulatorCount++;
+      else if (isIos) iosCount++;
       else if (isDesk) desktopCount++;
       else physicalCount++;
     });
@@ -1094,6 +1103,8 @@ async function fetchNodes() {
     // Filter tab badge counts
     const tabPhys = document.getElementById('tab-count-physical');
     if (tabPhys) tabPhys.textContent = physicalCount;
+    const tabIos = document.getElementById('tab-count-ios');
+    if (tabIos) tabIos.textContent = iosCount;
     const tabDesk = document.getElementById('tab-count-desktop');
     if (tabDesk) tabDesk.textContent = desktopCount;
     const tabEmu = document.getElementById('tab-count-emulator');
@@ -1172,16 +1183,23 @@ function renderNodesTable(nodes) {
       model.includes('ranchu') ||
       (n.node_id || '').includes('avd')
     );
-    const isDesk = !isSim && !isEmu && (
+    const isIos = !isSim && (
+      (n.device_type || '').toLowerCase().includes('ios') ||
+      (n.capabilities?.os_name || '').toLowerCase().includes('ios') ||
+      model.includes('iphone') ||
+      model.includes('ipad')
+    );
+    const isDesk = !isSim && !isEmu && !isIos && (
       n.device_type === 'windows_desktop' ||
       n.device_type === 'linux_desktop' ||
       n.device_type === 'mac_desktop' ||
       (n.device_type || '').includes('desktop')
     );
-    const isPhys = !isSim && !isEmu && !isDesk;
+    const isPhys = !isSim && !isEmu && !isDesk && !isIos;
 
     if (window.excludeSimulated && isSim) return false;
     if (currentFleetTab === 'physical') return isPhys;
+    if (currentFleetTab === 'ios') return isIos;
     if (currentFleetTab === 'desktop') return isDesk;
     if (currentFleetTab === 'emulator') return isEmu;
     if (currentFleetTab === 'simulated') return isSim;
@@ -1199,6 +1217,8 @@ function renderNodesTable(nodes) {
       if (emptyCategoryDesc) {
         if (currentFleetTab === 'physical') {
           emptyCategoryDesc.textContent = 'No physical Android smartphones are currently connected. Click "+ Add Device" to voluntary enroll.';
+        } else if (currentFleetTab === 'ios') {
+          emptyCategoryDesc.textContent = 'No iOS companion nodes currently connected. Run the SPaaS Swift Companion app on iOS 16+.';
         } else if (currentFleetTab === 'desktop') {
           emptyCategoryDesc.textContent = 'No desktop worker nodes connected. Run `cargo run -p spaas-cli -- worker` on a PC.';
         } else if (currentFleetTab === 'emulator') {
@@ -1230,23 +1250,31 @@ function renderNodesTable(nodes) {
       model.includes('ranchu') ||
       (n.node_id || '').includes('avd')
     );
-    const isDesktop = !isSimulated && !isEmulator && (
+    const isIos = !isSimulated && (
+      (n.device_type || '').toLowerCase().includes('ios') ||
+      (n.capabilities?.os_name || '').toLowerCase().includes('ios') ||
+      model.includes('iphone') ||
+      model.includes('ipad')
+    );
+    const isDesktop = !isSimulated && !isEmulator && !isIos && (
       n.device_type === 'windows_desktop' ||
       n.device_type === 'linux_desktop' ||
       n.device_type === 'mac_desktop' ||
       (n.device_type || '').includes('desktop')
     );
-    const isPhysical = !isSimulated && !isEmulator && !isDesktop;
+    const isPhysical = !isSimulated && !isEmulator && !isDesktop && !isIos;
 
     const typeBadge = isPhysical
       ? '<span class="badge badge-physical-prominent">📱 PHYSICAL</span>'
-      : (isDesktop
-        ? '<span class="badge badge-desktop">💻 DESKTOP</span>'
-        : (isEmulator
-          ? '<span class="badge badge-emulator">🤖 EMULATOR</span>'
-          : '<span class="badge badge-simulated">🧪 SIMULATED</span>'));
+      : (isIos
+        ? '<span class="badge badge-physical-prominent" style="background: rgba(168, 85, 247, 0.2); border-color: #a855f7; color: #c084fc;">🍎 IOS NODE</span>'
+        : (isDesktop
+          ? '<span class="badge badge-desktop">💻 DESKTOP</span>'
+          : (isEmulator
+            ? '<span class="badge badge-emulator">🤖 EMULATOR</span>'
+            : '<span class="badge badge-simulated">🧪 SIMULATED</span>')));
 
-    const rowClass = (isPhysical ? 'row-physical ' : '') + (selectedNode && selectedNode.node_id === n.node_id ? 'row-selected' : '');
+    const rowClass = (isPhysical || isIos ? 'row-physical ' : '') + (selectedNode && selectedNode.node_id === n.node_id ? 'row-selected' : '');
 
     const stateClass = n.state === 'Active' ? 'status-active'
       : (n.state === 'Idle' ? 'status-healthy'
@@ -1258,7 +1286,7 @@ function renderNodesTable(nodes) {
     return `
       <tr class="${rowClass}" onclick="window.spaasSelectNode('${n.node_id}')">
         <td>${typeBadge}</td>
-        <td><strong>${escapeHtml(n.capabilities?.device_model || 'Unknown Device')}</strong> ${isPhysical ? '✨' : ''}</td>
+        <td><strong>${escapeHtml(n.capabilities?.device_model || 'Unknown Device')}</strong> ${isPhysical ? '✨' : (isIos ? '🍎' : '')}</td>
         <td class="font-mono text-muted">${n.node_id.substring(0, 8)}...</td>
         <td class="font-mono">${n.capabilities?.architecture || 'aarch64'} / ${Math.round((n.capabilities?.total_ram_mb || 0)/1024)}GB</td>
         <td><span class="status-badge ${stateClass}">${(n.state || 'IDLE').toUpperCase()}</span></td>
@@ -1319,17 +1347,24 @@ function renderNodeDetails(node) {
     modelStr.includes('ranchu') ||
     (node.node_id || '').includes('avd')
   );
-  const isDesktop = !isSim && !isEmulator && (
+  const isIos = !isSim && (
+    (node.device_type || '').toLowerCase().includes('ios') ||
+    (node.capabilities?.os_name || '').toLowerCase().includes('ios') ||
+    modelStr.includes('iphone') ||
+    modelStr.includes('ipad')
+  );
+  const isDesktop = !isSim && !isEmulator && !isIos && (
     node.device_type === 'windows_desktop' ||
     node.device_type === 'linux_desktop' ||
     node.device_type === 'mac_desktop' ||
     (node.device_type || '').includes('desktop')
   );
-  const isPhysical = !isSim && !isEmulator && !isDesktop;
+  const isPhysical = !isSim && !isEmulator && !isDesktop && !isIos;
 
   const hwTypeLabel = isPhysical ? '📱 PHYSICAL (Real Android Smartphone)'
+    : (isIos ? '🍎 PHYSICAL (Real Apple iOS Device)'
     : (isDesktop ? '💻 DESKTOP (Workstation)'
-    : (isEmulator ? '🤖 EMULATOR (Android AVD)' : '🧪 SIMULATED (Podman Container)'));
+    : (isEmulator ? '🤖 EMULATOR (Android AVD)' : '🧪 SIMULATED (Podman Container)')));
 
   const elType = document.getElementById('detail-hw-type');
   if (elType) elType.textContent = hwTypeLabel;
@@ -1337,7 +1372,10 @@ function renderNodeDetails(node) {
   const elEvidence = document.getElementById('detail-device-evidence');
   if (elEvidence) {
     if (isPhysical) {
-      elEvidence.textContent = 'PHYSICAL HARDWARE';
+      elEvidence.textContent = 'PHYSICAL ANDROID HARDWARE';
+      elEvidence.className = 'badge badge-physical-prominent';
+    } else if (isIos) {
+      elEvidence.textContent = 'PHYSICAL IOS HARDWARE';
       elEvidence.className = 'badge badge-physical-prominent';
     } else if (isDesktop) {
       elEvidence.textContent = 'DESKTOP WORKER';
@@ -2062,20 +2100,56 @@ async function fetchMetering() {
   try {
     const res = await fetch(`${API_BASE}/api/v1/metering`);
     if (!res.ok) return;
-    const records = await res.json();
-    cachedMetering = records || [];
+    const data = await res.json();
+    const records = Array.isArray(data) ? data : (data.transactions || []);
+    cachedMetering = records;
 
     let totalCredits = 0;
+    let totalDebits = 0;
     let totalFuel = 0;
-    cachedMetering.forEach(r => {
-      totalCredits += r.credits_earned_by_node || 0;
-      totalFuel += r.usage?.fuel_consumed || 0;
+
+    records.forEach(r => {
+      const amt = Number(r.amount_credits || r.credits_earned_by_node || 0);
+      const fuel = r.fuel_used || r.usage?.fuel_consumed || 0;
+      totalFuel += fuel;
+      if (r.entry_type === 'DEBIT') {
+        totalDebits += amt;
+      } else {
+        totalCredits += amt;
+      }
     });
 
-    document.getElementById('metric-total-credits').textContent = totalCredits;
-    document.getElementById('usage-credits-earned').textContent = totalCredits;
-    document.getElementById('usage-fuel-consumed').textContent = totalFuel.toLocaleString();
-    document.getElementById('usage-tx-count').textContent = cachedMetering.length;
+    const isBalanced = data.summary?.is_balanced !== undefined
+      ? data.summary.is_balanced
+      : (Math.abs(totalDebits - totalCredits) < 0.0001 && records.length > 0);
+
+    const elTotalCredits = document.getElementById('metric-total-credits');
+    if (elTotalCredits) elTotalCredits.textContent = totalCredits.toFixed(2);
+    const elUsageCredits = document.getElementById('usage-credits-earned');
+    if (elUsageCredits) elUsageCredits.textContent = totalCredits.toFixed(2);
+    const elUsageFuel = document.getElementById('usage-fuel-consumed');
+    if (elUsageFuel) elUsageFuel.textContent = totalFuel.toLocaleString();
+    const elUsageTx = document.getElementById('usage-tx-count');
+    if (elUsageTx) elUsageTx.textContent = records.length;
+
+    // Double-Entry Ledger Invariant Cards
+    const elDebits = document.getElementById('ledger-total-debits');
+    if (elDebits) elDebits.textContent = `-${totalDebits.toFixed(4)} TEST CR`;
+    const elCredits = document.getElementById('ledger-total-credits');
+    if (elCredits) elCredits.textContent = `+${totalCredits.toFixed(4)} TEST CR`;
+    const elInvariant = document.getElementById('ledger-invariant-status');
+    if (elInvariant) {
+      const diff = Math.abs(totalDebits - totalCredits);
+      elInvariant.textContent = isBalanced
+        ? '∑ Debits + ∑ Credits = 0.0000 (Exact Balance)'
+        : `Diff: ${diff.toFixed(4)} TEST CR (Rebalancing)`;
+      elInvariant.className = isBalanced ? 'font-mono text-emerald' : 'font-mono text-rose';
+    }
+    const elBadge = document.getElementById('ledger-balance-badge');
+    if (elBadge) {
+      elBadge.textContent = isBalanced ? '⚖️ 100% BALANCED' : '⚠️ REBALANCING';
+      elBadge.className = `badge ${isBalanced ? 'badge-success' : 'badge-error'} font-mono`;
+    }
 
     renderMeteringTable(cachedMetering);
     fetchConsumerBalance();
@@ -2119,23 +2193,70 @@ function renderMeteringTable(records) {
   if (!tbody) return;
 
   if (records.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No metering records logged yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No metering records logged yet.</td></tr>';
     return;
   }
 
   tbody.innerHTML = records.map(r => {
+    const isDebit = r.entry_type === 'DEBIT';
+    const typeBadge = isDebit
+      ? '<span class="badge" style="background: rgba(244,63,94,0.15); color: #fb7185; border: 1px solid rgba(244,63,94,0.3);">🔻 DEBIT</span>'
+      : '<span class="badge" style="background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3);">🔺 CREDIT</span>';
+
+    const amt = Number(r.amount_credits || r.credits_earned_by_node || 0).toFixed(4);
+    const amtFormatted = isDebit
+      ? `<span class="text-rose font-mono">-${amt} CR</span>`
+      : `<span class="text-emerald font-mono">+${amt} CR</span>`;
+
+    const txId = r.tx_id || (r.id ? `tx_${r.id.substring(0, 8)}` : (r.idempotency_key ? r.idempotency_key.substring(0, 12) : '-'));
+    const account = r.account || (isDebit ? r.consumer_pubkey : r.provider_pubkey) || 'consumer';
+    const counterparty = r.counterparty || (isDebit ? r.provider_pubkey : r.consumer_pubkey) || 'node';
+    const fuel = (r.fuel_used || r.usage?.fuel_consumed || 0).toLocaleString();
+    const duration = r.duration_ms || r.usage?.wall_time_ms || 1200;
+
     return `
       <tr>
-        <td class="font-mono">${r.record_id ? r.record_id.substring(0, 8) + '...' : '-'}</td>
-        <td class="font-mono text-muted">${(r.idempotency_key || '').substring(0, 12)}...</td>
-        <td class="font-mono text-cyan">${r.job_id.substring(0, 8)}...</td>
-        <td class="font-mono text-emerald">+${r.credits_earned_by_node} CR</td>
-        <td class="font-mono">${(r.usage?.fuel_consumed || 0).toLocaleString()}</td>
-        <td>${r.usage?.wall_time_ms || 0} ms</td>
-        <td><span class="status-badge status-healthy">SETTLED</span></td>
+        <td>${typeBadge}</td>
+        <td class="font-mono text-muted">${escapeHtml(txId.substring(0, 16))}...</td>
+        <td class="font-mono">${escapeHtml(account.substring(0, 14))}...</td>
+        <td class="font-mono text-muted">${escapeHtml(counterparty.substring(0, 14))}...</td>
+        <td class="font-mono text-cyan">${escapeHtml((r.job_id || '').substring(0, 8))}...</td>
+        <td>${amtFormatted}</td>
+        <td class="font-mono">${fuel}</td>
+        <td>${duration} ms</td>
+        <td><span class="status-badge status-healthy">${r.status || 'SETTLED'}</span></td>
       </tr>
     `;
   }).join('');
+}
+
+function downloadLedgerCsv() {
+  if (!cachedMetering || cachedMetering.length === 0) {
+    alert('No ledger records available to export.');
+    return;
+  }
+  const headers = ['id', 'tx_id', 'entry_type', 'account', 'counterparty', 'job_id', 'amount_credits', 'fuel_used', 'duration_ms', 'status', 'timestamp_iso'];
+  const rows = cachedMetering.map(r => [
+    `"${r.id || ''}"`,
+    `"${r.tx_id || ''}"`,
+    `"${r.entry_type || 'CREDIT'}"`,
+    `"${r.account || ''}"`,
+    `"${r.counterparty || ''}"`,
+    `"${r.job_id || ''}"`,
+    r.amount_credits || r.credits_earned_by_node || 0,
+    r.fuel_used || r.usage?.fuel_consumed || 0,
+    r.duration_ms || r.usage?.wall_time_ms || 0,
+    `"${r.status || 'SETTLED'}"`,
+    `"${new Date(r.timestamp || Date.now()).toISOString()}"`
+  ].join(','));
+
+  const csvContent = 'data:text/csv;charset=utf-8,' + encodeURIComponent([headers.join(','), ...rows].join('\n'));
+  const link = document.createElement('a');
+  link.setAttribute('href', csvContent);
+  link.setAttribute('download', `spaas-double-entry-ledger-${Date.now()}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 async function fetchAudit() {
@@ -3220,18 +3341,25 @@ function initSearchAndFilters() {
         model.includes('ranchu') ||
         (n.node_id || '').includes('avd')
       );
-      const isDesk = !isSim && !isEmu && (
+      const isIos = !isSim && (
+        (n.device_type || '').toLowerCase().includes('ios') ||
+        (n.capabilities?.os_name || '').toLowerCase().includes('ios') ||
+        model.includes('iphone') ||
+        model.includes('ipad')
+      );
+      const isDesk = !isSim && !isEmu && !isIos && (
         n.device_type === 'windows_desktop' ||
         n.device_type === 'linux_desktop' ||
         n.device_type === 'mac_desktop' ||
         (n.device_type || '').includes('desktop')
       );
-      const isPhys = !isSim && !isEmu && !isDesk;
+      const isPhys = !isSim && !isEmu && !isDesk && !isIos;
 
       if (window.excludeSimulated && isSim) return false;
 
       // Fleet Tab Filter
       if (currentFleetTab === 'physical' && !isPhys) return false;
+      if (currentFleetTab === 'ios' && !isIos) return false;
       if (currentFleetTab === 'desktop' && !isDesk) return false;
       if (currentFleetTab === 'emulator' && !isEmu) return false;
       if (currentFleetTab === 'simulated' && !isSim) return false;
@@ -3245,6 +3373,7 @@ function initSearchAndFilters() {
       const matchesType = ty === 'ALL'
         || (ty === 'SIMULATED' && isSim)
         || (ty === 'DESKTOP' && isDesk)
+        || (ty === 'IOS' && isIos)
         || (ty === 'PHONE' && isPhys);
 
       return matchesQuery && matchesState && matchesType;
@@ -3256,6 +3385,11 @@ function initSearchAndFilters() {
   if (nodeSearch) nodeSearch.addEventListener('input', applyNodeFilters);
   if (nodeFilterState) nodeFilterState.addEventListener('change', applyNodeFilters);
   if (nodeFilterType) nodeFilterType.addEventListener('change', applyNodeFilters);
+
+  const btnExportCsv = document.getElementById('btn-download-ledger-csv');
+  if (btnExportCsv) {
+    btnExportCsv.addEventListener('click', downloadLedgerCsv);
+  }
 
   const jobSearch = document.getElementById('job-search');
   const jobFilter = document.getElementById('job-filter-state');
@@ -3276,6 +3410,178 @@ function initSearchAndFilters() {
 
   if (jobSearch) jobSearch.addEventListener('input', applyJobFilters);
   if (jobFilter) jobFilter.addEventListener('change', applyJobFilters);
+}
+
+// Device Comparison Feature
+function initDeviceComparison() {
+  const modal = document.getElementById('modal-compare-devices');
+  const btnOpen = document.getElementById('btn-compare-devices-open');
+  const btnClose = document.getElementById('modal-compare-devices-close');
+  const btnCloseAction = document.getElementById('btn-modal-compare-close');
+  const selectA = document.getElementById('compare-select-device-a');
+  const selectB = document.getElementById('compare-select-device-b');
+  const tableContainer = document.getElementById('compare-table-container');
+
+  if (!btnOpen || !modal) return;
+
+  const openModal = () => {
+    modal.classList.remove('hidden');
+    populateDeviceSelects();
+    renderDeviceComparison();
+  };
+
+  const closeModal = () => {
+    modal.classList.add('hidden');
+  };
+
+  btnOpen.addEventListener('click', openModal);
+  if (btnClose) btnClose.addEventListener('click', closeModal);
+  if (btnCloseAction) btnCloseAction.addEventListener('click', closeModal);
+
+  if (selectA) selectA.addEventListener('change', renderDeviceComparison);
+  if (selectB) selectB.addEventListener('change', renderDeviceComparison);
+
+  function populateDeviceSelects() {
+    if (!selectA || !selectB) return;
+    const currentA = selectA.value;
+    const currentB = selectB.value;
+
+    const options = cachedNodes.map(n => {
+      const model = n.capabilities?.device_model || 'Unknown Device';
+      const idPrefix = n.node_id.substring(0, 8);
+      const isSim = n.is_simulated || n.device_type === 'simulated_node';
+      const label = `[${isSim ? 'SIM' : (n.capabilities?.os_name || 'NODE')}] ${model} (${idPrefix})`;
+      return `<option value="${n.node_id}">${escapeHtml(label)}</option>`;
+    }).join('');
+
+    selectA.innerHTML = options || '<option value="">No devices registered</option>';
+    selectB.innerHTML = options || '<option value="">No devices registered</option>';
+
+    if (cachedNodes.length >= 2) {
+      selectA.value = (currentA && cachedNodes.some(n => n.node_id === currentA)) ? currentA : cachedNodes[0].node_id;
+      selectB.value = (currentB && cachedNodes.some(n => n.node_id === currentB)) ? currentB : cachedNodes[1].node_id;
+    } else if (cachedNodes.length === 1) {
+      selectA.value = cachedNodes[0].node_id;
+      selectB.value = cachedNodes[0].node_id;
+    }
+  }
+
+  function getDimensionScore(node, dimKey) {
+    if (!node?.qualification?.capability_vector) return 75;
+    const val = node.qualification.capability_vector[dimKey];
+    if (typeof val === 'number') return val;
+    if (typeof val === 'object' && val !== null) {
+      if ('Score' in val) return val.Score;
+    }
+    if (typeof val === 'string' && val.startsWith('Score(')) {
+      return parseInt(val.replace('Score(', '').replace(')', '')) || 0;
+    }
+    return 0;
+  }
+
+  function renderDeviceComparison() {
+    if (!tableContainer) return;
+    const nodeA = cachedNodes.find(n => n.node_id === selectA.value);
+    const nodeB = cachedNodes.find(n => n.node_id === selectB.value);
+
+    if (!nodeA || !nodeB) {
+      tableContainer.innerHTML = '<div class="p-4 text-center text-muted">Select two compute devices above to perform side-by-side capability benchmarking and multi-attribute qualification comparison.</div>';
+      return;
+    }
+
+    const dims = [
+      { name: 'CPU Integer & Logic', key: 'cpu', icon: '⚡' },
+      { name: 'WASM Fuel Throughput', key: 'wasm', icon: '🚀' },
+      { name: 'Floating Point (FP)', key: 'fp', icon: '📐' },
+      { name: 'RAM Latency & BW', key: 'memory', icon: '🧠' },
+      { name: 'Vulkan GPU Compute', key: 'gpu', icon: '🎮' },
+      { name: 'Hardware AI / NPU', key: 'npu', icon: '🤖' },
+      { name: 'Flash Storage I/O', key: 'storage', icon: '💾' },
+      { name: 'Network RTT & BW', key: 'network', icon: '📡' },
+      { name: 'Energy Efficiency', key: 'energy_efficiency', icon: '🔋' },
+      { name: 'Sustained Thermal Stability', key: 'sustained_performance', icon: '❄️' },
+      { name: 'Empirical Reliability', key: 'reliability', icon: '🛡️' },
+      { name: 'Hardware Attestation', key: 'security', icon: '🔒' }
+    ];
+
+    const scoreA = nodeA.qualification?.edge_score || 85;
+    const scoreB = nodeB.qualification?.edge_score || 85;
+
+    let rowsHtml = '';
+    // Overall Qualification Score Row
+    rowsHtml += `
+      <tr style="background: rgba(14, 165, 233, 0.08);">
+        <td style="font-weight: 600;">Overall Edge Score</td>
+        <td class="font-mono font-bold" style="color: ${scoreA >= scoreB ? '#34d399' : '#94a3b8'};">
+          ${scoreA}/100 ${scoreA > scoreB ? '🏆 Winner' : ''}
+        </td>
+        <td class="font-mono font-bold" style="color: ${scoreB >= scoreA ? '#34d399' : '#94a3b8'};">
+          ${scoreB}/100 ${scoreB > scoreA ? '🏆 Winner' : ''}
+        </td>
+      </tr>
+      <tr>
+        <td>Qualification Tier</td>
+        <td><span class="badge badge-success font-mono">${(nodeA.qualification?.tier || 'QUALIFIED').toUpperCase()}</span></td>
+        <td><span class="badge badge-success font-mono">${(nodeB.qualification?.tier || 'QUALIFIED').toUpperCase()}</span></td>
+      </tr>
+      <tr>
+        <td>Architecture / OS</td>
+        <td class="font-mono">${nodeA.capabilities?.architecture || 'aarch64'} (${nodeA.capabilities?.os_name || 'OS'} ${nodeA.capabilities?.os_version || ''})</td>
+        <td class="font-mono">${nodeB.capabilities?.architecture || 'aarch64'} (${nodeB.capabilities?.os_name || 'OS'} ${nodeB.capabilities?.os_version || ''})</td>
+      </tr>
+      <tr>
+        <td>CPU Cores / RAM</td>
+        <td class="font-mono">${nodeA.capabilities?.cpu_cores || 8} Cores / ${Math.round((nodeA.capabilities?.total_ram_mb || 4096)/1024)}GB</td>
+        <td class="font-mono">${nodeB.capabilities?.cpu_cores || 8} Cores / ${Math.round((nodeB.capabilities?.total_ram_mb || 4096)/1024)}GB</td>
+      </tr>
+      <tr>
+        <td>Battery &amp; Charging</td>
+        <td class="font-mono">${nodeA.telemetry?.battery_pct || 90}% (${nodeA.telemetry?.charging_state || 'AC'})</td>
+        <td class="font-mono">${nodeB.telemetry?.battery_pct || 90}% (${nodeB.telemetry?.charging_state || 'AC'})</td>
+      </tr>
+      <tr>
+        <td>Thermals &amp; Network</td>
+        <td><span class="text-emerald font-mono">${nodeA.telemetry?.thermal_status || 'NOMINAL'}</span> / ${nodeA.telemetry?.network_type || 'Wifi'}</td>
+        <td><span class="text-emerald font-mono">${nodeB.telemetry?.thermal_status || 'NOMINAL'}</span> / ${nodeB.telemetry?.network_type || 'Wifi'}</td>
+      </tr>
+    `;
+
+    // Dimension breakdown rows
+    dims.forEach(d => {
+      const valA = getDimensionScore(nodeA, d.key);
+      const valB = getDimensionScore(nodeB, d.key);
+      const winA = valA > valB;
+      const winB = valB > valA;
+      const tie = valA === valB;
+
+      rowsHtml += `
+        <tr>
+          <td><span style="margin-right: 0.35rem;">${d.icon}</span> ${d.name}</td>
+          <td class="font-mono" style="color: ${winA ? '#34d399' : (tie ? '#94a3b8' : '#cbd5e1')}; font-weight: ${winA ? '700' : '400'};">
+            ${valA}/100 ${winA ? '★' : ''}
+          </td>
+          <td class="font-mono" style="color: ${winB ? '#34d399' : (tie ? '#94a3b8' : '#cbd5e1')}; font-weight: ${winB ? '700' : '400'};">
+            ${valB}/100 ${winB ? '★' : ''}
+          </td>
+        </tr>
+      `;
+    });
+
+    tableContainer.innerHTML = `
+      <table class="data-table" style="width: 100%;">
+        <thead>
+          <tr>
+            <th style="width: 40%;">Capability Dimension / Attribute</th>
+            <th style="width: 30%;">${escapeHtml(nodeA.capabilities?.device_model || 'Device A')}</th>
+            <th style="width: 30%;">${escapeHtml(nodeB.capabilities?.device_model || 'Device B')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    `;
+  }
 }
 
 function escapeHtml(str) {

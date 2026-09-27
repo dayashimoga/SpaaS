@@ -365,22 +365,50 @@ function createMinimalFallbackEngine() {
 
       // LEDGER
       if (qu.startsWith("INSERT OR IGNORE INTO LEDGER") || qu.startsWith("INSERT INTO LEDGER")) {
-        const [id, idempotency_key, epoch, job_id, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, now] = params;
-        if (!tables.ledger.has(idempotency_key)) {
-          tables.ledger.set(idempotency_key, {
+        let entry;
+        if (qu.includes("ENTRY_TYPE") || params.length >= 16) {
+          const [id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now] = params;
+          entry = {
             id,
+            tx_id,
             idempotency_key,
             epoch,
             job_id,
+            entry_type: entry_type || "CREDIT",
+            account: account || provider_pubkey,
+            counterparty: counterparty || consumer_pubkey,
             consumer_pubkey,
             provider_pubkey,
-            amount_credits,
+            amount_credits: Number(amount_credits) || 0,
+            fuel_used,
+            duration_ms,
+            memory_mb,
+            status: status || "SETTLED",
+            timestamp: now
+          };
+        } else {
+          const [id, idempotency_key, epoch, job_id, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, now] = params;
+          entry = {
+            id,
+            tx_id: `tx_${id}`,
+            idempotency_key,
+            epoch,
+            job_id,
+            entry_type: "CREDIT",
+            account: provider_pubkey,
+            counterparty: consumer_pubkey,
+            consumer_pubkey,
+            provider_pubkey,
+            amount_credits: Number(amount_credits) || 0,
             fuel_used,
             duration_ms,
             memory_mb,
             status: "SETTLED",
             timestamp: now
-          });
+          };
+        }
+        if (!tables.ledger.has(entry.idempotency_key)) {
+          tables.ledger.set(entry.idempotency_key, entry);
         }
         return [];
       }
