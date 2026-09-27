@@ -2918,7 +2918,8 @@ async function fetchPairingCode(overrideIp = null) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    const code = data.pairing_code || data.token || 'SP-8492';
+    const code = data.pairing_code || data.token;
+    if (!code) throw new Error('Server did not return a valid pairing code');
     const codeEl = document.getElementById('modal-pairing-code');
     if (codeEl) codeEl.textContent = code;
     const codeStep = document.getElementById('modal-code-display-step');
