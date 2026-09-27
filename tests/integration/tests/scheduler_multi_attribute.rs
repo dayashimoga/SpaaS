@@ -266,7 +266,11 @@ fn test_scheduler_100_node_benchmark() {
     println!(" Throughput: {} schedule decisions/sec", ops_per_sec);
     println!("=======================================================");
 
-    let max_allowed_us = if cfg!(debug_assertions) { 2000.0 } else { 500.0 };
+    let max_allowed_us = if cfg!(debug_assertions) {
+        2000.0
+    } else {
+        500.0
+    };
     let min_allowed_ops = if cfg!(debug_assertions) { 500 } else { 2000 };
     assert!(
         per_op_us < max_allowed_us,
