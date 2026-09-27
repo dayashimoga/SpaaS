@@ -139,3 +139,38 @@ server {
 - **Detailed System Health**: `GET http://<host>:8080/api/v1/system/health`
 - **Prometheus Metrics**: `GET http://<host>:8080/metrics`
 - **Live SSE Event Stream**: `GET http://<host>:8080/api/v1/events`
+
+---
+
+## 7. Cloudflare Primary & Cloud Run Disaster Recovery Deployment
+
+### Cloudflare Primary Edge Deployment
+
+The primary control plane runs as a Cloudflare Worker backed by a SQLite Durable Object (`SPaaSCoordinator`), and the Web Console frontend runs on Cloudflare Pages.
+
+#### Required GitHub Secrets
+1. `CLOUDFLARE_API_TOKEN`: Cloudflare API Token.
+2. `CLOUDFLARE_ACCOUNT_ID`: 32-character hexadecimal Account ID from your Cloudflare dashboard URL or overview page.
+
+#### Required Cloudflare API Token Permissions
+When deploying both **Cloudflare Pages** and **Cloudflare Workers**:
+- **Template:** Use **"Edit Cloudflare Workers"** or create a **Custom Token**.
+- **Permissions:**
+  - `Account` | `Workers Scripts` | `Edit` *(Required for `spaas-control-plane` Worker)*
+  - `Account` | `Workers KV Storage` | `Edit` *(Required for Durable Objects SQLite persistence)*
+  - `Account` | `Account Settings` | `Read`
+  - `Account` | `Cloudflare Pages` | `Edit` *(Required for `spaas-console` Pages)*
+- **Account Resources:**
+  - `Include` | `All accounts` (or select your specific Cloudflare Account).
+
+> [!NOTE]
+> If your API token was previously created using only the "Cloudflare Pages" template, it will fail when deploying the Worker script with `No access to the specified resource`. Updating the token to include `Workers Scripts: Edit` resolves this error immediately.
+
+### Google Cloud Run Cold Standby Deployment
+
+Deploy the standby container to Google Cloud Run with zero minimum instances ($0.00 idle cost):
+
+```powershell
+# Automated validation & deployment
+powershell -File deploy/cloud-run/deploy-cloud-run.ps1 -ProjectId "your-gcp-project" -Region "us-central1"
+```
