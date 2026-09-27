@@ -15,6 +15,7 @@ public struct EnrollmentView: View {
         NavigationView {
             Form {
                 Section(header: Text("Device Pairing")) {
+                    #if os(iOS)
                     TextField("Enter Pairing Code (e.g. SP-8492)", text: $pairingCode)
                         .autocapitalization(.allCharacters)
                         .disableAutocorrection(true)
@@ -25,6 +26,13 @@ public struct EnrollmentView: View {
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
                         .font(.system(.caption, design: .monospaced))
+                    #else
+                    TextField("Enter Pairing Code (e.g. SP-8492)", text: $pairingCode)
+                        .font(.system(.body, design: .monospaced))
+
+                    TextField("Control Plane URL (Optional)", text: $customEndpoint)
+                        .font(.system(.caption, design: .monospaced))
+                    #endif
 
                     Button(action: performEnrollment) {
                         if isSubmitting {

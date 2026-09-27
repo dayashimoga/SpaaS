@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(UIKit)
 import UIKit
+#endif
 import Combine
 
 public final class WorkerService: ObservableObject {
@@ -18,7 +20,9 @@ public final class WorkerService: ObservableObject {
     private var loopTimer: Timer?
 
     public init() {
+        #if canImport(UIKit)
         UIDevice.current.isBatteryMonitoringEnabled = true
+        #endif
         loadStoredCredentials()
     }
 
@@ -39,7 +43,11 @@ public final class WorkerService: ObservableObject {
         self.endpoint = ep
 
         let genNodeId = "ios-\(UUID().uuidString.prefix(8).lowercased())"
+        #if canImport(UIKit)
         let deviceName = UIDevice.current.name
+        #else
+        let deviceName = Host.current().localizedName ?? "Apple Mac"
+        #endif
 
         guard let url = URL(string: "\(ep.trimmingCharacters(in: CharacterSet(charactersIn: "/")))/api/v1/devices/pair") else {
             completion(.failure(NSError(domain: "SPaaS", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid endpoint URL"])))
@@ -111,8 +119,13 @@ public final class WorkerService: ObservableObject {
     private func sendHeartbeat() {
         guard let url = URL(string: "\(endpoint)/api/v1/nodes/heartbeat") else { return }
 
+        #if canImport(UIKit)
         let batteryLevel = Int(max(0, UIDevice.current.batteryLevel) * 100)
         let batteryState = UIDevice.current.batteryState == .charging || UIDevice.current.batteryState == .full ? "ChargingAc" : "Discharging"
+        #else
+        let batteryLevel = 100
+        let batteryState = "ChargingAc"
+        #endif
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
