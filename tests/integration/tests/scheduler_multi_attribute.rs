@@ -266,14 +266,18 @@ fn test_scheduler_100_node_benchmark() {
     println!(" Throughput: {} schedule decisions/sec", ops_per_sec);
     println!("=======================================================");
 
+    let max_allowed_us = if cfg!(debug_assertions) { 2000.0 } else { 500.0 };
+    let min_allowed_ops = if cfg!(debug_assertions) { 500 } else { 2000 };
     assert!(
-        per_op_us < 500.0,
-        "100-node evaluation must be under 500µs (got {:.2}µs)",
+        per_op_us < max_allowed_us,
+        "100-node evaluation must be under {}µs (got {:.2}µs)",
+        max_allowed_us,
         per_op_us
     );
     assert!(
-        ops_per_sec > 2000,
-        "Throughput must exceed 2,000 decisions/sec"
+        ops_per_sec > min_allowed_ops,
+        "Throughput must exceed {} decisions/sec",
+        min_allowed_ops
     );
 }
 
