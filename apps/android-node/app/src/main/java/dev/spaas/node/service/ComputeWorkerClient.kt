@@ -294,7 +294,7 @@ object ComputeWorkerClient {
             val clientPubKey = getPublicKeyHex()
 
             val reqBody = JSONObject().apply {
-                put("pairing_code", cleanCode)
+                put("pairing_token", cleanCode)
                 put("device_name", deviceName)
                 put("device_type", "android_smartphone")
                 put("public_key", clientPubKey)

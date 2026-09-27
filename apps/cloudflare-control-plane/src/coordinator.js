@@ -887,12 +887,13 @@ export class SPaaSCoordinator {
       if (!body) {
         return json({ error: "BAD_REQUEST", message: "Malformed or missing JSON body" }, 400);
       }
-      const { pairing_token, node_id, public_key, device_type, device_name } = body;
-      if (!pairing_token) {
+      const { pairing_token, pairing_code, node_id, public_key, device_type, device_name } = body;
+      const resolvedToken = pairing_token || pairing_code;
+      if (!resolvedToken) {
         return json({ error: "MISSING_PAIRING_TOKEN", message: "pairing_token is required" }, 400);
       }
 
-      const tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE token = ?`, pairing_token);
+      const tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE token = ?`, resolvedToken);
       if (tokens.length === 0 || tokens[0].status !== "Active" || tokens[0].expires_at < Date.now()) {
         return json({ error: "INVALID_PAIRING_TOKEN", message: "Pairing token expired or already consumed" }, 400);
       }
@@ -914,8 +915,8 @@ export class SPaaSCoordinator {
       );
 
       // Invalidate token
-      this.sqlExec(`UPDATE pairing_tokens SET status = 'Claimed', claimed_by = ? WHERE token = ?`, assignedNodeId, pairing_token);
-      this.logAudit("DEVICE_PAIRED", `Device ${assignedNodeId} paired with token ${pairing_token}`);
+      this.sqlExec(`UPDATE pairing_tokens SET status = 'Claimed', claimed_by = ? WHERE token = ?`, assignedNodeId, resolvedToken);
+      this.logAudit("DEVICE_PAIRED", `Device ${assignedNodeId} paired with token ${resolvedToken}`);
 
       return json({
         status: "approved",
