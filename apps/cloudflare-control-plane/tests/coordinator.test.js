@@ -811,3 +811,72 @@ test("SPaaSCoordinator — True Double-Entry Ledger & CSV Download (GAP-M06)", a
   assert.ok(csvText.includes("CREDIT"));
 });
 
+test("SPaaSCoordinator — Cross-Cloud DR Epoch Handoff & Fencing", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "STANDBY",
+    SPAAS_CONTROL_PLANE_EPOCH: "1",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  // 1. Unauthenticated handoff must be rejected
+  const unauthRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/dr/epoch-handoff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_epoch: 2 })
+    })
+  );
+  assert.equal(unauthRes.status, 401);
+
+  // 2. Stale epoch (target_epoch 0 < current_epoch 1) must be rejected with 409 Conflict
+  const staleRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/dr/epoch-handoff", {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({ target_epoch: 0, target_role: "PRIMARY" })
+    })
+  );
+  assert.equal(staleRes.status, 409);
+  const staleData = await staleRes.json();
+  assert.equal(staleData.error, "STALE_EPOCH");
+
+  // 3. Valid epoch handoff (epoch 1 -> epoch 2, transition to PRIMARY)
+  const handoffRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/dr/epoch-handoff", {
+      method: "POST",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({
+        target_epoch: 2,
+        target_role: "PRIMARY",
+        reason: "Simulated failback from Cloud Run standby",
+        checkpoint: {
+          nodes: [
+            {
+              node_id: "dr-synced-node-01",
+              device_type: "android_smartphone",
+              region: "us-central",
+              state: "Idle"
+            }
+          ]
+        }
+      })
+    })
+  );
+  assert.equal(handoffRes.status, 200);
+  const handoffData = await handoffRes.json();
+  assert.equal(handoffData.status, "HANDOFF_COMPLETE");
+  assert.equal(handoffData.epoch, 2);
+  assert.equal(handoffData.role, "PRIMARY");
+  assert.equal(handoffData.is_authoritative, true);
+  assert.ok(handoffData.fencing_token.includes("spaas-epoch-2"));
+
+  // Verify internal coordinator state updated
+  assert.equal(coordinator.epoch, 2);
+  assert.equal(coordinator.role, "PRIMARY");
+
+  // Verify checkpoint node was ingested
+  const ingestedNode = coordinator.sqlExec("SELECT * FROM nodes WHERE id = ?", "dr-synced-node-01");
+  assert.equal(ingestedNode.length, 1);
+  assert.equal(ingestedNode[0].id, "dr-synced-node-01");
+});
+

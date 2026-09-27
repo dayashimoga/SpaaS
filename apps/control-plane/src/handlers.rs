@@ -2207,6 +2207,135 @@ pub async fn deactivate_dr(
     })))
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct EpochHandoffRequest {
+    pub operator_secret: Option<String>,
+    pub target_epoch: Option<u64>,
+    pub target_role: Option<String>,
+    pub fencing_token: Option<String>,
+    pub reason: Option<String>,
+    pub checkpoint: Option<IngestCheckpointRequest>,
+}
+
+pub async fn epoch_handoff(
+    State(state): State<AppState>,
+    Json(payload): Json<EpochHandoffRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let expected_secret = std::env::var("SPAAS_DR_OPERATOR_SECRET").unwrap_or_default();
+    if !expected_secret.is_empty() {
+        let provided = payload.operator_secret.as_deref().unwrap_or("");
+        if provided != expected_secret {
+            return Err((StatusCode::UNAUTHORIZED, "Invalid operator secret".into()));
+        }
+    }
+
+    let current_epoch = state.epoch.load(Ordering::Relaxed);
+    let target_epoch = payload.target_epoch.unwrap_or(current_epoch + 1);
+
+    if target_epoch < current_epoch {
+        return Err((
+            StatusCode::CONFLICT,
+            format!(
+                "Stale handoff epoch {} is lower than current authoritative epoch {}",
+                target_epoch, current_epoch
+            ),
+        ));
+    }
+
+    state.epoch.store(target_epoch, Ordering::Relaxed);
+
+    let target_role = payload.target_role.unwrap_or_else(|| "ACTIVE_DR".into());
+    let token = payload
+        .fencing_token
+        .unwrap_or_else(|| format!("spaas-epoch-{target_epoch}-{target_role}"));
+
+    {
+        let mut ft = state.fencing_token.write().await;
+        *ft = token.clone();
+    }
+    state.set_role(&target_role).await;
+
+    // Ingest checkpoint if provided
+    let mut ingested_nodes = 0;
+    let mut ingested_jobs = 0;
+    if let Some(cp) = payload.checkpoint {
+        let mut nodes = state.nodes.write().await;
+        for node in cp.nodes {
+            let id = node.node_id;
+            nodes.insert(id, node.clone());
+            let _ = state
+                .storage
+                .append_event(WalEvent::UpsertNode { node })
+                .await;
+            ingested_nodes += 1;
+        }
+
+        let mut jobs = state.jobs.write().await;
+        for job in cp.jobs {
+            let id = job.job_id;
+            jobs.insert(id, job.clone());
+            let _ = state
+                .storage
+                .append_event(WalEvent::UpsertJob { job })
+                .await;
+            ingested_jobs += 1;
+        }
+    }
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let reason = payload
+        .reason
+        .unwrap_or_else(|| "Cross-cloud DR synchronization".into());
+
+    let audit = AuditRecord {
+        timestamp_ms: now,
+        event_type: "DR_EPOCH_HANDOFF".into(),
+        entity_id: "CONTROL_PLANE".into(),
+        details: serde_json::json!({
+            "epoch": target_epoch,
+            "role": target_role,
+            "fencing_token": token,
+            "reason": reason,
+            "ingested_nodes": ingested_nodes,
+            "ingested_jobs": ingested_jobs,
+        })
+        .to_string(),
+    };
+    let _ = state
+        .storage
+        .append_event(WalEvent::AppendAudit {
+            record: audit.clone(),
+        })
+        .await;
+    {
+        let mut log = state.audit_log.write().await;
+        log.push(audit);
+    }
+
+    state.broadcast_event(
+        "DR_EPOCH_HANDOFF",
+        serde_json::json!({
+            "epoch": target_epoch,
+            "role": target_role,
+            "fencing_token": token,
+            "timestamp_ms": now,
+        }),
+    );
+
+    let is_authoritative = target_role == "PRIMARY" || target_role == "ACTIVE_DR";
+
+    Ok(Json(serde_json::json!({
+        "status": "HANDOFF_COMPLETE",
+        "role": target_role,
+        "epoch": target_epoch,
+        "fencing_token": token,
+        "is_authoritative": is_authoritative,
+        "ingested_nodes": ingested_nodes,
+        "ingested_jobs": ingested_jobs,
+        "timestamp_ms": now
+    })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2599,5 +2728,71 @@ mod tests {
             .0;
         assert_eq!(deact_res["status"], "STANDBY");
         assert!(state.is_standby().await);
+    }
+
+    #[tokio::test]
+    async fn test_epoch_handoff_and_fencing() {
+        let dir = tempdir().unwrap();
+        let state = AppState::new(dir.path());
+        state.set_role("STANDBY").await;
+        state.epoch.store(1, Ordering::Relaxed);
+
+        // 1. Stale handoff (target_epoch 0 < current_epoch 1) must be rejected with CONFLICT
+        let stale_req = EpochHandoffRequest {
+            operator_secret: None,
+            target_epoch: Some(0),
+            target_role: Some("ACTIVE_DR".into()),
+            fencing_token: None,
+            reason: Some("stale test".into()),
+            checkpoint: None,
+        };
+        let stale_err = epoch_handoff(State(state.clone()), Json(stale_req))
+            .await
+            .unwrap_err();
+        assert_eq!(stale_err.0, StatusCode::CONFLICT);
+
+        // 2. Valid handoff with checkpoint ingestion
+        let cp_node = NodeRecord {
+            node_id: Uuid::new_v4(),
+            public_key: "handoff_node_pk".into(),
+            device_type: NodeDeviceType::AndroidSmartphone,
+            enrollment: EnrollmentStatus::Enrolled,
+            state: NodeState::Idle,
+            capabilities: NodeHardwareCapabilities::default(),
+            telemetry: NodeTelemetry::default(),
+            policy: ProviderPolicy::default(),
+            qualification: None,
+            enrolled_at_ms: 1000,
+            last_heartbeat_ms: 1000,
+            region: "us-central".into(),
+            is_simulated: false,
+        };
+        let valid_req = EpochHandoffRequest {
+            operator_secret: None,
+            target_epoch: Some(3),
+            target_role: Some("ACTIVE_DR".into()),
+            fencing_token: Some("spaas-epoch-3-active".into()),
+            reason: Some("Cross-cloud leadership handoff".into()),
+            checkpoint: Some(IngestCheckpointRequest {
+                epoch: 3,
+                fencing_token: "spaas-epoch-3-active".into(),
+                nodes: vec![cp_node.clone()],
+                jobs: vec![],
+            }),
+        };
+
+        let res = epoch_handoff(State(state.clone()), Json(valid_req))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(res["status"], "HANDOFF_COMPLETE");
+        assert_eq!(res["epoch"], 3);
+        assert_eq!(res["role"], "ACTIVE_DR");
+        assert_eq!(res["is_authoritative"], true);
+        assert_eq!(res["ingested_nodes"], 1);
+
+        assert_eq!(state.epoch.load(Ordering::Relaxed), 3);
+        assert!(state.is_authoritative().await);
+        assert_eq!(state.nodes.read().await.len(), 1);
     }
 }

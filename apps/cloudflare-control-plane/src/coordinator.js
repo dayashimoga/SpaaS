@@ -757,6 +757,70 @@ export class SPaaSCoordinator {
       return json(checkpoint);
     }
 
+    // 2b. Cross-Cloud DR Epoch Handoff (Admin Auth Required)
+    if (path === "/api/v1/dr/epoch-handoff" && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Administrative authorization token required" }, 401);
+      }
+      try {
+        const body = await req.json();
+        const targetEpoch = body.target_epoch !== undefined ? Number(body.target_epoch) : (this.epoch + 1);
+        if (targetEpoch < this.epoch) {
+          return json({
+            error: "STALE_EPOCH",
+            message: `Target epoch ${targetEpoch} cannot be lower than current epoch ${this.epoch}`,
+            current_epoch: this.epoch
+          }, 409);
+        }
+
+        const targetRole = body.target_role || "PRIMARY";
+        const reason = body.reason || "Cross-cloud DR synchronization";
+        this.epoch = targetEpoch;
+        this.sqlExec(`UPDATE meta SET value = ? WHERE key = 'epoch'`, [this.epoch.toString()]);
+        
+        const fencingToken = body.fencing_token || `spaas-epoch-${this.epoch}-${targetRole.toLowerCase()}`;
+        this.role = targetRole;
+
+        // If a checkpoint was pushed into the DO from Cloud Run failback:
+        if (body.checkpoint && typeof body.checkpoint === 'object') {
+          if (Array.isArray(body.checkpoint.nodes)) {
+            for (const n of body.checkpoint.nodes) {
+              const nodeId = n.id || n.node_id;
+              if (nodeId) {
+                const existing = this.sqlExec(`SELECT * FROM nodes WHERE id = ?`, nodeId);
+                if (existing.length === 0) {
+                  this.sqlExec(
+                    `INSERT OR REPLACE INTO nodes (id, name, device_type, public_key, auth_token, state, is_simulated, last_heartbeat, created_at)
+                     VALUES (?, ?, ?, ?, ?, 'Ready', 0, ?, ?)`,
+                    nodeId,
+                    n.name || n.device_model || 'Edge Node',
+                    n.device_type || 'Phone',
+                    n.public_key || 'ed25519_pk',
+                    n.auth_token || 'token_dr',
+                    n.last_heartbeat || n.last_heartbeat_ms || Date.now(),
+                    n.created_at || n.registered_at_ms || Date.now()
+                  );
+                }
+              }
+            }
+          }
+        }
+
+        this.logAudit("DR_EPOCH_HANDOFF", `Handoff to epoch ${this.epoch}, role: ${this.role}, reason: ${reason}`);
+
+        return json({
+          status: "HANDOFF_COMPLETE",
+          role: this.role,
+          epoch: this.epoch,
+          fencing_token: fencingToken,
+          is_authoritative: (this.role === "PRIMARY" || this.role === "ACTIVE_DR"),
+          timestamp_ms: Date.now()
+        });
+      } catch (err) {
+        return json({ error: "BAD_REQUEST", message: err.message }, 400);
+      }
+    }
+
     // 3. Operational Fabric Controls (Admin Auth Required)
     if (path === "/api/v1/fabric/pause" && method === "POST") {
       if (!this.verifyAdminAuth(req)) {

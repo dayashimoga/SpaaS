@@ -214,6 +214,7 @@ pub fn build_router(state: AppState) -> Router {
         // Multi-Cloud Disaster Recovery & Standby Handlers
         .route("/api/v1/dr/status", get(get_dr_status))
         .route("/api/v1/dr/checkpoint", post(ingest_dr_checkpoint))
+        .route("/api/v1/dr/epoch-handoff", post(epoch_handoff))
         .route("/api/v1/dr/activate", post(activate_dr))
         .route("/api/v1/dr/deactivate", post(deactivate_dr))
         // Challenge & Real Verification
