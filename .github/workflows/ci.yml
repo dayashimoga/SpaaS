@@ -48,6 +48,8 @@ jobs:
         with:
           node-version: 20
       - name: Install & Build
+        env:
+          VITE_API_URL: https://spaas-control-plane.dayashimoga.workers.dev
         run: |
           cd apps/web-console
           npm ci
@@ -104,7 +106,18 @@ jobs:
         if: github.ref == 'refs/heads/main' && env.CLOUDFLARE_API_TOKEN != ''
         run: |
           echo "Verifying live Cloudflare Worker control plane health..."
-          curl -f -s https://spaas-control-plane.spaas.workers.dev/health | grep '"status":"healthy"'
+          WORKER_URL="${SPAAS_WORKER_URL:-https://spaas-control-plane.dayashimoga.workers.dev}"
+          for i in 1 2 3 4 5; do
+            RESPONSE=$(curl -f -s "${WORKER_URL}/health" || true)
+            if echo "$RESPONSE" | grep -q '"status":"healthy"'; then
+              echo "Live Cloudflare Worker health verified: $RESPONSE"
+              exit 0
+            fi
+            echo "Waiting for edge propagation (attempt $i/5)..."
+            sleep 3
+          done
+          echo "Failed to verify live health at ${WORKER_URL}"
+          exit 1
 
   cloud-run-standby-pipeline:
     name: Cloud Run Standby DR Pipeline

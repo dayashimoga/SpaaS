@@ -48,9 +48,9 @@ function getApiBase() {
     return 'http://127.0.0.1:8080';
   }
 
-  // 5. When served over HTTPS on a remote domain (e.g. Cloudflare Pages *.pages.dev)
-  if (window.location.protocol === 'https:') {
-    return window.location.origin;
+  // 5. When served over HTTPS on Cloudflare Pages (*.pages.dev) or remote origin
+  if (window.location.hostname.endsWith('pages.dev') || window.location.protocol === 'https:') {
+    return 'https://spaas-control-plane.dayashimoga.workers.dev';
   }
 
   return 'http://127.0.0.1:8080';
