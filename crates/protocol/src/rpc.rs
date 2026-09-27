@@ -182,6 +182,7 @@ pub struct CreatePairingTokenResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PairDeviceRequest {
+    #[serde(alias = "pairing_token")]
     pub pairing_code: String,
     pub device_name: String,
     pub device_type: crate::node::NodeDeviceType,
@@ -479,5 +480,10 @@ mod tests {
         assert!(req.initial_policy.only_on_unmetered_network);
         assert_eq!(req.initial_policy.min_battery_threshold_pct, 40);
         assert_eq!(req.initial_telemetry.battery_pct, 99);
+
+        // Also verify pairing_token alias:
+        let alias_payload = raw_payload.replace("\"pairing_code\": \"SP-9927\"", "\"pairing_token\": \"SP-9927\"");
+        let req_alias: PairDeviceRequest = serde_json::from_str(&alias_payload).expect("Must deserialize pairing_token alias");
+        assert_eq!(req_alias.pairing_code, "SP-9927");
     }
 }
