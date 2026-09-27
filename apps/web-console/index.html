@@ -46,7 +46,7 @@
             <span class="icon">💳</span> Usage &amp; Credits
           </button>
           <button id="nav-advanced" class="nav-item" data-tab="advanced">
-            <span class="icon">⚙️</span> Advanced
+            <span class="icon">🛡️</span> Administration
           </button>
         </nav>
 
@@ -997,6 +997,45 @@
 
           <!-- Advanced Subtab 1: System Health & Recovery -->
           <div id="advtab-view-health" class="advtab-pane active">
+            <!-- Multi-Cloud Architecture & Disaster Recovery Standby Matrix -->
+            <div class="card p-3 mb-4" style="border-left: 4px solid #10B981; background: rgba(16, 185, 129, 0.04);">
+              <div class="flex items-center justify-between mb-2">
+                <div>
+                  <h3 style="display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+                    <span>☁️</span> Multi-Cloud Control Plane &amp; DR Standby
+                  </h3>
+                  <p class="text-sub" style="margin: 0.25rem 0 0 0;">Primary edge coordination via Cloudflare Workers + Durable Objects with cold-standby disaster recovery on Google Cloud Run.</p>
+                </div>
+                <span class="badge badge-success font-mono" id="mc-active-role">PRIMARY: CLOUDFLARE</span>
+              </div>
+              <div class="details-grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: 1rem;">
+                <div style="background: rgba(255, 255, 255, 0.03); padding: 0.75rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.08);">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <strong style="color: #F59E0B;">🟠 Cloudflare Edge (Primary)</strong>
+                    <span class="badge badge-success">ACTIVE</span>
+                  </div>
+                  <div class="spec-list" style="font-size: 0.85rem;">
+                    <div class="spec-row"><span class="spec-label">Runtime:</span> <span class="spec-val">Workers + SQLite Durable Objects</span></div>
+                    <div class="spec-row"><span class="spec-label">Storage:</span> <span class="spec-val">Transactional ctx.storage.sql</span></div>
+                    <div class="spec-row"><span class="spec-label">WebSockets:</span> <span class="spec-val text-emerald">Zero-Cost Hibernation API</span></div>
+                    <div class="spec-row"><span class="spec-label">Current Epoch:</span> <span class="spec-val font-mono" id="mc-cf-epoch">Epoch 1 (Authoritative)</span></div>
+                  </div>
+                </div>
+                <div style="background: rgba(255, 255, 255, 0.03); padding: 0.75rem; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.08);">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <strong style="color: #3B82F6;">🔵 Google Cloud Run (Standby DR)</strong>
+                    <span class="badge badge-secondary" id="mc-gcr-status">COLD STANDBY</span>
+                  </div>
+                  <div class="spec-list" style="font-size: 0.85rem;">
+                    <div class="spec-row"><span class="spec-label">Runtime:</span> <span class="spec-val">Axum Rust Container (0 min-instances)</span></div>
+                    <div class="spec-row"><span class="spec-label">Activation:</span> <span class="spec-val">Operator-Approved / Primary Outage</span></div>
+                    <div class="spec-row"><span class="spec-label">Fencing:</span> <span class="spec-val text-cyan">Monotonic Epoch Tokens</span></div>
+                    <div class="spec-row"><span class="spec-label">Cost Invariant:</span> <span class="spec-val text-emerald">$0.00 while dormant</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div class="details-grid">
               <div class="card">
                 <div class="card-header">

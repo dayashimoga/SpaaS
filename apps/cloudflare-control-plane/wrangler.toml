@@ -1,0 +1,19 @@
+name = "spaas-control-plane"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[durable_objects]
+bindings = [
+  { name = "COORDINATOR", class_name = "SPaaSCoordinator" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SPaaSCoordinator"]
+
+[vars]
+SPAAS_ROLE = "PRIMARY"
+SPAAS_CONTROL_PLANE_EPOCH = "1"
+SPAAS_ENVIRONMENT = "production"
+SPAAS_RATE_LIMIT_RPS = "100"

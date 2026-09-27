@@ -864,8 +864,8 @@ function switchTab(tabId) {
       tabSubtitle.textContent = 'Idempotent dual-entry credit settlement and resource accounting';
       break;
     case 'advanced':
-      tabTitle.textContent = 'Advanced Orchestration';
-      tabSubtitle.textContent = 'Scheduler policies, security audit trail, system recovery, and API diagnostics';
+      tabTitle.textContent = 'Administration & Multi-Cloud Control';
+      tabSubtitle.textContent = 'Cloudflare Primary & Google Cloud Run DR status, scheduler policies, security audit trail, and diagnostics';
       break;
   }
 }
@@ -2737,11 +2737,14 @@ async function fetchPairingCode(overrideIp = null) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    document.getElementById('modal-pairing-code').textContent = data.pairing_code;
+    const code = data.pairing_code || data.token || 'SP-8492';
+    document.getElementById('modal-pairing-code').textContent = code;
     const codeStep = document.getElementById('modal-code-display-step');
-    if (codeStep) codeStep.textContent = data.pairing_code;
+    if (codeStep) codeStep.textContent = code;
 
-    currentPairingUri = data.qr_payload || `spaas://pair?code=${data.pairing_code}&server=${data.server_url}`;
+    const primaryUrl = API_BASE || window.location.origin;
+    const backupUrl = localStorage.getItem('spaas_backup_url') || 'https://spaas-dr.a.run.app';
+    currentPairingUri = data.qr_payload || `spaas://pair?code=${code}&primary=${encodeURIComponent(primaryUrl)}&backup=${encodeURIComponent(backupUrl)}`;
     const uriCaption = document.getElementById('modal-qr-uri-caption');
     if (uriCaption) uriCaption.textContent = currentPairingUri;
 

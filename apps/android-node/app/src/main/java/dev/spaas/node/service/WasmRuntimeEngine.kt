@@ -178,21 +178,65 @@ object WasmRuntimeEngine {
             stdoutStream.write(outBytes, 0, minOf(outBytes.size, config.maxOutputBytes))
             out
         } else if (workloadName.contains("matrix", ignoreCase = true)) {
-            fuelRemaining -= 1_200_000L
+            // Perform real 64x64 float32 matrix multiplication
+            val n = 64
+            val a = FloatArray(n * n) { (it % 10 + 1).toFloat() * 0.1f }
+            val b = FloatArray(n * n) { ((it + 3) % 10 + 1).toFloat() * 0.1f }
+            val c = FloatArray(n * n)
+            var flopCount = 0L
+            for (i in 0 until n) {
+                for (k in 0 until n) {
+                    val aik = a[i * n + k]
+                    for (j in 0 until n) {
+                        c[i * n + j] += aik * b[k * n + j]
+                        flopCount += 2L
+                    }
+                }
+            }
+            var sumSq = 0.0
+            for (v in c) {
+                sumSq += (v * v).toDouble()
+            }
+            val norm = Math.sqrt(sumSq)
+            fuelRemaining -= flopCount * 2L
             val out = "SPaaS WASM Sandbox [Device: $model, Runtime: wasm_wasi]\n" +
-                    "Task: Matrix Multiplication (64x64 float32)\n" +
-                    "Computed Operations: 524,288 FLOPs\n" +
-                    "Result Norm: 1428.5714\n" +
+                    "Task: Matrix Multiplication (${n}x${n} float32)\n" +
+                    "Computed Operations: $flopCount FLOPs\n" +
+                    "Result Norm: ${"%.4f".format(java.util.Locale.US, norm)}\n" +
                     "WASI Status: SUCCESS (exit code 0)\n"
             val outBytes = out.toByteArray(Charsets.UTF_8)
             stdoutStream.write(outBytes, 0, minOf(outBytes.size, config.maxOutputBytes))
             out
         } else if (workloadName.contains("prime", ignoreCase = true)) {
+            // Perform real Sieve of Eratosthenes up to 50,000
+            val limit = 50000
+            val isPrime = BooleanArray(limit + 1) { true }
+            isPrime[0] = false
+            isPrime[1] = false
+            var p = 2
+            while (p * p <= limit) {
+                if (isPrime[p]) {
+                    var multiple = p * p
+                    while (multiple <= limit) {
+                        isPrime[multiple] = false
+                        multiple += p
+                    }
+                }
+                p++
+            }
+            var count = 0
+            var largest = 0
+            for (i in 2..limit) {
+                if (isPrime[i]) {
+                    count++
+                    largest = i
+                }
+            }
             fuelRemaining -= 850_000L
             val out = "SPaaS WASM Sandbox [Device: $model, Runtime: wasm_wasi]\n" +
-                    "Task: Sieve of Eratosthenes (limit: 50,000)\n" +
-                    "Primes Found: 5,133\n" +
-                    "Largest Prime: 49,999\n" +
+                    "Task: Sieve of Eratosthenes (limit: $limit)\n" +
+                    "Primes Found: $count\n" +
+                    "Largest Prime: $largest\n" +
                     "WASI Status: SUCCESS (exit code 0)\n"
             val outBytes = out.toByteArray(Charsets.UTF_8)
             stdoutStream.write(outBytes, 0, minOf(outBytes.size, config.maxOutputBytes))

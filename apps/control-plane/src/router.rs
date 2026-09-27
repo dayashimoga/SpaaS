@@ -211,6 +211,11 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/v1/audit", get(get_audit_log))
         .route("/metrics", get(get_metrics))
+        // Multi-Cloud Disaster Recovery & Standby Handlers
+        .route("/api/v1/dr/status", get(get_dr_status))
+        .route("/api/v1/dr/checkpoint", post(ingest_dr_checkpoint))
+        .route("/api/v1/dr/activate", post(activate_dr))
+        .route("/api/v1/dr/deactivate", post(deactivate_dr))
         // Challenge & Real Verification
         .route(
             "/api/v1/workloads/challenge",

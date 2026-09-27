@@ -45,6 +45,10 @@ pub struct AppState {
     pub is_simulation_active: Arc<std::sync::atomic::AtomicBool>,
     pub pending_node_commands: Arc<RwLock<HashMap<Uuid, spaas_protocol::rpc::NodeRemoteCommand>>>,
     pub started_at_ms: i64,
+    pub role: Arc<RwLock<String>>,
+    pub epoch: Arc<std::sync::atomic::AtomicU64>,
+    pub fencing_token: Arc<RwLock<String>>,
+    pub last_checkpoint_ms: Arc<std::sync::atomic::AtomicI64>,
 }
 
 impl AppState {
@@ -180,6 +184,14 @@ impl AppState {
             kp
         };
 
+        let role_env = std::env::var("SPAAS_ROLE").unwrap_or_else(|_| "PRIMARY".to_string());
+        let epoch_env: u64 = std::env::var("SPAAS_EPOCH")
+            .ok()
+            .and_then(|e| e.parse().ok())
+            .unwrap_or(1);
+        let fencing_token_env = std::env::var("SPAAS_FENCING_TOKEN")
+            .unwrap_or_else(|_| format!("spaas-epoch-{epoch_env}-token"));
+
         Self {
             storage,
             nodes: Arc::new(RwLock::new(recovered.nodes)),
@@ -198,7 +210,30 @@ impl AppState {
             is_simulation_active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             pending_node_commands: Arc::new(RwLock::new(HashMap::new())),
             started_at_ms: chrono::Utc::now().timestamp_millis(),
+            role: Arc::new(RwLock::new(role_env)),
+            epoch: Arc::new(std::sync::atomic::AtomicU64::new(epoch_env)),
+            fencing_token: Arc::new(RwLock::new(fencing_token_env)),
+            last_checkpoint_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
+    }
+
+    pub async fn is_standby(&self) -> bool {
+        let r = self.role.read().await;
+        r.to_uppercase() == "STANDBY"
+    }
+
+    pub async fn is_authoritative(&self) -> bool {
+        let r = self.role.read().await;
+        r.to_uppercase() == "PRIMARY" || r.to_uppercase() == "ACTIVE_DR"
+    }
+
+    pub async fn get_role(&self) -> String {
+        self.role.read().await.clone()
+    }
+
+    pub async fn set_role(&self, new_role: impl Into<String>) {
+        let mut r = self.role.write().await;
+        *r = new_role.into();
     }
 
     pub fn broadcast_event(&self, event_type: &str, data: serde_json::Value) {

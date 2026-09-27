@@ -139,6 +139,14 @@ pub async fn submit_job(
     State(state): State<AppState>,
     Json(mut payload): Json<SubmitJobRequest>,
 ) -> Result<Json<SubmitJobResponse>, (StatusCode, String)> {
+    if state.is_standby().await {
+        return Err((
+            StatusCode::PRECONDITION_FAILED,
+            "Control plane is in STANDBY mode. Cloudflare is authoritative. Activate with POST /api/v1/dr/activate."
+                .to_string(),
+        ));
+    }
+
     // 1. If wasm_binary_base64 is supplied inline, decode it
     let mut inline_wasm_bytes = None;
     if let Some(ref wasm_b64) = payload.wasm_binary_base64 {
@@ -1945,10 +1953,249 @@ pub async fn remove_node(
     }
 }
 
+// -------------------------------------------------------------------------
+// Disaster Recovery & Cold Standby Handlers (Google Cloud Run / Failover)
+// -------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DrStatusResponse {
+    pub role: String,
+    pub epoch: u64,
+    pub fencing_token: String,
+    pub is_authoritative: bool,
+    pub primary_endpoint: String,
+    pub backup_endpoint: String,
+    pub last_checkpoint_ms: i64,
+    pub nodes_count: usize,
+    pub jobs_count: usize,
+}
+
+pub async fn get_dr_status(
+    State(state): State<AppState>,
+) -> Result<Json<DrStatusResponse>, (StatusCode, String)> {
+    let role = state.get_role().await;
+    let epoch = state.epoch.load(Ordering::Relaxed);
+    let fencing_token = state.fencing_token.read().await.clone();
+    let is_auth = state.is_authoritative().await;
+    let last_cp = state.last_checkpoint_ms.load(Ordering::Relaxed);
+    let nodes_count = state.nodes.read().await.len();
+    let jobs_count = state.jobs.read().await.len();
+
+    let primary_endpoint = std::env::var("SPAAS_PRIMARY_URL")
+        .unwrap_or_else(|_| "https://spaas.edge-compute.workers.dev".to_string());
+    let backup_endpoint = std::env::var("SPAAS_BACKUP_URL")
+        .unwrap_or_else(|_| "https://spaas-control-plane-backup.a.run.app".to_string());
+
+    Ok(Json(DrStatusResponse {
+        role,
+        epoch,
+        fencing_token,
+        is_authoritative: is_auth,
+        primary_endpoint,
+        backup_endpoint,
+        last_checkpoint_ms: last_cp,
+        nodes_count,
+        jobs_count,
+    }))
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct IngestCheckpointRequest {
+    pub epoch: u64,
+    pub fencing_token: String,
+    #[serde(default)]
+    pub nodes: Vec<NodeRecord>,
+    #[serde(default)]
+    pub jobs: Vec<JobRecord>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct IngestCheckpointResponse {
+    pub accepted: bool,
+    pub epoch: u64,
+    pub nodes_synced: usize,
+    pub jobs_synced: usize,
+    pub timestamp_ms: i64,
+}
+
+pub async fn ingest_dr_checkpoint(
+    State(state): State<AppState>,
+    Json(payload): Json<IngestCheckpointRequest>,
+) -> Result<Json<IngestCheckpointResponse>, (StatusCode, String)> {
+    let current_epoch = state.epoch.load(Ordering::Relaxed);
+    if payload.epoch < current_epoch {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("Stale checkpoint epoch {} < current epoch {}", payload.epoch, current_epoch),
+        ));
+    }
+
+    state.epoch.store(payload.epoch, Ordering::Relaxed);
+    {
+        let mut ft = state.fencing_token.write().await;
+        *ft = payload.fencing_token;
+    }
+
+    let nodes_count = payload.nodes.len();
+    let jobs_count = payload.jobs.len();
+
+    // Ingest nodes into memory and persistence
+    {
+        let mut nodes = state.nodes.write().await;
+        for node in payload.nodes {
+            let id = node.node_id;
+            nodes.insert(id, node.clone());
+            let _ = state.storage.append_event(WalEvent::UpsertNode { node }).await;
+        }
+    }
+
+    // Ingest jobs into memory and persistence
+    {
+        let mut jobs = state.jobs.write().await;
+        for job in payload.jobs {
+            let id = job.job_id;
+            jobs.insert(id, job.clone());
+            let _ = state.storage.append_event(WalEvent::UpsertJob { job }).await;
+        }
+    }
+
+    let now = chrono::Utc::now().timestamp_millis();
+    state.last_checkpoint_ms.store(now, Ordering::Relaxed);
+
+    state.broadcast_event(
+        "DR_CHECKPOINT_INGESTED",
+        serde_json::json!({
+            "epoch": payload.epoch,
+            "nodes_synced": nodes_count,
+            "jobs_synced": jobs_count,
+            "timestamp_ms": now,
+        }),
+    );
+
+    Ok(Json(IngestCheckpointResponse {
+        accepted: true,
+        epoch: payload.epoch,
+        nodes_synced: nodes_count,
+        jobs_synced: jobs_count,
+        timestamp_ms: now,
+    }))
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct ActivateDrRequest {
+    pub operator_secret: Option<String>,
+    pub target_epoch: Option<u64>,
+    pub reason: Option<String>,
+}
+
+pub async fn activate_dr(
+    State(state): State<AppState>,
+    Json(payload): Json<ActivateDrRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let expected_secret = std::env::var("SPAAS_DR_OPERATOR_SECRET").unwrap_or_default();
+    if !expected_secret.is_empty() {
+        let provided = payload.operator_secret.as_deref().unwrap_or("");
+        if provided != expected_secret {
+            return Err((StatusCode::UNAUTHORIZED, "Invalid operator secret".into()));
+        }
+    }
+
+    let current_epoch = state.epoch.load(Ordering::Relaxed);
+    let new_epoch = payload.target_epoch.unwrap_or(current_epoch + 1);
+    state.epoch.store(new_epoch, Ordering::Relaxed);
+
+    let new_token = format!("spaas-epoch-{new_epoch}-gcr-active");
+    {
+        let mut ft = state.fencing_token.write().await;
+        *ft = new_token.clone();
+    }
+    state.set_role("ACTIVE_DR").await;
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let reason = payload.reason.unwrap_or_else(|| "Operator initiated failover to Cloud Run DR standby".into());
+
+    let audit = AuditRecord {
+        timestamp_ms: now,
+        event_type: "DR_FAILOVER_ACTIVATED".into(),
+        entity_id: "CONTROL_PLANE".into(),
+        details: serde_json::json!({
+            "epoch": new_epoch,
+            "fencing_token": new_token,
+            "reason": reason,
+        })
+        .to_string(),
+    };
+    let _ = state.storage.append_event(WalEvent::AppendAudit { record: audit.clone() }).await;
+    {
+        let mut log = state.audit_log.write().await;
+        log.push(audit);
+    }
+
+    state.broadcast_event(
+        "DR_FAILOVER_ACTIVATED",
+        serde_json::json!({
+            "role": "ACTIVE_DR",
+            "epoch": new_epoch,
+            "fencing_token": new_token,
+            "activated_at_ms": now,
+        }),
+    );
+
+    Ok(Json(serde_json::json!({
+        "status": "ACTIVATED",
+        "role": "ACTIVE_DR",
+        "epoch": new_epoch,
+        "fencing_token": new_token,
+        "is_authoritative": true,
+        "activated_at_ms": now,
+        "message": "Google Cloud Run control plane is now AUTHORITATIVE."
+    })))
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct DeactivateDrRequest {
+    pub operator_secret: Option<String>,
+}
+
+pub async fn deactivate_dr(
+    State(state): State<AppState>,
+    Json(payload): Json<DeactivateDrRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let expected_secret = std::env::var("SPAAS_DR_OPERATOR_SECRET").unwrap_or_default();
+    if !expected_secret.is_empty() {
+        let provided = payload.operator_secret.as_deref().unwrap_or("");
+        if provided != expected_secret {
+            return Err((StatusCode::UNAUTHORIZED, "Invalid operator secret".into()));
+        }
+    }
+
+    state.set_role("STANDBY").await;
+    let epoch = state.epoch.load(Ordering::Relaxed);
+    let now = chrono::Utc::now().timestamp_millis();
+
+    state.broadcast_event(
+        "DR_FAILBACK_STANDBY",
+        serde_json::json!({
+            "role": "STANDBY",
+            "epoch": epoch,
+            "deactivated_at_ms": now,
+        }),
+    );
+
+    Ok(Json(serde_json::json!({
+        "status": "STANDBY",
+        "role": "STANDBY",
+        "epoch": epoch,
+        "is_authoritative": false,
+        "message": "Google Cloud Run control plane returned to cold STANDBY."
+    })))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use spaas_protocol::node::*;
+    use spaas_protocol::workload::*;
     use tempfile::tempdir;
 
     #[tokio::test]
@@ -2207,5 +2454,121 @@ mod tests {
             .0;
         assert_eq!(remove_res["removed"], true);
         assert_eq!(state.nodes.read().await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_dr_standby_and_activation_lifecycle() {
+        let dir = tempdir().unwrap();
+        let state = AppState::new(dir.path());
+
+        // 1. Initial status: PRIMARY
+        let status = get_dr_status(State(state.clone())).await.unwrap().0;
+        assert_eq!(status.role, "PRIMARY");
+        assert!(status.is_authoritative);
+        assert_eq!(status.epoch, 1);
+
+        // 2. Set to STANDBY mode
+        state.set_role("STANDBY").await;
+        let standby_status = get_dr_status(State(state.clone())).await.unwrap().0;
+        assert_eq!(standby_status.role, "STANDBY");
+        assert!(!standby_status.is_authoritative);
+
+        // 3. In Standby mode, submitting a job must be rejected with PRECONDITION_FAILED
+        let spec = WorkloadSpec {
+            workload_id: Uuid::new_v4(),
+            spec_version: "1.0.0".into(),
+            name: "standby_rejection_test".into(),
+            runtime: spaas_protocol::workload::RuntimeType::WasmWasi,
+            artifact_sha256: "hash".into(),
+            artifact_size_bytes: 10,
+            artifact_uri: "memory://".into(),
+            entrypoint: "_start".into(),
+            args: vec![],
+            env_vars: vec![],
+            limits: ResourceLimits::default(),
+            network_policy: NetworkPolicy::None,
+            required_capabilities: RequiredCapabilities::default(),
+            dimension_weights: Default::default(),
+            retry_policy: RetryPolicy::default(),
+            verification_policy: VerificationPolicy::SingleNode,
+            priority: WorkloadPriority::Normal,
+            submitter_signature: "".into(),
+            submitter_pubkey: "".into(),
+            created_at_ms: 1000,
+            ..Default::default()
+        };
+        let job_req = SubmitJobRequest {
+            spec,
+            wasm_binary_base64: None,
+        };
+        let err = submit_job(State(state.clone()), Json(job_req.clone())).await.unwrap_err();
+        assert_eq!(err.0, StatusCode::PRECONDITION_FAILED);
+        assert!(err.1.contains("STANDBY mode"));
+
+        // 4. Ingest checkpoint at epoch 1
+        let checkpoint_node = NodeRecord {
+            node_id: Uuid::new_v4(),
+            public_key: "cp_node_pubkey".into(),
+            device_type: NodeDeviceType::AndroidSmartphone,
+            enrollment: EnrollmentStatus::Enrolled,
+            state: NodeState::Idle,
+            capabilities: NodeHardwareCapabilities::default(),
+            telemetry: NodeTelemetry::default(),
+            policy: ProviderPolicy::default(),
+            qualification: None,
+            enrolled_at_ms: 1000,
+            last_heartbeat_ms: 1000,
+            region: "us-east".into(),
+            is_simulated: false,
+        };
+        let cp_req = IngestCheckpointRequest {
+            epoch: 1,
+            fencing_token: "spaas-epoch-1-cf-primary".into(),
+            nodes: vec![checkpoint_node.clone()],
+            jobs: vec![],
+        };
+        let cp_res = ingest_dr_checkpoint(State(state.clone()), Json(cp_req)).await.unwrap().0;
+        assert!(cp_res.accepted);
+        assert_eq!(cp_res.nodes_synced, 1);
+        assert_eq!(state.nodes.read().await.len(), 1);
+
+        // 5. Stale checkpoint (epoch 0 < current epoch 1) must be rejected with CONFLICT
+        let stale_cp = IngestCheckpointRequest {
+            epoch: 0,
+            fencing_token: "stale_token".into(),
+            nodes: vec![],
+            jobs: vec![],
+        };
+        let stale_err = ingest_dr_checkpoint(State(state.clone()), Json(stale_cp)).await.unwrap_err();
+        assert_eq!(stale_err.0, StatusCode::CONFLICT);
+
+        // 6. Activate DR (operator failover)
+        let act_req = ActivateDrRequest {
+            operator_secret: None,
+            target_epoch: Some(2),
+            reason: Some("Primary Cloudflare outage simulation".into()),
+        };
+        let act_res = activate_dr(State(state.clone()), Json(act_req)).await.unwrap().0;
+        assert_eq!(act_res["status"], "ACTIVATED");
+        assert_eq!(act_res["role"], "ACTIVE_DR");
+        assert_eq!(act_res["epoch"], 2);
+
+        // 7. Verify control plane is now authoritative
+        assert!(state.is_authoritative().await);
+        assert!(!state.is_standby().await);
+
+        // 8. Now submit_job must not be rejected with PRECONDITION_FAILED
+        let submit_res = submit_job(State(state.clone()), Json(job_req)).await;
+        if let Err((code, _)) = submit_res {
+            assert_ne!(code, StatusCode::PRECONDITION_FAILED);
+        }
+
+        // 9. Deactivate DR (operator failback)
+        let deact_req = DeactivateDrRequest {
+            operator_secret: None,
+        };
+        let deact_res = deactivate_dr(State(state.clone()), Json(deact_req)).await.unwrap().0;
+        assert_eq!(deact_res["status"], "STANDBY");
+        assert!(state.is_standby().await);
     }
 }

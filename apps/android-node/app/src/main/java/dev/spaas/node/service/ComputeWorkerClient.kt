@@ -23,7 +23,9 @@ object ComputeWorkerClient {
         DISCONNECTED
     }
 
-    var serverBaseUrl: String = if (isRunningInEmulator()) "http://10.0.2.2:8080" else "http://192.168.0.111:8080"
+    var primaryServerUrl: String = if (isRunningInEmulator()) "http://10.0.2.2:8080" else ""
+    var backupServerUrl: String = ""
+    var serverBaseUrl: String = if (primaryServerUrl.isNotBlank()) primaryServerUrl else if (isRunningInEmulator()) "http://10.0.2.2:8080" else ""
     var pairedNodeId: String? = null
     var authToken: String? = null
     var isPaired: Boolean = false
@@ -31,6 +33,7 @@ object ComputeWorkerClient {
 
     var connectionState: ConnectionState = ConnectionState.DISCONNECTED
     var consecutiveHeartbeatFailures: Int = 0
+    var heartbeatSuccessCount: Int = 0
     const val MAX_RECONNECT_ATTEMPTS: Int = 20
 
     fun calculateBackoffDelayMs(failures: Int): Long {
@@ -41,6 +44,12 @@ object ComputeWorkerClient {
 
     fun handleHeartbeatFailure() {
         consecutiveHeartbeatFailures++
+        // Dynamic Disaster Recovery Failover: If Primary fails 3 consecutive times, failover to Backup (Cloud Run)
+        if (consecutiveHeartbeatFailures >= 3 && backupServerUrl.isNotBlank() && serverBaseUrl != backupServerUrl) {
+            android.util.Log.w("ComputeWorkerClient", "[DR FAILOVER] Primary endpoint ($serverBaseUrl) failed 3 times; switching active endpoint to Backup: $backupServerUrl")
+            serverBaseUrl = backupServerUrl
+            consecutiveHeartbeatFailures = 0
+        }
         connectionState = if (consecutiveHeartbeatFailures >= MAX_RECONNECT_ATTEMPTS) {
             ConnectionState.DISCONNECTED
         } else {
@@ -56,14 +65,25 @@ object ComputeWorkerClient {
         val prefs = context.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE)
         val savedNodeId = prefs.getString("paired_node_id", null)
         val savedToken = prefs.getString("auth_token", null)
+        val savedPrimary = prefs.getString("primary_server_url", null)
+        val savedBackup = prefs.getString("backup_server_url", null)
         val savedUrl = prefs.getString("server_base_url", null)
         val privB64 = prefs.getString("private_key_b64", null)
         val pubB64 = prefs.getString("public_key_b64", null)
         val algorithm = prefs.getString("key_algorithm", "Ed25519") ?: "Ed25519"
 
+        if (!savedPrimary.isNullOrBlank()) {
+            primaryServerUrl = savedPrimary
+        }
+        if (!savedBackup.isNullOrBlank()) {
+            backupServerUrl = savedBackup
+        }
         if (!savedUrl.isNullOrBlank()) {
             serverBaseUrl = savedUrl
+        } else if (primaryServerUrl.isNotBlank()) {
+            serverBaseUrl = primaryServerUrl
         }
+
         if (savedNodeId != null && savedToken != null) {
             pairedNodeId = savedNodeId
             authToken = savedToken
@@ -94,6 +114,8 @@ object ComputeWorkerClient {
             prefs.edit()
                 .putString("paired_node_id", pairedNodeId)
                 .putString("auth_token", authToken)
+                .putString("primary_server_url", primaryServerUrl)
+                .putString("backup_server_url", backupServerUrl)
                 .putString("server_base_url", serverBaseUrl)
                 .putString("private_key_b64", privB64)
                 .putString("public_key_b64", pubB64)
@@ -222,11 +244,22 @@ object ComputeWorkerClient {
                 val parsedUri = android.net.Uri.parse(uriStr)
                 parsedUri.getQueryParameter("code")?.let { cleanCode = it.trim().uppercase() }
                 val emuParam = parsedUri.getQueryParameter("emu")
-                val srvParam = parsedUri.getQueryParameter("server")
+                val primaryParam = parsedUri.getQueryParameter("primary") ?: parsedUri.getQueryParameter("server")
+                val backupParam = parsedUri.getQueryParameter("backup")
+
+                if (!primaryParam.isNullOrBlank()) {
+                    primaryServerUrl = primaryParam.trimEnd('/')
+                }
+                if (!backupParam.isNullOrBlank()) {
+                    backupServerUrl = backupParam.trimEnd('/')
+                }
+
                 cleanUrl = if (isRunningInEmulator() && !emuParam.isNullOrBlank()) {
                     emuParam.trimEnd('/')
-                } else if (!srvParam.isNullOrBlank()) {
-                    srvParam.trimEnd('/')
+                } else if (primaryServerUrl.isNotBlank()) {
+                    primaryServerUrl
+                } else if (!primaryParam.isNullOrBlank()) {
+                    primaryParam.trimEnd('/')
                 } else {
                     cleanUrl
                 }
@@ -374,7 +407,24 @@ object ComputeWorkerClient {
             val ok = conn.responseCode in 200..299
             if (ok) {
                 consecutiveHeartbeatFailures = 0
+                heartbeatSuccessCount++
                 connectionState = ConnectionState.CONNECTED
+
+                // Periodic Disaster Recovery Failback Probe:
+                // If currently operating on backupServerUrl, test if primaryServerUrl is back online every 10 heartbeats
+                if (serverBaseUrl == backupServerUrl && primaryServerUrl.isNotBlank() && heartbeatSuccessCount % 10 == 0) {
+                    try {
+                        val probe = URL("$primaryServerUrl/health")
+                        val pconn = probe.openConnection() as HttpURLConnection
+                        pconn.connectTimeout = 3000
+                        pconn.readTimeout = 3000
+                        if (pconn.responseCode in 200..299) {
+                            android.util.Log.i("ComputeWorkerClient", "[DR FAILBACK] Primary control plane ($primaryServerUrl) is back online; failing back.")
+                            serverBaseUrl = primaryServerUrl
+                        }
+                    } catch (_: Throwable) {}
+                }
+
                 try {
                     val respText = conn.inputStream.bufferedReader().use { it.readText() }
                     val respObj = JSONObject(respText)

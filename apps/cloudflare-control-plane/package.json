@@ -1,0 +1,18 @@
+{
+  "name": "spaas-cloudflare-control-plane",
+  "version": "0.1.0",
+  "description": "SPaaS Universal Edge Compute Fabric — Primary Cloudflare Worker & SQLite Durable Object Control Plane",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test tests/coordinator.test.js"
+  },
+  "keywords": ["spaas", "edge-compute", "cloudflare-workers", "durable-objects", "sqlite"],
+  "author": "SPaaS Architecture Team <team@spaas.dev>",
+  "license": "Apache-2.0 OR MIT",
+  "devDependencies": {
+    "wrangler": "^4.86.0"
+  }
+}

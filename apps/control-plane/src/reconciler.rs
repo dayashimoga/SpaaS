@@ -16,6 +16,11 @@ pub async fn run_reconciler_loop(state: AppState) {
     loop {
         interval.tick().await;
 
+        if state.is_standby().await {
+            // Dormant cold standby mode: do not schedule or expire leases
+            continue;
+        }
+
         let now = chrono::Utc::now().timestamp_millis();
         let timeout_thresh = now - 20_000; // 20s heartbeat timeout
 
