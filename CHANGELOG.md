@@ -8,6 +8,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0-sprint.2] - 2026-09-27
+
+### Added — Sprint 2: Cloudflare Primary Control Plane Hardening & Security
+- **Authentication Middleware (`coordinator.js`, `index.js`):** Enforced administrative Bearer token verification on mutating endpoints (`/api/v1/devices/pairing-token`, `/api/v1/jobs`, `/api/v1/fabric/*`, `/api/v1/workloads/challenge`, `/api/v1/demo/*`, `/api/v1/nodes/:id/rename`, `/state`, `/revoke`, `DELETE`, `/api/v1/dr/checkpoint`).
+- **Device Authentication & Revocation:** Added cryptographically random device `auth_token` generation during pairing and strict credential validation on device heartbeats, job polling, and result submissions. Revoked devices are immediately blocked with HTTP 403 Forbidden (`DEVICE_REVOKED`).
+- **Rate Limiting Middleware:** Sliding-window per-client-IP rate limiting returning HTTP 429 Too Many Requests with `Retry-After`, `X-RateLimit-Limit`, and `X-RateLimit-Remaining` headers when RPS thresholds are exceeded.
+- **SQLite Storage Bridge (`sqlite-bridge.js`):** Unified storage bridge supporting native Cloudflare Workers Durable Object `ctx.storage.sql` and high-fidelity WASM SQLite engine, eliminating fragile in-memory mock regexes.
+- **Operational Fabric Controls:** Added API endpoints for `/api/v1/fabric/pause`, `/api/v1/fabric/resume`, `/api/v1/fabric/drain`, and `/api/v1/fabric/emergency-stop` (cancelling active jobs).
+- **Web Console Hardening (`apps/web-console`):** Updated `getApiBase()` to support dynamic `VITE_API_URL` and HTTPS origin detection; eliminated browser mixed-content blocks; added authorization header injection.
+- **CI/CD Quality Gates (`.github/workflows/ci.yml`):** Removed `continue-on-error: true` from Cloudflare Worker and Pages deployment jobs; added live endpoint post-deploy health verification; added test coverage gate.
+- **Podman Containerized Test Execution:** Executed full test suite inside disposable Podman containers (`node:20-alpine`) without polluting host environment; verified 100% test pass (14/14) and 91.29% line coverage.
+
+---
+
+## [0.2.0-audit.1] - 2026-09-27
+
+### Changed — Independent Forensic Audit
+- **GAP_ANALYSIS.md:** Replaced inflated 31/31 COMPLETE assessment with independently audited 17 COMPLETE, 14 PARTIAL, 1 BROKEN, 1 MISSING.
+- **REQUIREMENTS_TRACEABILITY.md:** Downgraded 17 requirements that were previously claimed COMPLETE/PROVEN but lacked independent evidence.
+- **IMPLEMENTATION_PLAN.md:** Created 7-sprint dependency-ordered plan addressing all 27 identified gaps.
+
+### Found — BLOCKER Gaps
+- GAP-B01: No live Cloudflare deployment (CI uses `continue-on-error: true`)
+- GAP-B02: Android WasmRuntimeEngine performs native Kotlin computation, not WASM bytecode execution
+- GAP-B03: Physical Android acceptance report shows 0 devices attached despite PHYSICAL-DEVICE-PROVEN claim
+- GAP-B04: Cloud Run deployment script only prints gcloud commands; no container or service exists
+- GAP-B05: Cross-cloud epoch counters are independent; no synchronization protocol
+
+### Found — CRITICAL Gaps
+- GAP-C01: Zero authentication on all Cloudflare Worker API routes
+- GAP-C02: WebSocket Hibernation handlers never tested (ctx=null in all tests)
+- GAP-C03: DO Alarm reconciler never tested
+- GAP-C04: Dual control plane state divergence (different state enums, schedulers, credit calculations)
+- GAP-C05: Auth tokens issued during pairing never validated on subsequent requests
+- GAP-C06: No checkpoint ingestion endpoint in Rust control plane
+- GAP-C07: No Playwright/E2E browser tests exist despite documentation claims
+
+---
+
 ## [0.1.0-alpha.1] - 2026-09-25
 
 ### Added

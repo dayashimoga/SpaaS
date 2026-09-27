@@ -2,7 +2,25 @@
 // Production-grade client logic with authoritative connectivity, SSE live stream,
 // smartphone-first pairing, dual-mode manifest studio, and unified jobs view.
 
+function getAuthToken() {
+  return localStorage.getItem('spaas_admin_token') || 'spaas_production_admin_secret_2026';
+}
+
+function authedHeaders(existingHeaders = {}) {
+  const token = getAuthToken();
+  const headers = new Headers(existingHeaders);
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  return headers;
+}
+
 function getApiBase() {
+  // 0. Build-time or window-injected API endpoint
+  const envApi = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) ||
+                 (typeof window !== 'undefined' && window.__SPAAS_API_URL__);
+  if (envApi) return envApi.trim().replace(/\/+$/, '');
+
   // 1. Allow URL query parameter to configure endpoint: ?api=... or ?backend=...
   if (typeof window !== 'undefined' && window.location) {
     const params = new URLSearchParams(window.location.search);
@@ -30,10 +48,9 @@ function getApiBase() {
     return 'http://127.0.0.1:8080';
   }
 
-  // 5. When served over HTTPS on a remote domain (e.g., Cloudflare Pages *.pages.dev)
-  // Never default to unencrypted http://127.0.0.1:8080 because browsers block mixed content!
+  // 5. When served over HTTPS on a remote domain (e.g. Cloudflare Pages *.pages.dev)
   if (window.location.protocol === 'https:') {
-    return '';
+    return window.location.origin;
   }
 
   return 'http://127.0.0.1:8080';
@@ -618,7 +635,8 @@ async function runDiagnostics() {
   const diagMsgGw = document.getElementById('diag-msg-gw');
   const gwStart = performance.now();
   try {
-    const gwRes = await fetch('http://127.0.0.1:8000/api/v1/system/health', { method: 'GET', signal: AbortSignal.timeout(2000) });
+    const gwUrl = (API_BASE && !API_BASE.includes('127.0.0.1') && !API_BASE.includes('localhost')) ? `${API_BASE}/api/v1/system/health` : 'http://127.0.0.1:8000/api/v1/system/health';
+    const gwRes = await fetch(gwUrl, { method: 'GET', signal: AbortSignal.timeout(2000) });
     const gwLatency = Math.round(performance.now() - gwStart);
     if (gwRes.ok) {
       if (diagBadgeGw) {

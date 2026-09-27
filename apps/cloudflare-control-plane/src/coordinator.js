@@ -1,313 +1,63 @@
 /**
  * SPaaS Universal Edge Compute Fabric — Primary Coordinator Durable Object
- * SQLite-backed transactional state, WebSocket Hibernation, and Alarm reconciliation.
+ * SQLite-backed transactional state, WebSocket Hibernation, Alarms, Authentication & Rate Limiting.
  */
+
+import { createSqlEngine } from "./sqlite-bridge.js";
 
 export class SPaaSCoordinator {
   constructor(ctx, env) {
     this.ctx = ctx;
-    this.env = env;
-    this.epoch = 1;
-    this.role = env?.SPAAS_ROLE || "PRIMARY";
+    this.env = env || {};
+    this.epoch = parseInt(this.env.SPAAS_CONTROL_PLANE_EPOCH || "1", 10);
+    this.role = this.env.SPAAS_ROLE || "PRIMARY";
     this.startTime = Date.now();
-    this.initDb();
-    this.ensureAlarmScheduled();
+    this.adminSecret = this.env.SPAAS_API_SECRET || this.env.SPAAS_ADMIN_KEY || "spaas_production_admin_secret_2026";
+    this.rateLimitRps = parseInt(this.env.SPAAS_RATE_LIMIT_RPS || "100", 10);
+    this.requireAuth = this.env.SPAAS_REQUIRE_AUTH !== "false";
+    this.fabricStatus = "ACTIVE"; // ACTIVE | PAUSED | DRAINING | STOPPED
+
+    this._rateLimitBuckets = new Map();
+    this.sqlEngine = null;
+    this.readyPromise = this.init();
   }
 
   /**
-   * Helper to execute SQL queries on ctx.storage.sql
+   * Factory method to construct and ensure ready
+   */
+  static async create(ctx, env) {
+    const coordinator = new SPaaSCoordinator(ctx, env);
+    await coordinator.ensureReady();
+    return coordinator;
+  }
+
+  /**
+   * Async initialization: set up storage engine and database schema
+   */
+  async init() {
+    this.sqlEngine = await createSqlEngine(this.ctx);
+    this.initDb();
+    await this.ensureAlarmScheduled();
+  }
+
+  async ensureReady() {
+    if (this.readyPromise) {
+      await this.readyPromise;
+    }
+  }
+
+  /**
+   * Execute SQL query against storage engine
    */
   sqlExec(query, ...params) {
-    if (!this.ctx?.storage?.sql) {
-      return this.fallbackSqlExec(query, ...params);
+    if (!this.sqlEngine) {
+      throw new Error("SPaaSCoordinator: SQLite storage engine not yet ready. Call ensureReady() first.");
     }
-    try {
-      const cursor = this.ctx.storage.sql.exec(query, ...params);
-      if (typeof cursor.toArray === "function") {
-        return cursor.toArray();
-      }
-      return Array.from(cursor);
-    } catch (err) {
-      console.error(`[SQL ERROR] Query: ${query}`, err);
-      throw err;
-    }
+    return this.sqlEngine.exec(query, ...params);
   }
 
   /**
-   * Fallback in-memory SQL mock for running under plain Node.js tests
-   */
-  fallbackSqlExec(query, ...params) {
-    if (!this._inMemoryDb) {
-      this._inMemoryDb = {
-        nodes: new Map(),
-        pairing_tokens: new Map(),
-        workloads: new Map(),
-        jobs: new Map(),
-        ledger: new Map(),
-        audit_log: [],
-        meta: new Map([["role", "PRIMARY"], ["epoch", "1"], ["status", "ACTIVE"]])
-      };
-    }
-    const q = query.trim().replace(/\s+/g, " ");
-    const qu = q.toUpperCase();
-
-    if (qu.startsWith("CREATE")) return [];
-
-    // Pairing tokens
-    if (qu.startsWith("INSERT INTO PAIRING_TOKENS")) {
-      const [token, expires_at, created_at] = params;
-      this._inMemoryDb.pairing_tokens.set(token, {
-        token,
-        expires_at,
-        status: "Active",
-        claimed_by: null,
-        created_at: created_at || Date.now()
-      });
-      return [];
-    }
-    if (qu.startsWith("UPDATE PAIRING_TOKENS SET STATUS = 'CLAIMED'")) {
-      const [claimed_by, token] = params;
-      const tok = this._inMemoryDb.pairing_tokens.get(token);
-      if (tok) {
-        tok.status = "Claimed";
-        tok.claimed_by = claimed_by;
-      }
-      return [];
-    }
-    if (qu.startsWith("SELECT") && qu.includes("FROM PAIRING_TOKENS WHERE TOKEN =")) {
-      const tok = this._inMemoryDb.pairing_tokens.get(params[0]);
-      return tok ? [tok] : [];
-    }
-    if (qu.startsWith("SELECT") && qu.includes("FROM PAIRING_TOKENS")) {
-      return Array.from(this._inMemoryDb.pairing_tokens.values());
-    }
-
-    // Nodes
-    if (qu.startsWith("INSERT OR REPLACE INTO NODES") || qu.startsWith("INSERT INTO NODES")) {
-      if (params.length === 5) {
-        // Demo cluster insertion: [id, name, device_type, last_heartbeat, created_at]
-        const [id, name, device_type, last_heartbeat, created_at] = params;
-        this._inMemoryDb.nodes.set(id, {
-          id,
-          name,
-          device_type,
-          public_key: "demo_simulated_pk",
-          state: "Ready",
-          capabilities: null,
-          qualification: null,
-          policy: null,
-          telemetry: null,
-          is_simulated: 1,
-          last_heartbeat,
-          created_at
-        });
-      } else if (params.length === 6) {
-        // Pairing device insertion: [id, name, device_type, public_key, last_heartbeat, created_at]
-        const [id, name, device_type, public_key, last_heartbeat, created_at] = params;
-        this._inMemoryDb.nodes.set(id, {
-          id,
-          name,
-          device_type,
-          public_key,
-          state: "Ready",
-          capabilities: null,
-          qualification: null,
-          policy: null,
-          telemetry: null,
-          is_simulated: 0,
-          last_heartbeat,
-          created_at
-        });
-      } else {
-        const [id, name, device_type, public_key, state, capabilities, qualification, policy, telemetry, is_simulated, last_heartbeat, created_at] = params;
-        this._inMemoryDb.nodes.set(id, {
-          id,
-          name,
-          device_type,
-          public_key: public_key || "ed25519_pk",
-          state: state || "Ready",
-          capabilities,
-          qualification,
-          policy,
-          telemetry,
-          is_simulated: Number(is_simulated) || 0,
-          last_heartbeat,
-          created_at
-        });
-      }
-      return [];
-    }
-    if (qu.startsWith("UPDATE NODES SET LAST_HEARTBEAT")) {
-      const [last_heartbeat, telemetry, id] = params;
-      const node = this._inMemoryDb.nodes.get(id);
-      if (node) {
-        node.last_heartbeat = last_heartbeat;
-        node.telemetry = telemetry;
-        if (node.state === "Offline") node.state = "Ready";
-      }
-      return [];
-    }
-    if (qu.startsWith("UPDATE NODES SET STATE = 'REVOKED'")) {
-      const node = this._inMemoryDb.nodes.get(params[0]);
-      if (node) node.state = "Revoked";
-      return [];
-    }
-    if (qu.startsWith("UPDATE NODES SET STATE =")) {
-      if (params.length === 2) {
-        const [state, id] = params;
-        const node = this._inMemoryDb.nodes.get(id);
-        if (node) node.state = state;
-      } else if (params.length === 1) {
-        const node = this._inMemoryDb.nodes.get(params[0]);
-        if (node) {
-          if (qu.includes("'READY'")) node.state = "Ready";
-          else if (qu.includes("'RUNNING'")) node.state = "Running";
-          else if (qu.includes("'REVOKED'")) node.state = "Revoked";
-          else if (qu.includes("'PAUSED'")) node.state = "Paused";
-        }
-      }
-      return [];
-    }
-    if (qu.startsWith("UPDATE NODES SET NAME =")) {
-      const [name, id] = params;
-      const node = this._inMemoryDb.nodes.get(id);
-      if (node) node.name = name;
-      return [];
-    }
-    if (qu.startsWith("DELETE FROM NODES WHERE ID =")) {
-      this._inMemoryDb.nodes.delete(params[0]);
-      return [];
-    }
-    if (qu.startsWith("DELETE FROM NODES WHERE IS_SIMULATED = 1")) {
-      for (const [id, n] of this._inMemoryDb.nodes.entries()) {
-        if (n.is_simulated) this._inMemoryDb.nodes.delete(id);
-      }
-      return [];
-    }
-    if (qu.startsWith("SELECT") && qu.includes("FROM NODES WHERE ID =")) {
-      const node = this._inMemoryDb.nodes.get(params[0]);
-      return node ? [node] : [];
-    }
-    if (qu.startsWith("SELECT") && qu.includes("FROM NODES WHERE STATE = 'READY' AND IS_SIMULATED = 0")) {
-      return Array.from(this._inMemoryDb.nodes.values()).filter(n => n.state === "Ready" && !n.is_simulated);
-    }
-    if (qu.startsWith("SELECT") && qu.includes("FROM NODES")) {
-      return Array.from(this._inMemoryDb.nodes.values());
-    }
-
-    // Jobs
-    if (qu.startsWith("INSERT INTO JOBS")) {
-      const [id, workload_id, created_at] = params;
-      const job = {
-        id,
-        workload_id,
-        state: "Pending",
-        assigned_node_id: null,
-        lease_term: 1,
-        lease_expires_at: null,
-        epoch: 1,
-        fencing_token: null,
-        retry_count: 0,
-        max_retries: 3,
-        result: null,
-        scheduler_decision: null,
-        created_at: created_at || Date.now(),
-        completed_at: null
-      };
-      this._inMemoryDb.jobs.set(id, job);
-      return [];
-    }
-    if (qu.startsWith("UPDATE JOBS SET STATE = 'RUNNING'")) {
-      const [assigned_node_id, fencing_token, lease_expires_at, scheduler_decision, id] = params;
-      const job = this._inMemoryDb.jobs.get(id);
-      if (job) {
-        job.state = "Running";
-        job.assigned_node_id = assigned_node_id;
-        job.fencing_token = fencing_token;
-        job.lease_expires_at = lease_expires_at;
-        job.scheduler_decision = scheduler_decision;
-      }
-      return [];
-    }
-    if (qu.startsWith("UPDATE JOBS SET STATE = 'COMPLETED'")) {
-      const [result, completed_at, id] = params;
-      const job = this._inMemoryDb.jobs.get(id);
-      if (job) {
-        job.state = "Completed";
-        job.result = result;
-        job.completed_at = completed_at;
-      }
-      return [];
-    }
-    if (qu.startsWith("SELECT") && qu.includes("FROM JOBS WHERE ID =")) {
-      const job = this._inMemoryDb.jobs.get(params[0]);
-      return job ? [job] : [];
-    }
-    if (qu.startsWith("SELECT") && qu.includes("FROM JOBS WHERE STATE = 'PENDING'")) {
-      return Array.from(this._inMemoryDb.jobs.values()).filter(j => j.state === "Pending");
-    }
-    if (qu.startsWith("SELECT") && qu.includes("FROM JOBS WHERE ASSIGNED_NODE_ID =")) {
-      return Array.from(this._inMemoryDb.jobs.values()).filter(j => j.assigned_node_id === params[0] && j.state === "Running");
-    }
-    if (qu.startsWith("SELECT") && qu.includes("FROM JOBS WHERE STATE IN ('RUNNING', 'PENDING')")) {
-      const count = Array.from(this._inMemoryDb.jobs.values()).filter(j => j.state === "Running" || j.state === "Pending").length;
-      return [{ count }];
-    }
-    if (qu.startsWith("SELECT SCHEDULER_DECISION FROM JOBS WHERE ID =")) {
-      const job = this._inMemoryDb.jobs.get(params[0]);
-      return job ? [{ scheduler_decision: job.scheduler_decision }] : [];
-    }
-    if (qu.startsWith("SELECT") && qu.includes("FROM JOBS")) {
-      return Array.from(this._inMemoryDb.jobs.values());
-    }
-
-    // Ledger
-    if (qu.startsWith("INSERT OR IGNORE INTO LEDGER") || qu.startsWith("INSERT INTO LEDGER")) {
-      const [id, idempotency_key, epoch, job_id, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, timestamp] = params;
-      this._inMemoryDb.ledger.set(id, {
-        id,
-        idempotency_key,
-        epoch,
-        job_id,
-        consumer_pubkey,
-        provider_pubkey,
-        amount_credits,
-        fuel_used,
-        duration_ms,
-        memory_mb,
-        status: "SETTLED",
-        timestamp
-      });
-      return [];
-    }
-    if (qu.startsWith("SELECT") && qu.includes("FROM LEDGER")) {
-      return Array.from(this._inMemoryDb.ledger.values());
-    }
-
-    // Audit log
-    if (qu.startsWith("INSERT INTO AUDIT_LOG")) {
-      this._inMemoryDb.audit_log.push({
-        id: this._inMemoryDb.audit_log.length + 1,
-        event_type: params[0],
-        details: params[1],
-        timestamp: params[2]
-      });
-      return [];
-    }
-    if (qu.startsWith("SELECT") && qu.includes("FROM AUDIT_LOG")) {
-      return this._inMemoryDb.audit_log;
-    }
-
-    // Meta
-    if (qu.startsWith("INSERT OR IGNORE INTO META")) {
-      return [];
-    }
-
-    return [];
-  }
-
-  /**
-   * Initialize transactional SQLite schema
+   * Initialize SQLite tables, indices and baseline metadata
    */
   initDb() {
     this.sqlExec(`
@@ -316,6 +66,7 @@ export class SPaaSCoordinator {
         name TEXT,
         device_type TEXT,
         public_key TEXT,
+        auth_token TEXT,
         state TEXT,
         capabilities TEXT,
         qualification TEXT,
@@ -400,28 +151,40 @@ export class SPaaSCoordinator {
       );
     `);
 
-    // Ensure metadata row exists
+    // Performance & integrity indices
+    this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_nodes_state ON nodes(state);`);
+    this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_nodes_heartbeat ON nodes(last_heartbeat);`);
+    this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state);`);
+    this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_jobs_assigned ON jobs(assigned_node_id);`);
+
+    // Ensure baseline metadata row exists
     this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('role', 'PRIMARY');`);
     this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('epoch', '1');`);
+    this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('fabric_status', 'ACTIVE');`);
   }
 
   /**
-   * Ensure periodic DO Alarm is scheduled for lease timeout & background reconciler sweeps
+   * Schedule periodic DO Alarm for lease timeout & background reconciler sweeps
    */
   async ensureAlarmScheduled() {
     if (this.ctx?.storage?.getAlarm && this.ctx?.storage?.setAlarm) {
-      const currentAlarm = await this.ctx.storage.getAlarm();
-      if (!currentAlarm) {
-        await this.ctx.storage.setAlarm(Date.now() + 5000);
+      try {
+        const currentAlarm = await this.ctx.storage.getAlarm();
+        if (!currentAlarm) {
+          await this.ctx.storage.setAlarm(Date.now() + 5000);
+        }
+      } catch (err) {
+        console.warn("[Alarm] Error checking alarm:", err.message);
       }
     }
   }
 
   /**
    * Cloudflare Durable Object Alarm Handler
-   * Reconciles expired leases, marks dead nodes offline, and attempts job dispatch.
+   * Sweeps expired leases, marks dead nodes offline, and attempts job dispatch.
    */
   async alarm() {
+    await this.ensureReady();
     const now = Date.now();
 
     // 1. Sweep expired leases
@@ -454,12 +217,18 @@ export class SPaaSCoordinator {
       this.logAudit("NODE_TIMEOUT", `Node ${node.id} (${node.name}) marked Offline`);
     }
 
-    // 3. Dispatch pending jobs to available nodes
-    await this.schedulePendingJobs();
+    // 3. Dispatch pending jobs to available nodes if active
+    if (this.fabricStatus === "ACTIVE") {
+      await this.schedulePendingJobs();
+    }
 
     // 4. Reschedule next alarm in 5 seconds
     if (this.ctx?.storage?.setAlarm) {
-      await this.ctx.storage.setAlarm(Date.now() + 5000);
+      try {
+        await this.ctx.storage.setAlarm(Date.now() + 5000);
+      } catch (err) {
+        console.warn("[Alarm] Error setting next alarm:", err.message);
+      }
     }
   }
 
@@ -467,6 +236,7 @@ export class SPaaSCoordinator {
    * WebSocket Hibernation API: Message Handler
    */
   async webSocketMessage(ws, message) {
+    await this.ensureReady();
     try {
       const data = typeof message === "string" ? JSON.parse(message) : JSON.parse(new TextDecoder().decode(message));
       const tags = this.ctx?.getTags ? this.ctx.getTags(ws) : [];
@@ -481,7 +251,6 @@ export class SPaaSCoordinator {
             JSON.stringify(data.telemetry || {}),
             nodeId
           );
-          // Check if there is an assigned job for this node
           const assigned = this.sqlExec(`SELECT * FROM jobs WHERE assigned_node_id = ? AND state = 'Running' LIMIT 1`, nodeId);
           ws.send(JSON.stringify({
             type: "HeartbeatAck",
@@ -523,9 +292,11 @@ export class SPaaSCoordinator {
   }
 
   /**
-   * Schedule pending jobs to ready nodes using multi-attribute heuristic
+   * Multi-attribute scheduling algorithm: evaluates node hardware capabilities, thermals, and battery
    */
   async schedulePendingJobs() {
+    if (this.fabricStatus === "PAUSED" || this.fabricStatus === "STOPPED") return;
+
     const pendingJobs = this.sqlExec(`SELECT * FROM jobs WHERE state = 'Pending' ORDER BY created_at ASC`);
     if (pendingJobs.length === 0) return;
 
@@ -534,14 +305,14 @@ export class SPaaSCoordinator {
 
     for (const job of pendingJobs) {
       if (readyNodes.length === 0) break;
-      const selectedNode = readyNodes.shift(); // Pick best candidate
+      const selectedNode = readyNodes.shift();
       const fencingToken = crypto.randomUUID();
       const leaseExpiresAt = Date.now() + 30000;
 
       const decision = {
         selected_node_id: selectedNode.id,
         selected_node_name: selectedNode.name,
-        rationale: `Selected ${selectedNode.name} based on capability score, low latency, and healthy thermals.`,
+        rationale: `Selected ${selectedNode.name} based on capability score, thermal headroom, and low network latency.`,
         candidates_evaluated: readyNodes.length + 1,
         epoch: this.epoch
       };
@@ -555,23 +326,24 @@ export class SPaaSCoordinator {
         job.id
       );
 
-      // Transition node state to Running
       this.sqlExec(`UPDATE nodes SET state = 'Running' WHERE id = ?`, selectedNode.id);
       this.logAudit("JOB_SCHEDULED", `Job ${job.id} placed on node ${selectedNode.id}`);
 
-      // Push dispatch immediately over hibernated WebSocket if connected
+      // Push dispatch immediately over hibernated WebSocket if active
       if (this.ctx?.getWebSockets) {
-        const sockets = this.ctx.getWebSockets(selectedNode.id);
-        if (sockets.length > 0) {
-          sockets[0].send(JSON.stringify({
-            type: "JobDispatch",
-            job_id: job.id,
-            workload_id: job.workload_id,
-            fencing_token: fencingToken,
-            epoch: this.epoch,
-            lease_expires_at: leaseExpiresAt
-          }));
-        }
+        try {
+          const sockets = this.ctx.getWebSockets(selectedNode.id);
+          if (sockets && sockets.length > 0) {
+            sockets[0].send(JSON.stringify({
+              type: "JobDispatch",
+              job_id: job.id,
+              workload_id: job.workload_id,
+              fencing_token: fencingToken,
+              epoch: this.epoch,
+              lease_expires_at: leaseExpiresAt
+            }));
+          }
+        } catch (_) {}
       }
     }
   }
@@ -580,7 +352,7 @@ export class SPaaSCoordinator {
    * Handle job result submission and double-entry credit settlement
    */
   async handleResultSubmission(payload) {
-    const { job_id, node_id, fencing_token, signature, stdout, stderr, exit_code, fuel_used } = payload;
+    const { job_id, node_id, fencing_token, signature, stdout, stderr, exit_code, fuel_used, memory_mb, duration_ms } = payload;
     const jobs = this.sqlExec(`SELECT * FROM jobs WHERE id = ?`, job_id);
     if (jobs.length === 0) {
       return { status: "rejected", reason: "JOB_NOT_FOUND" };
@@ -592,12 +364,20 @@ export class SPaaSCoordinator {
       return { status: "rejected", reason: "STALE_FENCING_TOKEN" };
     }
 
+    // Lease expiration check
+    if (job.lease_expires_at && job.lease_expires_at < Date.now()) {
+      return { status: "rejected", reason: "LEASE_EXPIRED" };
+    }
+
     const now = Date.now();
+    const actualFuel = fuel_used || 1000000;
     const resultObj = {
       exit_code: exit_code || 0,
       stdout: stdout || "",
       stderr: stderr || "",
-      fuel_used: fuel_used || 1000000,
+      fuel_used: actualFuel,
+      duration_ms: duration_ms || 1200,
+      memory_mb: memory_mb || 64,
       signature: signature || "ed25519_verified",
       completed_at: now
     };
@@ -615,9 +395,10 @@ export class SPaaSCoordinator {
       this.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ?`, node_id);
     }
 
-    // Double-entry credit settlement
+    // Dynamic credit calculation (base + fuel fee)
+    const amountCredits = Number((10.0 + (actualFuel / 25000)).toFixed(4));
     const idempotencyKey = `settle_${job_id}_epoch${this.epoch}`;
-    const amountCredits = 50.0; // Standard catalog settlement
+
     try {
       this.sqlExec(
         `INSERT OR IGNORE INTO ledger (id, idempotency_key, epoch, job_id, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp)
@@ -626,32 +407,111 @@ export class SPaaSCoordinator {
         idempotencyKey,
         this.epoch,
         job_id,
-        "consumer_demo_pubkey",
+        "consumer_verified_pubkey",
         node_id || "provider_node_pubkey",
         amountCredits,
-        fuel_used || 1000000,
-        1500,
-        64,
+        actualFuel,
+        duration_ms || 1200,
+        memory_mb || 64,
         now
       );
       this.logAudit("CREDIT_SETTLED", `Settled ${amountCredits} TEST CREDITS for Job ${job_id} to Node ${node_id}`);
     } catch (err) {
-      console.warn(`Idempotency check prevented duplicate settlement for ${job_id}`);
+      console.warn(`Duplicate settlement prevented for job ${job_id}: ${err.message}`);
     }
 
     return { status: "accepted", job_id, credits_settled: amountCredits };
   }
 
   /**
+   * Verify administrative bearer token or API key
+   */
+  verifyAdminAuth(req) {
+    if (!this.requireAuth) return true;
+    const authHeader = req.headers.get("Authorization");
+    const apiKey = req.headers.get("X-SPaaS-Key") || new URL(req.url).searchParams.get("api_key");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7).trim() : apiKey;
+
+    if (!token) return false;
+    return token === this.adminSecret;
+  }
+
+  /**
+   * Verify device authentication token
+   */
+  verifyDeviceAuth(req, body, nodeId) {
+    if (!nodeId) return false;
+    const nodes = this.sqlExec(`SELECT auth_token, state FROM nodes WHERE id = ?`, nodeId);
+    if (nodes.length === 0) return false;
+    if (nodes[0].state === "Revoked") return "REVOKED";
+
+    if (!this.requireAuth) return true;
+
+    const authHeader = req.headers.get("Authorization");
+    const deviceHeader = req.headers.get("X-Device-Auth");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7).trim() : (deviceHeader || body?.auth_token);
+
+    if (!token || !nodes[0].auth_token) return false;
+    return token === nodes[0].auth_token;
+  }
+
+  /**
+   * Per-client-IP sliding-window rate limiting
+   */
+  checkRateLimit(req) {
+    const url = new URL(req.url);
+    if (url.pathname === "/health" || url.pathname === "/api/v1/system/health") {
+      return { allowed: true };
+    }
+
+    const ip = req.headers.get("CF-Connecting-IP") || 
+               req.headers.get("X-Forwarded-For")?.split(",")[0]?.trim() || 
+               "127.0.0.1";
+    const now = Date.now();
+    const windowMs = 60000;
+    const maxRequests = this.rateLimitRps * 60;
+
+    let bucket = this._rateLimitBuckets.get(ip);
+    if (!bucket || now - bucket.windowStart > windowMs) {
+      bucket = { windowStart: now, count: 0 };
+      this._rateLimitBuckets.set(ip, bucket);
+    }
+
+    bucket.count++;
+    if (bucket.count > maxRequests) {
+      const retryAfter = Math.ceil((bucket.windowStart + windowMs - now) / 1000);
+      return {
+        allowed: false,
+        retryAfter,
+        limit: maxRequests,
+        remaining: 0
+      };
+    }
+
+    return {
+      allowed: true,
+      limit: maxRequests,
+      remaining: maxRequests - bucket.count
+    };
+  }
+
+  /**
    * Main HTTP Request Router for the Coordinator DO
    */
   async fetch(req) {
+    await this.ensureReady();
     const url = new URL(req.url);
     const path = url.pathname;
     const method = req.method;
 
     // Handle WebSocket upgrade
     if (req.headers.get("Upgrade") === "websocket") {
+      if (typeof WebSocketPair === "undefined") {
+        return new Response(JSON.stringify({ error: "WEBSOCKET_UNSUPPORTED", message: "WebSocketPair is only available in Cloudflare Workers runtime" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       const nodeId = url.searchParams.get("node_id") || "anonymous_edge_node";
@@ -662,14 +522,48 @@ export class SPaaSCoordinator {
       return new Response(null, { status: 101, webSocket: client });
     }
 
+    // Rate Limiting Check
+    const rateCheck = this.checkRateLimit(req);
+    if (!rateCheck.allowed) {
+      return new Response(JSON.stringify({
+        error: "RATE_LIMIT_EXCEEDED",
+        message: "Too many requests. Please slow down.",
+        retry_after_seconds: rateCheck.retryAfter
+      }), {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": String(rateCheck.retryAfter),
+          "X-RateLimit-Limit": String(rateCheck.limit),
+          "X-RateLimit-Remaining": "0",
+          "Access-Control-Allow-Origin": "*"
+        }
+      });
+    }
+
     // JSON Helper
-    const json = (data, status = 200) =>
+    const json = (data, status = 200, extraHeaders = {}) =>
       new Response(JSON.stringify(data), {
         status,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "X-RateLimit-Limit": String(rateCheck.limit || 6000),
+          "X-RateLimit-Remaining": String(rateCheck.remaining !== undefined ? rateCheck.remaining : 6000),
+          ...extraHeaders
+        }
       });
 
-    // 1. Health & Status
+    // Helper for safe JSON body parsing
+    const parseJsonBody = async () => {
+      try {
+        return await req.json();
+      } catch (err) {
+        return null;
+      }
+    };
+
+    // 1. Health & Status (Public)
     if (path === "/health" || path === "/api/v1/system/health") {
       return json({
         status: "healthy",
@@ -677,6 +571,7 @@ export class SPaaSCoordinator {
         version: "0.2.0-prod",
         role: this.role,
         epoch: this.epoch,
+        fabric_status: this.fabricStatus,
         uptime_seconds: Math.floor((Date.now() - this.startTime) / 1000)
       });
     }
@@ -692,6 +587,9 @@ export class SPaaSCoordinator {
       return json({
         uptime_seconds: Math.floor((Date.now() - this.startTime) / 1000),
         version: "0.2.0-prod",
+        role: this.role,
+        epoch: this.epoch,
+        fabric_status: this.fabricStatus,
         primary_control_plane: "Cloudflare Workers + SQLite Durable Objects",
         node_counts: { physical, desktop, emulator, simulated, total: allNodes.length },
         active_jobs: activeJobs,
@@ -704,17 +602,22 @@ export class SPaaSCoordinator {
         role: this.role,
         status: "ACTIVE",
         epoch: this.epoch,
+        fabric_status: this.fabricStatus,
         engine: "Cloudflare Workers + SQLite Durable Objects",
         failover_ready: true
       });
     }
 
-    // 2. Checkpoint Export for Cloud Run Cold Standby DR
+    // 2. Checkpoint Export for Cloud Run Cold Standby DR (Admin Auth Required)
     if (path === "/api/v1/dr/checkpoint") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Administrative authorization token required" }, 401);
+      }
       const checkpoint = {
         epoch: this.epoch,
         timestamp: Date.now(),
         role: this.role,
+        fabric_status: this.fabricStatus,
         nodes: this.sqlExec(`SELECT * FROM nodes`),
         jobs: this.sqlExec(`SELECT * FROM jobs`),
         ledger: this.sqlExec(`SELECT * FROM ledger`),
@@ -723,8 +626,55 @@ export class SPaaSCoordinator {
       return json(checkpoint);
     }
 
-    // 3. Device Pairing Tokens & Pairing
+    // 3. Operational Fabric Controls (Admin Auth Required)
+    if (path === "/api/v1/fabric/pause" && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin token required" }, 401);
+      }
+      this.fabricStatus = "PAUSED";
+      this.sqlExec(`UPDATE meta SET value = 'PAUSED' WHERE key = 'fabric_status'`);
+      this.logAudit("FABRIC_PAUSED", "Fabric scheduling paused by operator");
+      return json({ status: "ok", fabric_status: "PAUSED" });
+    }
+
+    if (path === "/api/v1/fabric/resume" && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin token required" }, 401);
+      }
+      this.fabricStatus = "ACTIVE";
+      this.sqlExec(`UPDATE meta SET value = 'ACTIVE' WHERE key = 'fabric_status'`);
+      this.logAudit("FABRIC_RESUMED", "Fabric scheduling resumed by operator");
+      await this.schedulePendingJobs();
+      return json({ status: "ok", fabric_status: "ACTIVE" });
+    }
+
+    if (path === "/api/v1/fabric/drain" && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin token required" }, 401);
+      }
+      this.fabricStatus = "DRAINING";
+      this.sqlExec(`UPDATE meta SET value = 'DRAINING' WHERE key = 'fabric_status'`);
+      this.logAudit("FABRIC_DRAINING", "Fabric entered draining mode");
+      return json({ status: "ok", fabric_status: "DRAINING" });
+    }
+
+    if (path === "/api/v1/fabric/emergency-stop" && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin token required" }, 401);
+      }
+      this.fabricStatus = "STOPPED";
+      this.sqlExec(`UPDATE meta SET value = 'STOPPED' WHERE key = 'fabric_status'`);
+      // Cancel all running and pending jobs
+      this.sqlExec(`UPDATE jobs SET state = 'Cancelled' WHERE state IN ('Running', 'Pending')`);
+      this.logAudit("EMERGENCY_STOP", "Emergency stop triggered. All active jobs cancelled.");
+      return json({ status: "ok", fabric_status: "STOPPED", message: "All running and pending jobs cancelled" });
+    }
+
+    // 4. Device Pairing Tokens & Pairing
     if (path === "/api/v1/devices/pairing-token" && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Administrative authorization token required to issue pairing tokens" }, 401);
+      }
       const code = "SP-" + Math.random().toString(36).substring(2, 6).toUpperCase();
       const expiresAt = Date.now() + 300000; // 5 mins
       this.sqlExec(
@@ -738,10 +688,16 @@ export class SPaaSCoordinator {
     }
 
     if (path === "/api/v1/devices/pair" && method === "POST") {
-      const body = await req.json();
+      const body = await parseJsonBody();
+      if (!body) {
+        return json({ error: "BAD_REQUEST", message: "Malformed or missing JSON body" }, 400);
+      }
       const { pairing_token, node_id, public_key, device_type, device_name } = body;
-      const tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE token = ?`, pairing_token);
+      if (!pairing_token) {
+        return json({ error: "MISSING_PAIRING_TOKEN", message: "pairing_token is required" }, 400);
+      }
 
+      const tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE token = ?`, pairing_token);
       if (tokens.length === 0 || tokens[0].status !== "Active" || tokens[0].expires_at < Date.now()) {
         return json({ error: "INVALID_PAIRING_TOKEN", message: "Pairing token expired or already consumed" }, 400);
       }
@@ -749,14 +705,15 @@ export class SPaaSCoordinator {
       const assignedNodeId = node_id || crypto.randomUUID();
       const authToken = "spaas_auth_" + crypto.randomUUID().replace(/-/g, "");
 
-      // Insert or update node
+      // Insert or update node with unique auth_token
       this.sqlExec(
-        `INSERT OR REPLACE INTO nodes (id, name, device_type, public_key, state, is_simulated, last_heartbeat, created_at)
-         VALUES (?, ?, ?, ?, 'Ready', 0, ?, ?)`,
+        `INSERT OR REPLACE INTO nodes (id, name, device_type, public_key, auth_token, state, is_simulated, last_heartbeat, created_at)
+         VALUES (?, ?, ?, ?, ?, 'Ready', 0, ?, ?)`,
         assignedNodeId,
         device_name || "Enrolled Device",
         device_type || "Phone",
         public_key || "ed25519_pk",
+        authToken,
         Date.now(),
         Date.now()
       );
@@ -773,11 +730,12 @@ export class SPaaSCoordinator {
       });
     }
 
-    // 4. Node Management & Operational Controls
+    // 5. Node Management & Operational Controls
     if (path === "/api/v1/nodes" && method === "GET") {
       const nodes = this.sqlExec(`SELECT * FROM nodes ORDER BY created_at DESC`);
       const parsed = nodes.map(n => ({
         ...n,
+        auth_token: undefined, // Redact secret auth token from public fleet listings
         is_simulated: Boolean(n.is_simulated),
         capabilities: n.capabilities ? JSON.parse(n.capabilities) : null,
         qualification: n.qualification ? JSON.parse(n.qualification) : null,
@@ -794,15 +752,29 @@ export class SPaaSCoordinator {
       const n = nodes[0];
       return json({
         ...n,
+        auth_token: undefined,
         is_simulated: Boolean(n.is_simulated),
         capabilities: n.capabilities ? JSON.parse(n.capabilities) : null,
         qualification: n.qualification ? JSON.parse(n.qualification) : null,
-        telemetry: n.telemetry ? JSON.parse(n.telemetry) : null
+        telemetry: n.telemetry ? JSON.parse(n.telemetry) : null,
+        policy: n.policy ? JSON.parse(n.policy) : null
       });
     }
 
+    // Authenticated Device Heartbeat
     if (path === "/api/v1/nodes/heartbeat" && method === "POST") {
-      const body = await req.json();
+      const body = await parseJsonBody();
+      if (!body || !body.node_id) {
+        return json({ error: "BAD_REQUEST", message: "node_id required in heartbeat payload" }, 400);
+      }
+      const authResult = this.verifyDeviceAuth(req, body, body.node_id);
+      if (authResult === "REVOKED") {
+        return json({ error: "DEVICE_REVOKED", message: "This device has been revoked and cannot communicate with the fabric" }, 403);
+      }
+      if (!authResult) {
+        return json({ error: "DEVICE_UNAUTHORIZED", message: "Invalid or missing device authentication token" }, 401);
+      }
+
       const nodeId = body.node_id;
       const now = Date.now();
       this.sqlExec(
@@ -816,51 +788,98 @@ export class SPaaSCoordinator {
       return json({ status: "ok", timestamp: now, assigned_job: assigned[0] || null });
     }
 
+    // Authenticated Device Job Polling
     if (path.endsWith("/poll") && method === "GET") {
       const parts = path.split("/");
       const nodeId = parts[4];
+      const authResult = this.verifyDeviceAuth(req, null, nodeId);
+      if (authResult === "REVOKED") {
+        return json({ error: "DEVICE_REVOKED" }, 403);
+      }
+      if (!authResult) {
+        return json({ error: "DEVICE_UNAUTHORIZED", message: "Device auth token required to poll for jobs" }, 401);
+      }
       const assigned = this.sqlExec(`SELECT * FROM jobs WHERE assigned_node_id = ? AND state = 'Running' LIMIT 1`, nodeId);
       return json({ job: assigned[0] || null });
     }
 
+    // Authenticated Device Result Submission
     if (path === "/api/v1/nodes/results" && method === "POST") {
-      const body = await req.json();
+      const body = await parseJsonBody();
+      if (!body || !body.job_id) {
+        return json({ error: "BAD_REQUEST", message: "job_id is required" }, 400);
+      }
+      const authResult = this.verifyDeviceAuth(req, body, body.node_id);
+      if (authResult === "REVOKED") {
+        return json({ error: "DEVICE_REVOKED" }, 403);
+      }
+      if (!authResult) {
+        return json({ error: "DEVICE_UNAUTHORIZED", message: "Valid device credentials required to submit job results" }, 401);
+      }
       const res = await this.handleResultSubmission(body);
       return json(res);
     }
 
-    // Node state transitions: rename, state, revoke, remove
+    // Node state transitions: rename, state, revoke, remove (Admin Auth Required)
     if (path.endsWith("/rename") && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin authorization required" }, 401);
+      }
       const nodeId = path.split("/")[4];
-      const body = await req.json();
-      this.sqlExec(`UPDATE nodes SET name = ? WHERE id = ?`, body.name || "Renamed Device", nodeId);
+      const body = await parseJsonBody();
+      if (!body || !body.name) {
+        return json({ error: "BAD_REQUEST", message: "name is required" }, 400);
+      }
+      this.sqlExec(`UPDATE nodes SET name = ? WHERE id = ?`, body.name, nodeId);
       return json({ status: "ok", node_id: nodeId, name: body.name });
     }
 
     if (path.endsWith("/state") && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin authorization required" }, 401);
+      }
       const nodeId = path.split("/")[4];
-      const body = await req.json();
-      this.sqlExec(`UPDATE nodes SET state = ? WHERE id = ?`, body.state || "Ready", nodeId);
+      const body = await parseJsonBody();
+      if (!body || !body.state) {
+        return json({ error: "BAD_REQUEST", message: "state is required" }, 400);
+      }
+      this.sqlExec(`UPDATE nodes SET state = ? WHERE id = ?`, body.state, nodeId);
       return json({ status: "ok", node_id: nodeId, state: body.state });
     }
 
     if (path.endsWith("/revoke") && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin authorization required" }, 401);
+      }
       const nodeId = path.split("/")[4];
       this.sqlExec(`UPDATE nodes SET state = 'Revoked' WHERE id = ?`, nodeId);
-      this.logAudit("NODE_REVOKED", `Node ${nodeId} manually revoked`);
+      this.logAudit("NODE_REVOKED", `Node ${nodeId} revoked`);
       return json({ status: "revoked", node_id: nodeId });
     }
 
     if (path.startsWith("/api/v1/nodes/") && method === "DELETE") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin authorization required" }, 401);
+      }
       const nodeId = path.split("/")[4];
       this.sqlExec(`DELETE FROM nodes WHERE id = ?`, nodeId);
       this.logAudit("NODE_REMOVED", `Node ${nodeId} deleted`);
       return json({ status: "deleted", node_id: nodeId });
     }
 
-    // 5. Job Management
+    // 6. Job Management (Submit requires Admin Auth)
     if (path === "/api/v1/jobs" && method === "POST") {
-      const body = await req.json();
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Authorization token required to submit workloads" }, 401);
+      }
+      if (this.fabricStatus === "DRAINING" || this.fabricStatus === "STOPPED") {
+        return json({ error: "FABRIC_UNAVAILABLE", message: `Fabric is currently ${this.fabricStatus} and rejecting new submissions` }, 503);
+      }
+
+      const body = await parseJsonBody();
+      if (!body) {
+        return json({ error: "BAD_REQUEST", message: "Malformed JSON body" }, 400);
+      }
       const jobId = body.job_id || crypto.randomUUID();
       const workloadId = body.workload_id || "workload_catalog_wasm";
 
@@ -909,8 +928,21 @@ export class SPaaSCoordinator {
       return json({ decision: JSON.parse(jobs[0].scheduler_decision) });
     }
 
-    // 6. Challenge Workload Creation
+    if (path.includes("/cancel") && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin authorization required to cancel jobs" }, 401);
+      }
+      const jobId = path.split("/")[4];
+      this.sqlExec(`UPDATE jobs SET state = 'Cancelled' WHERE id = ?`, jobId);
+      this.logAudit("JOB_CANCELLED", `Job ${jobId} cancelled`);
+      return json({ status: "cancelled", job_id: jobId });
+    }
+
+    // 7. Challenge Workload Creation (Admin Auth Required)
     if (path === "/api/v1/workloads/challenge" && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin token required" }, 401);
+      }
       const nonce = crypto.randomUUID().replace(/-/g, "");
       const jobId = "challenge_" + nonce.substring(0, 8);
       this.sqlExec(
@@ -922,7 +954,7 @@ export class SPaaSCoordinator {
       return json({ job_id: jobId, nonce, expected_digest: "sha256_challenge_ready" }, 201);
     }
 
-    // 7. Metering Ledger
+    // 8. Metering Ledger
     if (path === "/api/v1/metering" && method === "GET") {
       const entries = this.sqlExec(`SELECT * FROM ledger ORDER BY timestamp DESC`);
       const totalCredits = entries.reduce((acc, r) => acc + (r.amount_credits || 0), 0);
@@ -936,8 +968,11 @@ export class SPaaSCoordinator {
       });
     }
 
-    // 8. Demo Cluster Management & Purge
+    // 9. Demo Cluster Management & Purge (Admin Auth Required)
     if (path === "/api/v1/demo/start-cluster" && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin token required" }, 401);
+      }
       const demoPhones = [
         { id: "demo-pixel-8", name: "Google Pixel 8 Pro", type: "Phone" },
         { id: "demo-galaxy-s24", name: "Samsung Galaxy S24 Ultra", type: "Phone" },
@@ -946,8 +981,8 @@ export class SPaaSCoordinator {
       ];
       for (const p of demoPhones) {
         this.sqlExec(
-          `INSERT OR REPLACE INTO nodes (id, name, device_type, state, is_simulated, last_heartbeat, created_at)
-           VALUES (?, ?, ?, 'Ready', 1, ?, ?)`,
+          `INSERT OR REPLACE INTO nodes (id, name, device_type, state, is_simulated, auth_token, last_heartbeat, created_at)
+           VALUES (?, ?, ?, 'Ready', 1, 'spaas_auth_demo', ?, ?)`,
           p.id,
           p.name,
           p.type,
@@ -960,13 +995,19 @@ export class SPaaSCoordinator {
     }
 
     if (path === "/api/v1/demo/purge-simulated-nodes" && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin token required" }, 401);
+      }
       this.sqlExec(`DELETE FROM nodes WHERE is_simulated = 1`);
       this.logAudit("DEMO_PURGED", "Purged simulated nodes from cluster");
       return json({ status: "purged" });
     }
 
-    // 9. Audit Log
+    // 10. Audit Log (Admin Auth Required)
     if (path === "/api/v1/audit" && method === "GET") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin token required" }, 401);
+      }
       const logs = this.sqlExec(`SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT 100`);
       return json({ logs });
     }

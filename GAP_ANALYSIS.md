@@ -1,124 +1,161 @@
-# SPaaS Universal Edge Compute Fabric — Forensic Gap Analysis & Production Readiness Audit
+# SPaaS Universal Edge Compute Fabric — Independent Forensic Gap Analysis
 
-**Document Version:** 3.0.0-PROD  
+**Document Version:** 4.0.0-AUDIT  
 **Audit Date:** 2026-09-27  
-**Auditor:** Principal Distributed Systems Architect, Rust/Android Engineer, Cloudflare/Google Cloud Specialist, DevSecOps & QA Lead  
-**Baseline Standard:** Multi-Cloud Production Architecture Specification  
-**Classification Standard:** Strictly evidence-backed (`COMPLETE`, `PARTIAL`, `BROKEN`, `MISSING`, `UNVERIFIED`, `EXTERNALLY BLOCKED`)  
-**Evidence Standard:** (`PROVEN`, `EMULATOR-PROVEN`, `SIMULATION-PROVEN`, `PHYSICAL-DEVICE-PROVEN`, `IMPLEMENTED-UNPROVEN`, `HARDWARE-REQUIRED`, `UNSUPPORTED`, `FAILED`)
+**Commit Baseline:** `8528155`  
+**Auditor Methodology:** Independent source code inspection. All prior certifications treated as unverified.  
+**Classification Standard:** `COMPLETE`, `PARTIAL`, `BROKEN`, `MISSING`, `UNVERIFIED`, `EXTERNALLY BLOCKED`  
+**Evidence Standard:** `PROVEN`, `EMULATOR-PROVEN`, `SIMULATION-PROVEN`, `PHYSICAL-DEVICE-PROVEN`, `IMPLEMENTED-UNPROVEN`, `HARDWARE-REQUIRED`, `UNSUPPORTED`, `FAILED`
 
 ---
 
-## 1. Forensic Audit Verdict & Architectural Imperatives
+## 1. Executive Audit Verdict
 
-A forensic audit of the existing SPaaS codebase across all 12 workspace crates, the control plane server, gateway, web console, Android node application, test harness, container tooling, and CI/CD pipelines was conducted.
+Previous documentation claimed 31/31 requirements COMPLETE with PRODUCTION_HARDENED_ACCEPTANCE_PASS.
 
-### Executive Audit Findings:
+**Independent audit finding: This claim is significantly overstated.**
 
-1. **Control Plane Ingress & Serverless Edge Migration (Severity: Blocker):**
-   - **Current State:** The control plane is implemented as a stateful Axum Rust process (`apps/control-plane`) with local filesystem persistence (`spaas.wal`, `spaas.snapshot.json`). While highly performant locally, running it on an engineer's laptop requires an active Cloudflare Tunnel (`cloudflared`) to expose port 8080 to the public internet and remote smartphones.
-   - **Target Architecture:** Deploy the **Primary Production Control Plane** to **Cloudflare Workers + Durable Objects** with native SQLite storage (`ctx.storage.sql`). This delivers globally distributed public HTTPS endpoints with zero infrastructure overhead, eliminates mixed-content browser barriers, supports **WebSocket Hibernation** for tens of thousands of idle mobile workers, and utilizes Durable Object Alarms for event-driven lease reconciliation.
-   - **Classification:** `MISSING` (DO implementation required in Sprint 2).
+Audited status: 17 COMPLETE, 12 PARTIAL, 1 BROKEN, 1 MISSING. Estimated production readiness: ~35%.
 
-2. **Google Cloud Run Disaster Recovery (Cold Standby) (Severity: Blocker):**
-   - **Current State:** Container definitions exist (`Containerfile.control-plane`), but the control plane has no awareness of a Standby role vs an Active Primary role. If deployed to Cloud Run alongside Cloudflare, there is no epoch fencing token or state reconciliation mechanism to prevent split-brain scheduling or double settlement of test credits.
-   - **Target Architecture:** Configure Google Cloud Run as a **Cold Standby** (`min-instances: 0`). During normal operation, Cloudflare DO is the sole authoritative control plane. Cloud Run is activated exclusively upon a confirmed primary outage via an operator-approved activation command (`POST /api/v1/dr/activate`). Fencing tokens and monotonically increasing control-plane epochs guarantee that old leases or late results from an expired epoch are rejected.
-   - **Classification:** `PARTIAL` (Standby state machine and epoch synchronization required in Sprint 6).
-
-3. **Remote Mobile Onboarding & Dual-Endpoint Discovery (Severity: Critical):**
-   - **Current State:** The Android application (`apps/android-node`) historically fell back to hardcoded LAN IPs (`192.168.0.111:8080` or `10.0.2.2:8080`) when configuration was missing. While deep link parsing (`spaas://pair?code=...&server=...`) was introduced, the client does not yet support automatic failover between a primary Cloudflare endpoint and a secondary Cloud Run backup endpoint.
-   - **Target Architecture:** Zero-friction remote onboarding via Web Console `+ Add Device` modal: generates QR code and deep link containing both primary HTTPS/WSS URL and backup DR URL. Android app validates public TLS certificates, tests reachability, persists cryptographic node keys in Android Keystore / EncryptedSharedPreferences, and performs seamless endpoint discovery.
-   - **Classification:** `PARTIAL` (Dual-endpoint discovery and Keystore hardening required in Sprint 3).
-
-4. **Genuine WebAssembly Execution on Mobile (Severity: Critical):**
-   - **Current State:** The Rust workload runtime (`crates/workload-runtime`) executes WebAssembly with full bytecode interpretation via `wasmi` and strict fuel limits. On Android, `WasmRuntimeEngine.kt` correctly validates WASM headers, loads Section 11 data segments, and executes SHA-256 challenges, but lacks a complete stack machine opcode interpreter for general user-submitted WASM binaries (e.g. arithmetic, control flow `block`/`loop`/`br_if`, and linear memory load/store).
-   - **Target Architecture:** Implement a deterministic, sandboxed WASM stack machine VM inside `WasmRuntimeEngine.kt` supporting standard WASI Preview 1 host calls (`fd_write`, `clock_time_get`, `proc_exit`), instruction fuel metering, memory bounds checks, and exact stdout capture matching the Rust reference engine.
-   - **Classification:** `PARTIAL` (Full opcode execution required in Sprint 4).
-
-5. **Honest Accelerator Reporting & Multidimensional Scheduling (Severity: Major):**
-   - **Current State:** Previous iterations detected GPU/NPU presence via system drivers, which risked misclassifying detected-but-untested accelerators as benchmark-proven.
-   - **Target Architecture:** Label all accelerators as `UNTESTED` unless an active Vulkan compute shader or NNAPI model executes successfully. Apply hard eligibility constraints (RAM, architecture, battery %, charging state, Wi-Fi) followed by Pareto scoring with transparent "Why This Device?" explanation breakdown.
-   - **Classification:** `COMPLETE` in Rust Core (`scheduler-core`), `PARTIAL` in Android verification.
-
-6. **Pure Production Telemetry & Idempotent Test Credits (Severity: Major):**
-   - **Current State:** Synthetic demo nodes previously risked inflating aggregate capacity metrics on the web dashboard.
-   - **Target Architecture:** Enforce strict separation between physical/emulator devices and synthetic simulators across database schemas, API responses, and dashboard views. Ledger records double-entry TEST CREDITS with unique idempotency keys, itemized resource tariffs, and zero monetary implications.
-   - **Classification:** `COMPLETE` in Rust ledger, needs replication in Cloudflare DO SQLite.
+The Rust core crate library is genuinely well-engineered. The Cloudflare Durable Object coordinator, web console, and Android app are structurally sound. However, no cloud deployment has been validated, Android WASM execution is not genuine bytecode interpretation, physical device proof contradicts acceptance claims, and the two control planes have no shared domain contracts or cross-cloud coordination.
 
 ---
 
-## 2. Deep Dive: Component Gap Analysis
+## 2. BLOCKER Gaps (5)
 
-### Domain 1: Cloudflare Edge Primary vs Local Axum Host
-| Feature | Current Implementation | Target Cloudflare DO Architecture | Forensic Gap |
-|---|---|---|---|
-| Ingress Protocol | Local HTTP (`127.0.0.1:8080`) exposed via `cloudflared` | Native Cloudflare Worker HTTPS & WSS at `https://api.spaas.dev` | Requires public Worker gateway eliminating local laptop daemon requirement |
-| Stateful Coordination | In-memory `AppState` with Tokio mutexes | Partitioned Durable Objects (`CoordinatorDO`) | Process-local state must be ported to SQLite-backed Durable Objects |
-| Persistence Engine | File-based Write-Ahead Log (`spaas.wal`) + JSON snapshots | Durable Object SQLite (`ctx.storage.sql`) | Eliminates host filesystem dependencies, provides ACID SQL transactions |
-| Worker Connectivity | HTTP polling (`/api/v1/nodes/:id/poll`) + SSE stream | WebSocket Hibernation API (`ctx.acceptWebSocket`) | Idle connections consume zero CPU/memory; push-based job dispatch |
-| Lease Watchdog | Tokio async loop in background thread | Durable Object Alarms (`ctx.storage.setAlarm`) | Serverless event-driven execution without permanently running worker threads |
+### GAP-B01: No Live Cloudflare Deployment
+- **Component:** `apps/cloudflare-control-plane`, CI pipeline
+- **Finding:** CI deploys via `cloudflare/wrangler-action@v3` but with `continue-on-error: true` (ci.yml L62-63). No evidence of a functioning public HTTPS endpoint. No deployment URL documented.
+- **Impact:** The entire "Cloudflare Primary" architecture exists only as local code. No browser, device, or external system can reach it.
+- **Fix:** Configure Cloudflare API tokens as GitHub secrets, remove `continue-on-error`, validate deployment URL post-deploy.
 
-### Domain 2: Google Cloud Run Disaster Recovery
-| Feature | Current Implementation | Target Cloud Run Standby Architecture | Forensic Gap |
-|---|---|---|---|
-| Deployment Model | Dockerfile for local development and Podman testing | Cloud Run container with `min-instances: 0` | Must run dormant at zero cost until activated |
-| Control Plane Role | Single authoritative mode | Dual-role: `STANDBY` (dormant) vs `ACTIVE` (failover) | Must reject job dispatch and settlement while in `STANDBY` |
-| Split-Brain Defense | None | Monotonically increasing `epoch` and signed fencing tokens | Prevents concurrent scheduling or duplicate credit settlement |
-| State Synchronization | Single local snapshot | Authenticated checkpoint replication (`/api/v1/dr/checkpoint`) | Standby must be primed with latest verified checkpoint |
-| Failover Activation | Manual process start | Operator-approved signed activation (`POST /api/v1/dr/activate`) | Safe, audited promotion with explicit RTO/RPO recording |
+### GAP-B02: Android WASM Execution is Not Genuine
+- **Component:** `apps/android-node/app/src/main/java/dev/spaas/node/service/WasmRuntimeEngine.kt`
+- **Finding:** The engine parses WASM section headers correctly but never interprets WASM opcodes. Execution is routed to native Kotlin algorithms based on workload name pattern matching (`"challenge"` → SHA-256, `"matrix"` → FloatArray multiply, `"prime"` → BooleanArray sieve). An arbitrary WASM binary with unknown name returns a generic hello message.
+- **Impact:** Results cannot be independently verified against the Rust `wasmi` engine. The platform claim of "genuine artifact-based WASM execution" is false.
+- **Fix:** Integrate a real WASM interpreter (Chicory, wasmer-jni, or port wasmi via JNI/NDK) or implement a minimal WASM stack machine VM.
 
-### Domain 3: Remote Mobile Onboarding & Identity Persistence
-| Feature | Current Implementation | Target Production Architecture | Forensic Gap |
-|---|---|---|---|
-| Endpoint Resolution | Single URL or local fallback | Dual-endpoint discovery (Primary Cloudflare + Backup Cloud Run) | Android client must fail over smoothly if primary is unreachable |
-| Cryptographic Identity | `SharedPreferences` storage | Android Keystore / `EncryptedSharedPreferences` | Private key must be protected against application sandbox extraction |
-| Pairing Protocol | `SP-XXXX` 6-char token with QR payload | Expiring single-use token with cryptographic nonce and TLS verification | Eliminates token replay across primary and secondary control planes |
-| Reachability Diagnostic | Basic TCP ping check | Diagnostic probe returning RTT, DNS resolution, and AP isolation warning | Pre-flight connectivity check guides physical phone owners |
+### GAP-B03: Physical Device Proof Contradicts Claims
+- **Component:** `physical-android-acceptance-report.json`, `acceptance-report.json`
+- **Finding:** The physical report states `"devices_attached": 0` and `"classification": "HARDWARE-REQUIRED"`. However, the acceptance report G14B claims `"status": "PASS"` with `"classification": "PHYSICAL-DEVICE-PROVEN"`.
+- **Impact:** No evidence that any physical Android device has ever executed a workload via the SPaaS platform.
+- **Fix:** Execute acceptance on ≥2 physical Android devices with evidence capture.
 
-### Domain 4: WebAssembly Workload Runtime Engine
-| Feature | Current Implementation | Target Production Architecture | Forensic Gap |
-|---|---|---|---|
-| Rust Reference Engine | `wasmi` v0.40 with fuel metering and WASI Preview 1 | Deterministic execution, memory ceilings, stdout capture | Fully proven (`PROVEN`), 100% pass across adversarial tests |
-| Android Client Engine | Data segment extraction + SHA-256 challenge runner | Complete deterministic WASM stack machine VM | Must execute general instruction set (arithmetic, branch, memory) |
-| Workload Validation | Ed25519 signature and SHA-256 manifest check | Canonical digest validation `SHA256(exit_code || stdout || stderr || fuel)` | Both Rust and Android generate identical cryptographic receipts |
+### GAP-B04: No Cloud Run Deployment
+- **Component:** `deploy/cloud-run/`
+- **Finding:** `deploy-cloud-run.ps1` only `Write-Host`s gcloud commands; it never executes them. No GCP project, container image, or Cloud Run service exists. CI "validates" by grep-ing the YAML for strings.
+- **Impact:** The "Google Cloud Run Backup" architecture is purely theoretical.
+- **Fix:** Build container, push to registry, deploy to Cloud Run, validate health endpoint.
 
-### Domain 5: Intelligent Scheduling & Real Qualification
-| Feature | Current Implementation | Target Production Architecture | Forensic Gap |
-|---|---|---|---|
-| Hardware Discovery | CPU MIPS, RAM, storage, network RTT | Full 12-dimensional capability vector | Empirical microbenchmarks executed upon initial device qualification |
-| Accelerator Reporting | Static API presence checks | Active compute shader test; else labeled `UNTESTED` | Prevents fraudulent scheduling onto unsupported accelerators |
-| Multi-Objective Fit | Weighted scoring with hard constraint filters | Pareto optimization + transparent "Why This Device?" breakdown | Explains scheduling rationale and provides expected execution duration |
-| High Scale Resilience | Tested up to 5,000 nodes | 10,000 node validation with concurrent job submissions | Verifies p50 dispatch latency under 5ms at maximum scale |
-
-### Domain 6: Real Telemetry & Idempotent Test Credits
-| Feature | Current Implementation | Target Production Architecture | Forensic Gap |
-|---|---|---|---|
-| Credit Accounting | Double-entry ledger with idempotency keys | Double-entry ledger in DO SQLite with atomic transactions | Eliminates any possibility of duplicate credit minting or settlement |
-| Simulation Isolation | UI filter and `/demo/purge-simulated-nodes` | Strict database namespace isolation and clear dashboard demarcation | Production views display 100% genuine physical/desktop node capacity |
-| Metering Metrics | CPU fuel, RAM-seconds, network bytes | Itemized usage history, transparent tariffs, energy cost estimation | Clearly labeled TEST CREDITS with zero implied fiat redemption |
+### GAP-B05: No Cross-Cloud Epoch Synchronization
+- **Component:** `coordinator.js` (JS), `state.rs` / `reconciler.rs` (Rust)
+- **Finding:** Both control planes independently initialize `epoch = 1`. No protocol exists to exchange, compare, or fence epochs between Cloudflare and Cloud Run. Independent epoch counters cannot prevent split-brain.
+- **Impact:** After failover and failback, both control planes believe they are epoch 1, defeating fencing.
+- **Fix:** Implement epoch handoff protocol with signed fencing tokens exchanged during activation/deactivation.
 
 ---
 
-## 3. Production Readiness Matrix Across 13 Domains
+## 3. CRITICAL Gaps (7)
 
-| Domain | Domain Name | Severity | Primary Gap | Target Sprint | Readiness Status |
-|---|---|---|---|---|---|
-| **D01** | Cloudflare Edge Primary | **BLOCKER** | Implement SQLite-backed Durable Object control plane | S2 | `IMPLEMENTED-UNPROVEN` |
-| **D02** | Google Cloud Run DR | **BLOCKER** | Standby mode, epoch fencing, operator activation | S6 | `PARTIAL` |
-| **D03** | Remote Enrollment | **CRITICAL** | Android Keystore persistence, dual-endpoint discovery | S3 | `PARTIAL` |
-| **D04** | WASM Runtime Engine | **CRITICAL** | General opcode stack machine in Android Kotlin engine | S4 | `PARTIAL` |
-| **D05** | Hardware Qualification | **MAJOR** | Empirical microbenchmarks & honest accelerator badges | S4 | `PROVEN` (Rust) / `PARTIAL` (Android) |
-| **D06** | Intelligent Scheduler | **MAJOR** | 10,000-node concurrent load test & explainability UI | S4, S5 | `PROVEN` |
-| **D07** | Owner Controls | **MAJOR** | In-flight execution abort & local safety thresholding | S4 | `PROVEN` |
-| **D08** | Metering & Test Credits | **MAJOR** | Transactional DO SQLite ledger & itemized history | S2, S5 | `PROVEN` |
-| **D09** | Web Console UX | **MAJOR** | Administration tab, DR failover controls, live telemetry | S5 | `PROVEN` |
-| **D10** | Android Node UX | **MAJOR** | Dual-endpoint switcher, reachability diagnostic, 6 tabs | S3, S5 | `PHYSICAL-DEVICE-PROVEN` |
-| **D11** | Zero-Trust Security | **CRITICAL** | Ed25519 signing, replay defense, token sanitization | S7 | `PROVEN` |
-| **D12** | Observability & SRE | **MAJOR** | Analytics Engine, Cloud Run structured logging, health | S7 | `PROVEN` |
-| **D13** | Cost & Quota Defense | **MAJOR** | Cloudflare free-tier quotas & Cloud Run zero min-instances | S7 | `PARTIAL` |
+### GAP-C01: No Authentication on Cloudflare Worker Routes ✅ [RESOLVED in Sprint 2]
+- **Component:** `apps/cloudflare-control-plane/src/coordinator.js`
+- **Resolution:** Added Bearer token validation middleware for admin routes (`Authorization: Bearer <secret>`). Implemented sliding-window rate limiting with HTTP 429 response and Retry-After headers.
+
+### GAP-C02: WebSocket Hibernation & Persistence Testing ✅ [RESOLVED in Sprint 2]
+- **Component:** `sqlite-bridge.js` & `coordinator.test.js`
+- **Resolution:** Replaced in-memory mock with SQLite storage bridge supporting native DO SQLite and high-fidelity WASM SQLite engine. Added WebSocket message testing for heartbeat, ping/pong, and closure.
+
+### GAP-C03: DO Alarm Reconciler Tested ✅ [RESOLVED in Sprint 2]
+- **Component:** `coordinator.js` `alarm()` method & `coordinator.test.js`
+- **Resolution:** Added comprehensive automated test for `alarm()` reconciler testing expired lease sweep, retry increments, retry exhaustion leading to Failed state, and node timeout (>45s) to Offline state.
+
+### GAP-C04: Dual Control Plane State Divergence
+- **Component:** JS coordinator vs Rust control-plane
+- **Finding:** Node states differ (`"Ready"` in JS vs `Idle` enum in Rust). Scheduling algorithms differ (FIFO in JS vs multi-attribute scorer in Rust). Credit calculations differ (fixed 50.0 in JS vs usage-based in Rust). No shared type definitions or contract tests exist.
+- **Fix:** Extract shared JSON Schema or TypeScript/Rust contract definitions; run identical test suites.
+
+### GAP-C05: Auth Tokens Never Validated Server-Side ✅ [RESOLVED in Sprint 2]
+- **Component:** Pairing flow & device routes in `coordinator.js`
+- **Resolution:** Generated unique `auth_token` on device pairing, persisted to `nodes` table, and enforced on all subsequent device requests (`/heartbeat`, `/poll`, `/results`). Revoked devices immediately return HTTP 403 Forbidden.
+
+### GAP-C06: No Checkpoint Ingestion in Cloud Run
+- **Component:** Rust control plane `handlers.rs`
+- **Finding:** The CF Worker exports checkpoints via `GET /api/v1/dr/checkpoint`, but the Rust control plane has no endpoint to restore/ingest a checkpoint.
+- **Fix:** Implement `POST /api/v1/dr/checkpoint` in the Rust control plane.
+
+### GAP-C07: No Playwright/E2E Browser Tests
+- **Component:** Test infrastructure
+- **Finding:** `REQUIREMENTS_TRACEABILITY.md` references "Playwright browser recordings" but no Playwright configuration, test files, or npm dependencies exist anywhere.
+- **Fix:** Create Playwright test suite covering enrollment, job submission, and dashboard flows.
 
 ---
 
-## 4. Remediation Strategy
+## 4. MAJOR Gaps (9)
 
-All identified gaps are resolved systematically through the **Eight-Sprint Implementation Plan** detailed in [IMPLEMENTATION_PLAN.md](file:///h:/SpaaS/IMPLEMENTATION_PLAN.md). No code is deleted indiscriminately; existing Rust algorithms and working features are preserved and integrated into the serverless and DR targets.
+| Gap ID | Component | Issue |
+|---|---|---|
+| GAP-M01 | CF Worker scheduler | `schedulePendingJobs()` is FIFO — uses `readyNodes.shift()`, ignoring capabilities/qualification |
+| GAP-M02 | CF Worker metering | Settlement always uses hardcoded `amountCredits = 50.0` regardless of actual resource usage |
+| GAP-M03 | Android identity storage | Uses plain `SharedPreferences`, not `EncryptedSharedPreferences` or Android Keystore |
+| GAP-M04 | Android connectivity | Uses HTTP polling only; no WebSocket client despite DO WebSocket Hibernation support |
+| GAP-M05 | DR failback | No mechanism to transfer authority back from Cloud Run to Cloudflare |
+| GAP-M06 | DR alternative frontend | If Cloudflare is down, Pages frontend is also down; no recovery UI exists |
+| GAP-M07 | Web console API URL | ✅ **RESOLVED (S2)**: Configured via `VITE_API_URL`, window injection, and HTTPS origin detection |
+| GAP-M08 | CI coverage enforcement | ✅ **RESOLVED (S2)**: Added coverage reporting with ≥90% threshold enforcement to CI and package.json |
+| GAP-M09 | CI deploy validation | ✅ **RESOLVED (S2)**: Removed `continue-on-error: true`; added post-deploy live health check |
+
+---
+
+## 5. MINOR Gaps (6)
+
+| Gap ID | Component | Issue |
+|---|---|---|
+| GAP-N01 | CORS policy | Wildcard `Access-Control-Allow-Origin: *` acceptable for dev, not production |
+| GAP-N02 | Double-entry accounting | Single ledger row per settlement; true double-entry requires paired debit/credit |
+| GAP-N03 | QR code generation | Web "Add Device" creates text token only, not a scannable QR |
+| GAP-N04 | SBOM generation | Documented but not actually generated in CI |
+| GAP-N05 | Acceptance script default | Gates that don't output a classification string auto-promote to "PROVEN" |
+| GAP-N06 | Operational runbooks | Referenced but not authored (OPERATIONS.md, TROUBLESHOOTING.md are templates) |
+
+---
+
+## 6. Genuine Strengths
+
+The following components are genuinely well-implemented and tested:
+
+| Component | Assessment | Evidence |
+|---|---|---|
+| spaas-protocol | Comprehensive domain model with proper serde, validation, and type safety | 8 source files, extensive unit tests |
+| spaas-security | Real Ed25519 signing/verification, SHA-256, token issuance, input sanitization | `signing.rs`, `token.rs`, adversarial tests |
+| spaas-workload-runtime | Genuine WASM execution via `wasmi` v0.40 with fuel metering, WASI Preview 1 | `wasm_engine.rs`, adversarial fuzzing tests |
+| spaas-scheduler-core | Multi-attribute scorer with hard eligibility filters, thermal/battery awareness | 5 source files, 10K-node benchmark |
+| spaas-persistence | WAL with CRC32 checksums, crash recovery, snapshot compaction | `lib.rs`, durable recovery integration test |
+| spaas-metering | Idempotent ledger with provider/consumer accounting | `ledger.rs`, double-billing prevention test |
+| spaas-verification | Byzantine M-of-N quorum, hash match, deterministic replay | `consensus.rs`, `engine.rs` |
+| CF DO SQLite schema | Well-designed 7-table schema with proper constraints | `coordinator.js` initDb() |
+| Android app structure | Clean Kotlin architecture: activity, service, policy, telemetry | 7 source files |
+| Web console UI | Feature-rich 6-tab dashboard with responsive design | 1610-line index.html |
+| Integration test suite | 12 comprehensive test files covering adversarial scenarios | 12 test files |
+
+---
+
+## 7. Production Readiness Assessment
+
+| Layer | Status | Readiness |
+|---|---|---|
+| Rust core algorithms & domain logic | PROVEN | ✅ 95% |
+| Local integration tests | PROVEN | ✅ 90% |
+| Web console build & UI | PROVEN | ✅ 85% |
+| Android APK build & signing | PROVEN | ✅ 80% |
+| Cloudflare Worker code quality | PARTIAL | ⚠️ 60% |
+| Cloudflare live deployment | UNPROVEN | ❌ 0% |
+| Cloud Run deployment | UNPROVEN | ❌ 0% |
+| Multi-cloud DR | UNPROVEN | ❌ 0% |
+| Android genuine WASM execution | BROKEN | ❌ 0% |
+| Physical device validation | UNPROVEN | ❌ 0% |
+| End-to-end public internet flow | UNPROVEN | ❌ 0% |
+| Security hardening | PARTIAL | ⚠️ 40% |
+| Browser E2E testing | MISSING | ❌ 0% |
+| Monitoring & observability | MISSING | ❌ 0% |
+
+**Overall estimated production readiness: ~35%**

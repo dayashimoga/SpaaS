@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node --test tests/coordinator.test.js"
+    "test": "node --test --experimental-test-coverage tests/coordinator.test.js"
   },
   "keywords": ["spaas", "edge-compute", "cloudflare-workers", "durable-objects", "sqlite"],
   "author": "SPaaS Architecture Team <team@spaas.dev>",

@@ -1,74 +1,96 @@
-# SPaaS Universal Edge Compute Fabric — Master Requirements Traceability Matrix
+# SPaaS Universal Edge Compute Fabric — Audited Requirements Traceability Matrix
 
-**Document Version:** 3.0.0-PROD  
+**Document Version:** 4.0.0-AUDIT  
 **Audit Date:** 2026-09-27  
-**Author:** Principal Distributed Systems Architect, Rust/Android Engineer, DevSecOps & QA Lead  
-**Classification Standard:** Strictly evidence-backed (`COMPLETE`, `PARTIAL`, `BROKEN`, `MISSING`, `UNVERIFIED`, `EXTERNALLY BLOCKED`)  
-**Evidence Standard:** (`PROVEN`, `EMULATOR-PROVEN`, `SIMULATION-PROVEN`, `PHYSICAL-DEVICE-PROVEN`, `IMPLEMENTED-UNPROVEN`, `HARDWARE-REQUIRED`, `UNSUPPORTED`, `FAILED`)
+**Commit Baseline:** `8528155`  
+**Auditor Methodology:** Independent source code inspection. All prior certifications treated as unverified.  
+**Classification Standard:** `COMPLETE`, `PARTIAL`, `BROKEN`, `MISSING`, `UNVERIFIED`  
+**Evidence Standard:** `PROVEN`, `EMULATOR-PROVEN`, `SIMULATION-PROVEN`, `PHYSICAL-DEVICE-PROVEN`, `IMPLEMENTED-UNPROVEN`, `HARDWARE-REQUIRED`, `UNSUPPORTED`, `FAILED`
 
 ---
 
-## 1. Executive Summary & Audit Scope
+## 1. Audited Requirements Traceability Matrix
 
-This Traceability Matrix audits every architectural, protocol, compute, security, operational, and UX requirement of the SPaaS platform across historical phases, behavioral acceptance gates (G01–G22), and the multi-cloud production overhaul.
-
-### Core Architectural Mandate
-- **PRIMARY:** Cloudflare Pages (Frontend) + Cloudflare Workers (Public Ingress API) + SQLite-backed Durable Objects (Stateful Coordination & WebSocket Hibernation).
-- **BACKUP:** Google Cloud Run (Cold Standby Rust Control Plane, activated exclusively upon primary outage with fencing tokens and zero split-brain).
-- **COMPUTE:** Enrolled physical Android smartphones and desktop edge workers executing verified sandboxed WebAssembly.
-
----
-
-## 2. Master Requirements Traceability Matrix
-
-| Req ID | Domain / Subsystem | Requirement Description | Current Implementation State | Severity | Root Cause Analysis | Target Fix / Sprint | Verification Tests & Evidence | Status Classification | Evidence Classification |
-|---|---|---|---|---|---|---|---|---|---|
-| **REQ-ARC-01** | Architecture | Universal fabric supporting Android, desktop, server, IoT | Crates in `crates/*` support cross-platform execution; desktop worker runner `dist/bin/spaas-desktop-worker.ps1` operational. | Low | Initial focus was Android & desktop; server/IoT require consistent protocol endpoints. | S2, S3 | `test_desktop_physical_compute_worker` (Integration) | **COMPLETE** | `PROVEN` |
-| **REQ-ARC-02** | Architecture | Cloudflare Pages frontend hosting | Web Console builds with Vite into `apps/web-console/dist`; deployed to `https://spaas-console.pages.dev`. | High | Browsers enforced Mixed-Content policy when Pages called local HTTP `127.0.0.1:8080`. | S2 (Worker API routing) | Gate G12, CI Pages deploy job in `ci.yml` | **COMPLETE** | `PROVEN` |
-| **REQ-ARC-03** | Architecture | Cloudflare Workers + Durable Objects with SQLite (Primary Control Plane) | Implemented in `apps/cloudflare-control-plane/src/coordinator.js` using `ctx.storage.sql` across 7 ACID tables. | **BLOCKER** | System originally authored as native OS binary; edge DO coordination now fully implemented. | S2 (`apps/cloudflare-control-plane`) | `tests/coordinator.test.js` (5/5 passed), `wrangler deploy --dry-run` | **COMPLETE** | `PROVEN` |
-| **REQ-ARC-04** | Architecture | Google Cloud Run Disaster Recovery (Cold Standby) | Axum control plane configured with dormant `STANDBY` mode, `minScale: "0"`, and `deploy/cloud-run/service.yaml`. | **BLOCKER** | Standby role, dormant rejection, and failover/failback state machine now fully verified. | S6 (`apps/control-plane` DR mode) | `test_dr_standby_and_activation_lifecycle`, `deploy-cloud-run.ps1 -DryRun` | **COMPLETE** | `PROVEN` |
-| **REQ-ARC-05** | Architecture | WebSocket Hibernation & Event-Driven DO Execution | Implemented WebSocket Hibernation API in `coordinator.js` (`acceptWebSocket`, `webSocketMessage`) & DO Alarms. | **MAJOR** | Zero-cost idle connections and periodic 5s alarm reconciler operational. | S2, S3 (DO WebSocket Hibernation) | `test_alarm_reconciliation_and_fencing`, DO hibernation handlers | **COMPLETE** | `PROVEN` |
-| **REQ-ARC-06** | Architecture | Control-Plane Epochs, Fencing Tokens & Split-Brain Prevention | Monotonic epoch counters, lease fencing tokens, and stale epoch rejection (409 Conflict) active. | **CRITICAL** | Fencing tokens guarantee zero split-brain and prevent duplicate test credit settlement. | S6 (Epoch fencing protocol) | `test_dr_standby_and_activation_lifecycle`, `coordinator.test.js` | **COMPLETE** | `PROVEN` |
-| **REQ-ENR-01** | Remote Enrollment | Zero-friction remote onboarding via Web Console + QR code + Deep Link | Deep link `spaas://pair?code=...&primary=...&backup=...` parses dual endpoints and authenticates. | Medium | Hardcoded LAN fallback eliminated; dual-endpoint discovery active. | S3 (Dynamic endpoint discovery) | Android intent tests, deep link parsing tests | **COMPLETE** | `PROVEN` |
-| **REQ-ENR-02** | Remote Enrollment | Secure expiring single-use pairing codes (`SP-XXXX`) | Single-use token API (`/api/v1/devices/pairing-token`) active; tokens expire in 300s. | Medium | Token replay attacks across multiple control planes required epoch-bound tokens. | S2, S3 | Gate G15 (`test_pairing_token`), `test_pairing_token_uniqueness` | **COMPLETE** | `PROVEN` |
-| **REQ-ENR-03** | Remote Enrollment | Outbound HTTPS/WSS traversing NAT/CGNAT/Cellular | Client makes outbound HTTP requests; quick tunnels verified over cellular. | High | Direct IP connections fail under carrier NAT; must strictly use public HTTPS/WSS endpoints. | S2, S3 | Gate G14B physical phone cellular verification | **COMPLETE** | `PHYSICAL-DEVICE-PROVEN` |
-| **REQ-ENR-04** | Remote Enrollment | Persistent Cryptographic Device Identity in Android Keystore | `initPersistence()` and `persistIdentity()` persist dual endpoints and Ed25519 keypair across kills. | High | Cryptographic identity persists across app force-closes and device reboots. | S3 (`EncryptedDeviceIdentityStore`) | `MainActivity` lifecycle tests, reboot persistence test | **COMPLETE** | `PROVEN` |
-| **REQ-ENR-05** | Remote Enrollment | Multi-device fleet management: grouping, renaming, revoking, pausing | REST endpoints implemented (`/api/v1/nodes/:id/rename`, `state`, `policy`, `revoke`, `remove`). | Low | Missing device grouping tags resolved in UI fleet filter. | S3, S5 | `test_apk_delivery_and_node_management_endpoints` | **COMPLETE** | `PROVEN` |
-| **REQ-ENR-06** | Remote Enrollment | Authoritative 10-state device machine & accurate counts | `NodeState` enum aligned (`Ready`, `Running`, `Paused`, `Degraded`, `Offline`, etc.); counts disaggregated. | Medium | UI displays real-time disaggregated counts for physical, desktop, emulator, and simulated nodes. | S3, S5 | `test_node_ready_for_workload_rules`, UI telemetry cards | **COMPLETE** | `PROVEN` |
-| **REQ-QUA-01** | Qualification | Empirical microbenchmarks (CPU MIPS, WASM fuel, RAM bandwidth, Network RTT) | Rust `NodeQualificationEngine` runs real WASM fuel benchmark; Android runs real arithmetic & FLOP tests. | High | Empirical benchmarks measure integer ops, FP MFLOPS, multithreading, and thermal stability. | S4 (Android native microbenchmarks) | Gate G19 (`test_node_empirical_qualification_microbenchmarks`) | **COMPLETE** | `PROVEN` |
-| **REQ-QUA-02** | Qualification | Honest accelerator labeling (`UNKNOWN`/`UNTESTED`) | Capabilities matrix reports accelerators; untested marked `UNTESTED`. | Medium | Earlier versions reported static API presence without verifying active compute kernels. | S4 (Transparent capability vectors) | `test_node_qualification_benchmarks`, Web Device Details | **COMPLETE** | `PROVEN` |
-| **REQ-QUA-03** | Qualification | Dynamic live capacity factoring thermal drift and battery decay | Dynamic capacity formula implemented in `crates/scheduler-core/src/policy.rs`. | Low | Dynamic decay updates real-time trigger on thermal throttling events. | S4 | `test_scheduler_thermal_filter_and_scoring` | **COMPLETE** | `PROVEN` |
-| **REQ-SCH-01** | Scheduling | Multi-attribute ranking with hard eligibility constraints | `schedule_workload_with_decision` implemented in `scheduler-core`. | Low | Latency at 10,000 nodes verified under 100ms dispatch latency. | S4 (10k node concurrency suite) | Gate G19, `test_scheduler_10_000_node_scale_benchmark` | **COMPLETE** | `PROVEN` |
-| **REQ-SCH-02** | Scheduling | Transparent "Why This Device?" explanation API | API returns selected candidate, rankings, failed constraints, and estimated runtime. | Low | Explainability payload rendered prominently in Web UI job subtab. | S5 (Web Console Jobs tab overhaul) | `test_scheduler_workload_fit_decision_and_rejection_tracking` | **COMPLETE** | `PROVEN` |
-| **REQ-WRK-01** | Workload Execution | Signed WASM/WASI workload specification (`spaas.io/v1`) | YAML/JSON manifest parser and Ed25519 signature validator implemented. | Low | Manifest versions strictly validated (`spaas.io/v1`). | S4 | Gate G07 (`test_developer_manifest_parse_and_execution`) | **COMPLETE** | `PROVEN` |
-| **REQ-WRK-02** | Workload Execution | Genuine WebAssembly execution on Android | Android executes dynamic 64x64 matrix FLOPs, Sieve of Eratosthenes, and SHA-256 challenges. | **CRITICAL** | Static string responses replaced with genuine mathematical algorithms and operation counting. | S4 (Genuine WASM compute engine) | Gate G16, `WasmComputeTest.kt` | **COMPLETE** | `PROVEN` |
-| **REQ-WRK-03** | Workload Execution | Renewable job lease protocol & late result defense | `JobLease` protocol with lease terms, expiration watchdog, and late result rejection. | Low | Lease terms synchronized with DO alarms and reconciler ticks. | S2, S4 | Gate G09 (`test_job_lease_lifecycle_and_late_result_rejection`) | **COMPLETE** | `PROVEN` |
-| **REQ-WRK-04** | Owner Controls | Locally enforced Android owner restrictions (charging, battery, thermals, data) | `ProviderSafetyPolicy` checks battery, charger, network type, thermal ceiling. | Medium | Client-side sovereign evaluation ensures server cannot override owner restrictions. | S4 (In-flight cancellation hook) | Gate G17 (`test_resource_safety_yield_reasons`) | **COMPLETE** | `PROVEN` |
-| **REQ-WRK-05** | Owner Controls | Owner overrides: Pause, Resume, Drain, Emergency Stop | Local toggle buttons and ongoing notification controls in Android app. | Low | Emergency stop immediately halts in-flight compute and yields resources. | S4 | `ComputeForegroundService` notification actions | **COMPLETE** | `PROVEN` |
-| **REQ-WRK-06** | Workload Execution | Cryptographic challenge verification with random server nonce | `/api/v1/workloads/challenge` issues 32-byte nonce; worker executes SHA-256 WASM; server verifies digest. | Low | Random nonces guarantee freshness and prevent precomputed replay. | S4 | Gate G14B physical phone challenge execution | **COMPLETE** | `PHYSICAL-DEVICE-PROVEN` |
-| **REQ-MET-01** | Metering | Auditable double-entry TEST CREDIT accounting | Double-entry ledger in `crates/metering`; idempotency key prevents duplicate settlement. | Low | Settlement ledger persists transactionally in Cloudflare DO SQLite and control plane WAL. | S2, S5 | Gate G10 (`test_idempotent_metering_prevents_double_billing`) | **COMPLETE** | `PROVEN` |
-| **REQ-MET-02** | Real Data | Pure production telemetry: zero synthetic data in normal views | Simulation disaggregation banner and filter active; `/demo/purge-simulated-nodes` implemented. | Medium | Demo cluster nodes strictly isolated in separate namespaces with one-click purge. | S5 (Strict namespace isolation) | Gate G12, Web Console simulation banner | **COMPLETE** | `PROVEN` |
-| **REQ-MET-03** | Real Data | Isolated demo/simulation namespace & ledger | Dedicated simulation flags and separate ledgers for test workloads. | Low | Clear separation enforced across database schema and UI selectors. | S5 | `test_demo_cluster_and_auto_sign_workload_lifecycle` | **COMPLETE** | `PROVEN` |
-| **REQ-UX-01** | Product UX | Web Console 6-domain layout (Overview, Devices, Workloads, Jobs, Usage, Admin) | Responsive 6-tab navigation implemented: Overview, Devices, Workloads, Jobs, Usage/Credits, Administration. | Medium | Administration tab includes Multi-Cloud DR matrix and simulated fleet purge. | S5 (Admin tab addition) | Gate G12, Playwright browser recordings | **COMPLETE** | `PROVEN` |
-| **REQ-UX-02** | Product UX | Android App 6-tab overhaul (Home, Performance, Controls, Activity, Credits, Security) | Jetpack Compose app with 6 tabs, real-time gauges, and manual policy sliders. | Low | Deep link pairing and reachability ping integrated in Home tab. | S5 | Gate G14B physical device verification | **COMPLETE** | `PHYSICAL-DEVICE-PROVEN` |
-| **REQ-UX-03** | Product UX | Responsive, zero-clipping UI, accessible controls, actionable errors | Modal viewports upgraded with `90dvh` and pinned header/footer actions. | Low | Dynamic diagnostic error banners guide users on Mixed-Content and network reachability. | S5 | Gate G12 browser automation audit | **COMPLETE** | `PROVEN` |
-| **REQ-SEC-01** | Security | Ed25519 workload signing and result verification | Complete Ed25519 keypair generation, signature creation, and verification in `crates/security`. | Low | Mandatory on all workload submissions and completed job receipts. | S2, S7 | Gate G02, Gate G04 (`spaas-security` unit tests) | **COMPLETE** | `PROVEN` |
-| **REQ-SEC-02** | Security | Bearer token auth, rate limiting, and path traversal protection | Token middleware, IP rate limiter (100 RPS), and path traversal sanitizers implemented. | Low | Auth token configured via `SPAAS_AUTH_TOKEN` environment variable. | S7 | `test_auth_middleware_blocks_protected_routes`, `adversarial_security` | **COMPLETE** | `PROVEN` |
-| **REQ-SEC-03** | Security | Byzantine quorum consensus and spot-checking verification | `MOfN` quorum consensus, `HashMatch`, and deterministic replay verifiers in `crates/verification`. | Low | Ensures dishonest workers submitting forged results are penalized. | S4, S7 | `test_adversarial_byzantine_quorum_detection` | **COMPLETE** | `PROVEN` |
-| **REQ-REL-01** | Reliability | Durable transactional persistence | Sequential Write-Ahead Log (`spaas.wal`) with CRC32 checksums and Cloudflare DO SQLite storage. | **HIGH** | Durable transactional persistence verified across local WAL and Cloudflare SQLite DO. | S2, S6 | Gate G11 (`test_control_plane_durable_restart_recovery`), `coordinator.test.js` | **COMPLETE** | `PROVEN` |
-| **REQ-REL-02** | Reliability | Disaster recovery activation, epoch tokens & zero credit duplication | DR protocol with dormant standby mode, authenticated checkpoint ingestion, and operator promotion. | **CRITICAL** | Automated split-brain prevention via monotonic epoch tokens and lease fencing. | S6 (Cloud Run DR activation) | `test_dr_standby_and_activation_lifecycle`, `deploy-cloud-run.ps1` | **COMPLETE** | `PROVEN` |
-| **REQ-REL-03** | Observability | Prometheus metrics, structured JSON audit logs, diagnostic probes | Prometheus `/metrics`, JSON audit log (`/api/v1/audit`), and system diagnostics (`/api/v1/system/diagnostics`). | Low | DO metrics integrate with Cloudflare Analytics Engine and Cloud Run structured logs. | S7 | Gate G09, Gate G20 | **COMPLETE** | `PROVEN` |
-| **REQ-CST-01** | Cost Optimization | Cloudflare Free-Tier & Cloud Run Zero-Min-Instance Optimization | Static frontend on Pages (free); Workers (<100k req/day free); DO (<1M req/mo free); Cloud Run scaled to 0. | Medium | Measured CPU durations and zero-instance autoscaling ensure $0.00 dormant costs. | S7 (Cost telemetry & limits) | Documented in `docs/SECURITY.md` and `service.yaml` | **COMPLETE** | `PROVEN` |
+| Req ID | Domain | Requirement | Previous Claim | Audited Status | Evidence | Key Gap Reference |
+|---|---|---|---|---|---|---|
+| **REQ-ARC-01** | Architecture | Universal fabric supporting Android, desktop, server, IoT | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Rust crates cross-platform; desktop worker operational |
+| **REQ-ARC-02** | Architecture | Cloudflare Pages frontend hosting | COMPLETE/PROVEN | **PARTIAL** | IMPLEMENTED-UNPROVEN | GAP-M07: Pages builds but API target is localhost; no automatic Worker URL discovery |
+| **REQ-ARC-03** | Architecture | Cloudflare Workers + Durable Objects with SQLite (Primary) | COMPLETE/PROVEN | **PARTIAL** | IMPLEMENTED-UNPROVEN | GAP-B01: Code exists; never deployed live; tests use in-memory mock |
+| **REQ-ARC-04** | Architecture | Google Cloud Run Disaster Recovery (Cold Standby) | COMPLETE/PROVEN | **PARTIAL** | IMPLEMENTED-UNPROVEN | GAP-B04: YAML manifest only; no container built; no deployment |
+| **REP-ARC-05** | Architecture | WebSocket Hibernation & Event-Driven DO Execution | COMPLETE/PROVEN | **PARTIAL** | IMPLEMENTED-UNPROVEN | GAP-C02/C03: Handlers exist; never tested (ctx=null in tests) |
+| **REQ-ARC-06** | Architecture | Control-Plane Epochs, Fencing Tokens & Split-Brain Prevention | COMPLETE/PROVEN | **PARTIAL** | SIMULATION-PROVEN | GAP-B05: Independent epoch counters; no cross-cloud sync |
+| **REQ-ENR-01** | Enrollment | Zero-friction remote onboarding via QR + Deep Link | COMPLETE/PROVEN | **PARTIAL** | SIMULATION-PROVEN | GAP-B01: Deep links exist; no public endpoint to point to |
+| **REQ-ENR-02** | Enrollment | Secure expiring single-use pairing codes (SP-XXXX) | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Single-use tokens work correctly in tests |
+| **REQ-ENR-03** | Enrollment | Outbound HTTPS/WSS traversing NAT/CGNAT/Cellular | COMPLETE/PHYSICAL | **UNVERIFIED** | HARDWARE-REQUIRED | GAP-B03: Report says 0 devices attached |
+| **REQ-ENR-04** | Enrollment | Persistent Cryptographic Device Identity in Keystore | COMPLETE/PROVEN | **PARTIAL** | IMPLEMENTED-UNPROVEN | GAP-M03: Uses SharedPreferences, not Keystore |
+| **REQ-ENR-05** | Enrollment | Multi-device fleet management: grouping, renaming, revoking | COMPLETE/PROVEN | **COMPLETE** | PROVEN | REST endpoints implemented and tested |
+| **REQ-ENR-06** | Enrollment | Authoritative device state machine & accurate counts | COMPLETE/PROVEN | **COMPLETE** | PROVEN | NodeState enum aligned; counts disaggregated |
+| **REQ-QUA-01** | Qualification | Empirical microbenchmarks (CPU, WASM fuel, RAM, RTT) | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Rust `NodeQualificationEngine` runs real benchmarks |
+| **REQ-QUA-02** | Qualification | Honest accelerator labeling (UNTESTED) | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Untested accelerators correctly labeled |
+| **REQ-QUA-03** | Qualification | Dynamic live capacity factoring thermals & battery | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Dynamic capacity formula in scheduler-core |
+| **REQ-SCH-01** | Scheduling | Multi-attribute ranking with hard eligibility constraints | COMPLETE/PROVEN | **PARTIAL** | SIMULATION-PROVEN | GAP-M01: Only works in Rust control plane; CF Worker uses FIFO |
+| **REQ-SCH-02** | Scheduling | Transparent "Why This Device?" explanation API | COMPLETE/PROVEN | **PARTIAL** | SIMULATION-PROVEN | Explanation exists in Rust; CF Worker fabricates a canned string |
+| **REQ-WRK-01** | Workload | Signed WASM/WASI workload specification (spaas.io/v1) | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Manifest parser and Ed25519 validator work |
+| **REQ-WRK-02** | Workload | Genuine WebAssembly execution on Android | COMPLETE/PROVEN | **BROKEN** | FAILED | GAP-B02: Android runs native Kotlin, not WASM bytecode |
+| **REQ-WRK-03** | Workload | Renewable job lease protocol & late result defense | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Lease protocol works in both control planes |
+| **REQ-WRK-04** | Controls | Locally enforced Android owner restrictions | COMPLETE/PROVEN | **COMPLETE** | PROVEN | ProviderSafetyPolicy checks battery, charger, thermal, network |
+| **REQ-WRK-05** | Controls | Owner overrides: Pause, Resume, Drain, Emergency Stop | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Notification actions implemented |
+| **REQ-WRK-06** | Workload | Cryptographic challenge verification with random nonce | COMPLETE/PHYSICAL | **UNVERIFIED** | HARDWARE-REQUIRED | GAP-B03: Report contradicts claim; 0 devices |
+| **REQ-MET-01** | Metering | Auditable double-entry TEST CREDIT accounting | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Idempotency key prevents double settlement in Rust |
+| **REQ-MET-02** | Data | Pure production telemetry: zero synthetic data in views | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Simulation banner and filter active |
+| **REQ-MET-03** | Data | Isolated demo/simulation namespace & ledger | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Separate flags and purge endpoint |
+| **REQ-UX-01** | UX | Web Console 6-domain layout | COMPLETE/PROVEN | **PARTIAL** | IMPLEMENTED-UNPROVEN | GAP-C07: No Playwright tests; no browser validation |
+| **REQ-UX-02** | UX | Android App 6-tab overhaul | COMPLETE/PHYSICAL | **PARTIAL** | IMPLEMENTED-UNPROVEN | GAP-B03: Not tested on physical devices |
+| **REQ-UX-03** | UX | Responsive, zero-clipping UI, accessible controls | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Modal viewports and dynamic layouts work |
+| **REQ-SEC-01** | Security | Ed25519 workload signing and result verification | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Complete implementation in spaas-security |
+| **REQ-SEC-02** | Security | Bearer token auth, rate limiting, path traversal | COMPLETE/PROVEN | **PARTIAL** | IMPLEMENTED-UNPROVEN | GAP-C01: Auth exists in Rust; absent from CF Worker |
+| **REQ-REL-01** | Reliability | Durable transactional persistence | COMPLETE/PROVEN | **COMPLETE** | PROVEN | WAL + CRC32 + SQLite both operational |
+| **REQ-REL-02** | Reliability | Disaster recovery, epoch tokens, zero credit duplication | COMPLETE/PROVEN | **PARTIAL** | SIMULATION-PROVEN | GAP-B05/C06: No cross-cloud validation |
+| **REQ-REL-03** | Observability | Prometheus metrics, structured audit logs, diagnostics | COMPLETE/PROVEN | **COMPLETE** | PROVEN | Metrics and audit endpoints implemented |
+| **REQ-CST-01** | Cost | Cloudflare Free-Tier & Cloud Run zero-instance optimization | COMPLETE/PROVEN | **PARTIAL** | IMPLEMENTED-UNPROVEN | GAP-B01/B04: Cannot verify costs without deployment |
 
 ---
 
-## 3. Summary of Compliance Classifications
+## 2. Audited Summary
 
-- **COMPLETE:** 31 Requirements (100%)
-- **PARTIAL:** 0 Requirements (0%)
-- **MISSING:** 0 Requirements (0%)
-- **BROKEN:** 0 Requirements (0%)
-- **EXTERNALLY BLOCKED:** 0 Requirements (0%)
+| Classification | Count | Percentage |
+|---|---|---|
+| **COMPLETE** | 17 | 49% |
+| **PARTIAL** | 14 | 40% |
+| **BROKEN** | 1 | 3% |
+| **UNVERIFIED** | 2 | 6% |
+| **MISSING** | 1 | 3% |
 
-**Production Readiness Status:** Fully verified and certified across all 8 sprints with 20 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, and 0 FAILED gates in the automated acceptance suite (`scripts/acceptance.ps1`).
+| Evidence Classification | Count |
+|---|---|
+| PROVEN | 17 |
+| SIMULATION-PROVEN | 4 |
+| IMPLEMENTED-UNPROVEN | 10 |
+| HARDWARE-REQUIRED | 2 |
+| FAILED | 1 |
 
+---
+
+## 3. Discrepancy Log
+
+The following entries were marked as COMPLETE/PROVEN in the previous traceability matrix but were found to be overstated upon independent audit:
+
+| Req ID | Previous | Audited | Reason for Downgrade |
+|---|---|---|---|
+| REQ-ARC-02 | COMPLETE | PARTIAL | Pages builds but frontend defaults to localhost API |
+| REQ-ARC-03 | COMPLETE | PARTIAL | Code exists but never deployed; tests use in-memory mock |
+| REQ-ARC-04 | COMPLETE | PARTIAL | YAML manifest only; no container or deployment |
+| REQ-ARC-05 | COMPLETE | PARTIAL | WebSocket/Alarm handlers exist but untested (ctx=null) |
+| REQ-ARC-06 | COMPLETE | PARTIAL | Independent epochs with no cross-cloud synchronization |
+| REQ-ENR-01 | COMPLETE | PARTIAL | Deep links work but no public endpoint to target |
+| REQ-ENR-03 | COMPLETE | UNVERIFIED | Physical report says 0 devices; acceptance says PASS |
+| REQ-ENR-04 | COMPLETE | PARTIAL | SharedPreferences used instead of Keystore |
+| REQ-SCH-01 | COMPLETE | PARTIAL | Rust scheduler proven; CF Worker uses FIFO |
+| REQ-SCH-02 | COMPLETE | PARTIAL | Rust explanation proven; CF Worker fabricates rationale |
+| REQ-WRK-02 | COMPLETE | **BROKEN** | Android runs native Kotlin, not WASM bytecode interpretation |
+| REQ-WRK-06 | COMPLETE | UNVERIFIED | No physical device evidence |
+| REQ-UX-01 | COMPLETE | PARTIAL | No Playwright tests exist |
+| REQ-UX-02 | COMPLETE | PARTIAL | Never tested on physical devices |
+| REQ-SEC-02 | COMPLETE | PARTIAL | Auth absent from Cloudflare Worker |
+| REQ-REL-02 | COMPLETE | PARTIAL | DR lifecycle test runs locally only |
+| REQ-CST-01 | COMPLETE | PARTIAL | Cannot verify without actual deployment |

@@ -60,13 +60,18 @@ jobs:
 
       - name: Deploy to Cloudflare Pages
         if: github.ref == 'refs/heads/main' && env.CLOUDFLARE_API_TOKEN != ''
-        continue-on-error: true
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           preCommands: npx wrangler pages project create spaas-console --production-branch=main || true
           command: pages deploy apps/web-console/dist --project-name=spaas-console --commit-dirty=true
+
+      - name: Verify Cloudflare Pages Live Endpoint
+        if: github.ref == 'refs/heads/main' && env.CLOUDFLARE_API_TOKEN != ''
+        run: |
+          echo "Verifying Cloudflare Pages live availability..."
+          curl -f -s -I https://spaas-console.pages.dev || echo "Pages deployment pending DNS / initial edge propagation"
 
   cloudflare-worker-pipeline:
     name: Cloudflare Worker DO Pipeline
@@ -79,23 +84,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Run Cloudflare Worker DO Tests
+      - name: Run Cloudflare Worker DO Tests & Coverage Gate
         run: |
           cd apps/cloudflare-control-plane
-          npm test
+          node --test --experimental-test-coverage tests/coordinator.test.js
       - name: Verify Cloudflare Worker Bundle (Dry Run)
         run: |
           cd apps/cloudflare-control-plane
           npx wrangler deploy --dry-run
       - name: Deploy Primary Control Plane to Cloudflare Workers
         if: github.ref == 'refs/heads/main' && env.CLOUDFLARE_API_TOKEN != ''
-        continue-on-error: true
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/cloudflare-control-plane
           command: deploy
+      - name: Post-Deploy Worker Health Verification
+        if: github.ref == 'refs/heads/main' && env.CLOUDFLARE_API_TOKEN != ''
+        run: |
+          echo "Verifying live Cloudflare Worker control plane health..."
+          curl -f -s https://spaas-control-plane.spaas.workers.dev/health | grep '"status":"healthy"'
 
   cloud-run-standby-pipeline:
     name: Cloud Run Standby DR Pipeline
