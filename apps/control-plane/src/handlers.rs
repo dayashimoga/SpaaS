@@ -2026,7 +2026,10 @@ pub async fn ingest_dr_checkpoint(
     if payload.epoch < current_epoch {
         return Err((
             StatusCode::CONFLICT,
-            format!("Stale checkpoint epoch {} < current epoch {}", payload.epoch, current_epoch),
+            format!(
+                "Stale checkpoint epoch {} < current epoch {}",
+                payload.epoch, current_epoch
+            ),
         ));
     }
 
@@ -2045,7 +2048,10 @@ pub async fn ingest_dr_checkpoint(
         for node in payload.nodes {
             let id = node.node_id;
             nodes.insert(id, node.clone());
-            let _ = state.storage.append_event(WalEvent::UpsertNode { node }).await;
+            let _ = state
+                .storage
+                .append_event(WalEvent::UpsertNode { node })
+                .await;
         }
     }
 
@@ -2055,7 +2061,10 @@ pub async fn ingest_dr_checkpoint(
         for job in payload.jobs {
             let id = job.job_id;
             jobs.insert(id, job.clone());
-            let _ = state.storage.append_event(WalEvent::UpsertJob { job }).await;
+            let _ = state
+                .storage
+                .append_event(WalEvent::UpsertJob { job })
+                .await;
         }
     }
 
@@ -2112,7 +2121,9 @@ pub async fn activate_dr(
     state.set_role("ACTIVE_DR").await;
 
     let now = chrono::Utc::now().timestamp_millis();
-    let reason = payload.reason.unwrap_or_else(|| "Operator initiated failover to Cloud Run DR standby".into());
+    let reason = payload
+        .reason
+        .unwrap_or_else(|| "Operator initiated failover to Cloud Run DR standby".into());
 
     let audit = AuditRecord {
         timestamp_ms: now,
@@ -2125,7 +2136,12 @@ pub async fn activate_dr(
         })
         .to_string(),
     };
-    let _ = state.storage.append_event(WalEvent::AppendAudit { record: audit.clone() }).await;
+    let _ = state
+        .storage
+        .append_event(WalEvent::AppendAudit {
+            record: audit.clone(),
+        })
+        .await;
     {
         let mut log = state.audit_log.write().await;
         log.push(audit);
@@ -2501,7 +2517,9 @@ mod tests {
             spec,
             wasm_binary_base64: None,
         };
-        let err = submit_job(State(state.clone()), Json(job_req.clone())).await.unwrap_err();
+        let err = submit_job(State(state.clone()), Json(job_req.clone()))
+            .await
+            .unwrap_err();
         assert_eq!(err.0, StatusCode::PRECONDITION_FAILED);
         assert!(err.1.contains("STANDBY mode"));
 
@@ -2527,7 +2545,10 @@ mod tests {
             nodes: vec![checkpoint_node.clone()],
             jobs: vec![],
         };
-        let cp_res = ingest_dr_checkpoint(State(state.clone()), Json(cp_req)).await.unwrap().0;
+        let cp_res = ingest_dr_checkpoint(State(state.clone()), Json(cp_req))
+            .await
+            .unwrap()
+            .0;
         assert!(cp_res.accepted);
         assert_eq!(cp_res.nodes_synced, 1);
         assert_eq!(state.nodes.read().await.len(), 1);
@@ -2539,7 +2560,9 @@ mod tests {
             nodes: vec![],
             jobs: vec![],
         };
-        let stale_err = ingest_dr_checkpoint(State(state.clone()), Json(stale_cp)).await.unwrap_err();
+        let stale_err = ingest_dr_checkpoint(State(state.clone()), Json(stale_cp))
+            .await
+            .unwrap_err();
         assert_eq!(stale_err.0, StatusCode::CONFLICT);
 
         // 6. Activate DR (operator failover)
@@ -2548,7 +2571,10 @@ mod tests {
             target_epoch: Some(2),
             reason: Some("Primary Cloudflare outage simulation".into()),
         };
-        let act_res = activate_dr(State(state.clone()), Json(act_req)).await.unwrap().0;
+        let act_res = activate_dr(State(state.clone()), Json(act_req))
+            .await
+            .unwrap()
+            .0;
         assert_eq!(act_res["status"], "ACTIVATED");
         assert_eq!(act_res["role"], "ACTIVE_DR");
         assert_eq!(act_res["epoch"], 2);
@@ -2567,7 +2593,10 @@ mod tests {
         let deact_req = DeactivateDrRequest {
             operator_secret: None,
         };
-        let deact_res = deactivate_dr(State(state.clone()), Json(deact_req)).await.unwrap().0;
+        let deact_res = deactivate_dr(State(state.clone()), Json(deact_req))
+            .await
+            .unwrap()
+            .0;
         assert_eq!(deact_res["status"], "STANDBY");
         assert!(state.is_standby().await);
     }
