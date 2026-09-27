@@ -132,7 +132,7 @@ jobs:
           echo "Cloud Run standby manifest verified: 0 min-instances, dormant standby mode"
 
   build-release-binaries:
-    name: Build CLI & Server Binaries
+    name: Build CLI, Server & Desktop Worker Binaries
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -141,14 +141,26 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Build Binaries
-        run: cargo build --release -p spaas-cli -p spaas-control-plane -p spaas-gateway -p spaas-node-simulator
-      - name: Upload CLI Binary
+        run: cargo build --release -p spaas-cli -p spaas-desktop-worker -p spaas-control-plane -p spaas-gateway -p spaas-node-simulator
+      - name: Upload Binaries
         uses: actions/upload-artifact@v4
         with:
-          name: spaas-cli-${{ matrix.os }}
+          name: spaas-binaries-${{ matrix.os }}
           path: |
             target/release/spaas
             target/release/spaas.exe
+            target/release/spaas-desktop-worker
+            target/release/spaas-desktop-worker.exe
+
+  ios-build:
+    name: Build iOS Node Companion (Swift)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Swift SPM Build
+        run: |
+          cd apps/ios-node
+          swift build -v
 
   android-build:
     name: Build Android Node APK

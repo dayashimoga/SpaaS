@@ -15,6 +15,7 @@ members = [
     "apps/gateway",
     "apps/cli",
     "apps/node-simulator",
+    "apps/desktop-worker",
     "tests/integration",
 ]
 
