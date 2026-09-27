@@ -300,15 +300,17 @@ Report-Gate 15 "G14B" "Physical Android Hardware Onboarding & Runtime Execution"
         if ($nodesResp.nodes) {
             $physNode = $nodesResp.nodes | Where-Object { 
                 $_.is_simulated -eq $false -and 
-                ($_.device_type -eq "android_smartphone" -or ($_.capabilities.device_model -and $_.capabilities.device_model -notmatch "Emulator|Simulator|Sybil"))
+                ($_.device_type -eq "android_smartphone" -or $_.device_type -eq "android") -and
+                ($_.capabilities.architecture -match "arm|aarch64") -and
+                ($_.capabilities.device_model -notmatch "Emulator|Simulator|Sybil")
             } | Select-Object -First 1
         }
     } catch {
         Write-Host "Note: Control Plane query: $_" -ForegroundColor DarkGray
     }
 
-    if ($physNode) {
-        Write-Host "Active physical Android smartphone enrolled in Control Plane: $($physNode.capabilities.device_model) (Node ID: $($physNode.node_id))" -ForegroundColor Green
+    if ($physNode -and $adbPhysical) {
+        Write-Host "Active physical Android smartphone enrolled in Control Plane and verified via ADB: $($physNode.capabilities.device_model) (Node ID: $($physNode.node_id))" -ForegroundColor Green
         Write-Host "  - OS: $($physNode.capabilities.os_name) $($physNode.capabilities.os_version), Arch: $($physNode.capabilities.architecture), Cores: $($physNode.capabilities.cpu_cores), RAM: $($physNode.capabilities.total_ram_mb) MB"
         Write-Host "  - Telemetry: Battery $($physNode.telemetry.batteryPct)% ($($physNode.telemetry.charging_state)), Thermals $($physNode.telemetry.thermal_status), Network: $($physNode.telemetry.network_type)"
         
@@ -336,9 +338,6 @@ Report-Gate 15 "G14B" "Physical Android Hardware Onboarding & Runtime Execution"
         }
         
         Write-Host "Physical Android smartphone onboarding, empirical qualification & execution lifecycle proven: PHYSICAL-DEVICE-PROVEN" -ForegroundColor Green
-        "PHYSICAL-DEVICE-PROVEN"
-    } elseif ($adbPhysical) {
-        Write-Host "Active physical Android smartphone detected via ADB: PHYSICAL-DEVICE-PROVEN" -ForegroundColor Green
         "PHYSICAL-DEVICE-PROVEN"
     } else {
         Write-Host "No physical Android smartphone connected via ADB USB/Wi-Fi or enrolled in Control Plane. Gate certified: HARDWARE-REQUIRED (Production harness ready; awaiting physical device attach)." -ForegroundColor Yellow

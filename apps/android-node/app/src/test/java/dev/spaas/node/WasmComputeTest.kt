@@ -83,4 +83,30 @@ class WasmComputeTest {
             workloadName = "infinite-loop-test"
         )
     }
+
+    @Test
+    fun testRealCatalogWasmExecutionIfAvailable() {
+        val candidatePaths = listOf(
+            java.io.File("../../../fixtures/hello_wasi_clean.wasm"),
+            java.io.File("../../fixtures/hello_wasi_clean.wasm"),
+            java.io.File("fixtures/hello_wasi_clean.wasm")
+        )
+        val fixtureFile = candidatePaths.firstOrNull { it.exists() }
+        if (fixtureFile != null) {
+            val wasmBytes = fixtureFile.readBytes()
+            assertTrue(WasmRuntimeEngine.validateWasmBinary(wasmBytes))
+
+            val result = WasmRuntimeEngine.execute(
+                wasmBytes = wasmBytes,
+                config = WasmRuntimeEngine.ExecutionConfig(maxFuel = 10_000_000L),
+                workloadName = "catalog-hello"
+            )
+
+            assertEquals(0, result.exitCode)
+            assertTrue(result.stdout.contains("Hello from SPaaS Universal Edge Compute Fabric!"))
+            assertTrue(result.fuelConsumed > 0)
+            assertEquals(64, result.resultDigest.length)
+        }
+    }
 }
+

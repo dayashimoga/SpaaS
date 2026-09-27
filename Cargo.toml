@@ -10,6 +10,7 @@ members = [
     "crates/telemetry",
     "crates/persistence",
     "crates/node-agent",
+    "crates/benchmark-spec",
     "apps/control-plane",
     "apps/scheduler",
     "apps/gateway",
@@ -37,6 +38,7 @@ spaas-verification = { path = "crates/verification" }
 spaas-telemetry = { path = "crates/telemetry" }
 spaas-persistence = { path = "crates/persistence" }
 spaas-node-agent = { path = "crates/node-agent" }
+spaas-benchmark-spec = { path = "crates/benchmark-spec" }
 
 # Serialization & Core Utilities
 serde = { version = "1.0.210", features = ["derive"] }
