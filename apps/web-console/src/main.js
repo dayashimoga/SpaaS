@@ -1,9 +1,15 @@
+import QRCode from 'qrcode';
+
 // SPaaS Universal Edge Compute Fabric - Management Console Frontend Logic
 // Production-grade client logic with authoritative connectivity, SSE live stream,
 // smartphone-first pairing, dual-mode manifest studio, and unified jobs view.
 
 function getAuthToken() {
-  return localStorage.getItem('spaas_admin_token') || 'spaas_production_admin_secret_2026';
+  const token = localStorage.getItem('spaas_admin_token');
+  if (!token) {
+    console.warn('[SPaaS] No admin token configured. Set one in Administration → Settings.');
+  }
+  return token || '';
 }
 
 function authedHeaders(existingHeaders = {}) {
@@ -15,8 +21,11 @@ function authedHeaders(existingHeaders = {}) {
   return headers;
 }
 
+// Default Cloudflare Worker backend for production deployments
+const CLOUDFLARE_WORKER_URL = 'https://spaas-control-plane.dayashimoga.workers.dev';
+
 function getApiBase() {
-  // 0. Build-time or window-injected API endpoint
+  // 0. Build-time or window-injected API endpoint (highest priority)
   const envApi = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) ||
                  (typeof window !== 'undefined' && window.__SPAAS_API_URL__);
   if (envApi) return envApi.trim().replace(/\/+$/, '');
@@ -43,17 +52,13 @@ function getApiBase() {
   // 3. If running inside local control plane server (port 8080)
   if (window.location.port === '8080') return '';
 
-  // 4. Local dev on localhost or 127.0.0.1
+  // 4. Local dev on localhost or 127.0.0.1 — use local backend
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return 'http://127.0.0.1:8080';
   }
 
-  // 5. When served over HTTPS on Cloudflare Pages (*.pages.dev) or remote origin
-  if (window.location.hostname.endsWith('pages.dev') || window.location.protocol === 'https:') {
-    return 'https://spaas-control-plane.dayashimoga.workers.dev';
-  }
-
-  return 'http://127.0.0.1:8080';
+  // 5. All other origins (Cloudflare Pages, custom domains, remote HTTPS) → Cloudflare Worker
+  return CLOUDFLARE_WORKER_URL;
 }
 
 let API_BASE = getApiBase();
@@ -635,7 +640,7 @@ async function runDiagnostics() {
   const diagMsgGw = document.getElementById('diag-msg-gw');
   const gwStart = performance.now();
   try {
-    const gwUrl = (API_BASE && !API_BASE.includes('127.0.0.1') && !API_BASE.includes('localhost')) ? `${API_BASE}/api/v1/system/health` : 'http://127.0.0.1:8000/api/v1/system/health';
+    const gwUrl = `${API_BASE || CLOUDFLARE_WORKER_URL}/api/v1/system/health`;
     const gwRes = await fetch(gwUrl, { method: 'GET', signal: AbortSignal.timeout(2000) });
     const gwLatency = Math.round(performance.now() - gwStart);
     if (gwRes.ok) {
@@ -726,7 +731,7 @@ async function runDiagnostics() {
       diagTimeCp.textContent = nowStr;
       diagMsgCp.textContent = isHttpsMixedContent
         ? `Browser Mixed Content: HTTPS page blocked unencrypted fetch to ${API_BASE}`
-        : `Connection refused at ${API_BASE || 'http://127.0.0.1:8080'} (${err.message})`;
+        : `Connection refused at ${API_BASE || CLOUDFLARE_WORKER_URL} (${err.message})`;
     }
 
     if (diagBadgeSched) {
@@ -790,7 +795,7 @@ function repairConfiguration() {
   connectEventStream();
   refreshAllData();
   runDiagnostics();
-  alert('Configuration successfully restored to default production endpoint: ' + (API_BASE || 'http://127.0.0.1:8080'));
+  alert('Configuration successfully restored to default production endpoint: ' + (API_BASE || CLOUDFLARE_WORKER_URL));
 }
 
 function copyDiagnosticsReport() {
@@ -1024,7 +1029,7 @@ async function fetchSystemHealth() {
       if (workerChanMetric) workerChanMetric.textContent = sub.worker_channel;
     }
   } catch (err) {
-    const isHttpsPagesWithoutBackend = window.location.protocol === 'https:' && !localStorage.getItem('spaas_api_url') && (!API_BASE || API_BASE === 'http://127.0.0.1:8080');
+    const isHttpsPagesWithoutBackend = window.location.protocol === 'https:' && !localStorage.getItem('spaas_api_url') && (!API_BASE || API_BASE === CLOUDFLARE_WORKER_URL);
     const isHttpsMixedContent = window.location.protocol === 'https:' && (API_BASE.startsWith('http://127.0.0.1') || API_BASE.startsWith('http://localhost') || API_BASE.startsWith('http://'));
     let reason;
     if (isHttpsPagesWithoutBackend) {
@@ -2519,7 +2524,7 @@ function initModals() {
 
   if (btnCopyPsWorker) {
     btnCopyPsWorker.addEventListener('click', () => {
-      const cmd = document.getElementById('worker-ps-snippet')?.textContent || 'powershell -Command "irm http://127.0.0.1:8080/downloads/spaas-desktop-worker.ps1 | iex"';
+      const cmd = document.getElementById('worker-ps-snippet')?.textContent || `powershell -Command "irm ${API_BASE || CLOUDFLARE_WORKER_URL}/downloads/spaas-desktop-worker.ps1 | iex"`;
       navigator.clipboard.writeText(cmd);
       btnCopyPsWorker.textContent = 'Copied!';
       setTimeout(() => { btnCopyPsWorker.textContent = 'Copy Command'; }, 2000);
@@ -2610,6 +2615,52 @@ function initModals() {
     });
   }
 
+  const btnModalUseCf = document.getElementById('btn-modal-use-cf');
+  if (btnModalUseCf) {
+    btnModalUseCf.addEventListener('click', () => {
+      localStorage.setItem('spaas_api_url', CLOUDFLARE_WORKER_URL);
+      API_BASE = CLOUDFLARE_WORKER_URL;
+      const apiInput = document.getElementById('input-api-url');
+      if (apiInput) apiInput.value = CLOUDFLARE_WORKER_URL;
+      closeConnectGuide();
+      connectEventStream();
+      refreshAllData();
+      runDiagnostics();
+      alert('Successfully switched active endpoint to Primary Cloudflare Edge!');
+    });
+  }
+
+  // Universal enrollment tabs
+  const enrollTabs = document.querySelectorAll('.enrollment-tab-btn');
+  enrollTabs.forEach(btn => {
+    btn.addEventListener('click', () => {
+      enrollTabs.forEach(b => {
+        b.classList.remove('btn-cyan-active');
+        b.classList.add('btn-outline-cyan');
+      });
+      btn.classList.add('btn-cyan-active');
+      btn.classList.remove('btn-outline-cyan');
+
+      const plat = btn.getAttribute('data-platform');
+      const step1Desc = document.getElementById('enroll-step1-desc');
+      const step2Desc = document.getElementById('enroll-step2-desc');
+      const badge = document.getElementById('enrollment-status-badge');
+      if (plat === 'android') {
+        if (step1Desc) step1Desc.textContent = 'Install Android APK below or launch existing SPaaS app.';
+        if (step2Desc) step2Desc.textContent = 'Scan QR code with phone camera or enter pairing code.';
+        if (badge) badge.textContent = 'Android Selected';
+      } else if (plat === 'ios') {
+        if (step1Desc) step1Desc.textContent = 'Launch SPaaS Swift Companion on iOS 16+.';
+        if (step2Desc) step2Desc.textContent = 'Scan QR code or enter pairing code in settings.';
+        if (badge) badge.textContent = 'iOS Companion Selected';
+      } else if (plat === 'desktop') {
+        if (step1Desc) step1Desc.textContent = 'Run the PowerShell/Bash runner or native Rust binary.';
+        if (step2Desc) step2Desc.textContent = 'Worker automatically claims pairing token and registers.';
+        if (badge) badge.textContent = 'Desktop Worker Selected';
+      }
+    });
+  });
+
   // Guided workflows buttons
   const btnWfAddDevice = document.getElementById('btn-wf-add-device');
   if (btnWfAddDevice) {
@@ -2695,33 +2746,24 @@ async function fetchApkMetadata() {
 
 let currentPairingUri = '';
 
-function renderPairingQr(text) {
+async function renderPairingQr(text) {
   const container = document.getElementById('modal-qr-container');
   if (!container) return;
-  // Deterministic SVG QR representation
-  let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(i);
-    hash |= 0;
-  }
-  const cells = [];
-  const size = 15;
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      const inFinder1 = (r < 4 && c < 4);
-      const inFinder2 = (r < 4 && c >= size - 4);
-      const inFinder3 = (r >= size - 4 && c < 4);
-      if (inFinder1 || inFinder2 || inFinder3) {
-        cells.push(`<rect x="${c * 8}" y="${r * 8}" width="8" height="8" fill="#06B6D4" rx="1" />`);
-      } else {
-        const bit = ((hash ^ (r * 31 + c * 17)) & (1 << ((r + c) % 16))) !== 0;
-        if (bit) {
-          cells.push(`<rect x="${c * 8}" y="${r * 8}" width="7" height="7" fill="#F8FAFC" opacity="0.85" rx="1" />`);
-        }
+  try {
+    const svg = await QRCode.toString(text, {
+      type: 'svg',
+      margin: 1,
+      width: 140,
+      color: {
+        dark: '#0f172a',
+        light: '#ffffff'
       }
-    }
+    });
+    container.innerHTML = svg;
+  } catch (err) {
+    console.error('Failed to generate QR code:', err);
+    container.innerHTML = `<div class="text-error font-mono p-2" style="font-size:0.75rem;">QR Error: ${err.message}</div>`;
   }
-  container.innerHTML = `<svg viewBox="0 0 ${size * 8} ${size * 8}" width="120" height="120">${cells.join('')}</svg>`;
 }
 
 async function fetchPairingCode(overrideIp = null) {
@@ -2749,22 +2791,28 @@ async function fetchPairingCode(overrideIp = null) {
 
     const res = await fetch(`${API_BASE}/api/v1/devices/pairing-token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authedHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(payload)
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
     const code = data.pairing_code || data.token || 'SP-8492';
-    document.getElementById('modal-pairing-code').textContent = code;
+    const codeEl = document.getElementById('modal-pairing-code');
+    if (codeEl) codeEl.textContent = code;
     const codeStep = document.getElementById('modal-code-display-step');
     if (codeStep) codeStep.textContent = code;
+    const codePreview = document.getElementById('enroll-code-preview');
+    if (codePreview) codePreview.textContent = code;
 
-    const primaryUrl = API_BASE || window.location.origin;
+    const primaryUrl = API_BASE || CLOUDFLARE_WORKER_URL;
     const backupUrl = localStorage.getItem('spaas_backup_url') || 'https://spaas-dr.a.run.app';
     currentPairingUri = data.qr_payload || `spaas://pair?code=${code}&primary=${encodeURIComponent(primaryUrl)}&backup=${encodeURIComponent(backupUrl)}`;
     const uriCaption = document.getElementById('modal-qr-uri-caption');
     if (uriCaption) uriCaption.textContent = currentPairingUri;
+
+    const endpointEl = document.getElementById('enrollment-current-endpoint');
+    if (endpointEl) endpointEl.textContent = primaryUrl;
 
     if (data.lan_url) {
       const lanInput = document.getElementById('input-host-lan-ip');
@@ -2772,11 +2820,11 @@ async function fetchPairingCode(overrideIp = null) {
       const targetLabel = document.getElementById('label-physical-target');
       if (targetLabel) targetLabel.textContent = data.lan_url;
       const detectStatus = document.getElementById('lan-detect-status');
-      if (detectStatus) detectStatus.textContent = 'Active LAN: ' + (data.lan_url.replace('http://', ''));
+      if (detectStatus) detectStatus.textContent = 'Active: ' + (data.lan_url.replace('http://', ''));
     }
 
-    // Dynamic QR generation
-    renderPairingQr(currentPairingUri);
+    // Dynamic standard QR generation
+    await renderPairingQr(currentPairingUri);
 
     // Start 10 minute countdown timer
     let remainingSec = Math.max(0, Math.floor((data.expires_at_ms - Date.now()) / 1000));

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { SPaaSCoordinator } from "../src/coordinator.js";
 import workerGateway from "../src/index.js";
 
-const TEST_ADMIN_SECRET = "spaas_production_admin_secret_2026";
+const TEST_ADMIN_SECRET = "spaas_test_admin_secret_token_override";
 const ADMIN_HEADERS = {
   "Content-Type": "application/json",
   "Authorization": `Bearer ${TEST_ADMIN_SECRET}`

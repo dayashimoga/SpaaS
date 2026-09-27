@@ -12,7 +12,7 @@ export class SPaaSCoordinator {
     this.epoch = parseInt(this.env.SPAAS_CONTROL_PLANE_EPOCH || "1", 10);
     this.role = this.env.SPAAS_ROLE || "PRIMARY";
     this.startTime = Date.now();
-    this.adminSecret = this.env.SPAAS_API_SECRET || this.env.SPAAS_ADMIN_KEY || "spaas_production_admin_secret_2026";
+    this.adminSecret = this.env.SPAAS_API_SECRET || this.env.SPAAS_ADMIN_KEY || "";
     this.rateLimitRps = parseInt(this.env.SPAAS_RATE_LIMIT_RPS || "100", 10);
     this.requireAuth = this.env.SPAAS_REQUIRE_AUTH !== "false";
     this.fabricStatus = "ACTIVE"; // ACTIVE | PAUSED | DRAINING | STOPPED
@@ -300,20 +300,114 @@ export class SPaaSCoordinator {
     const pendingJobs = this.sqlExec(`SELECT * FROM jobs WHERE state = 'Pending' ORDER BY created_at ASC`);
     if (pendingJobs.length === 0) return;
 
-    const readyNodes = this.sqlExec(`SELECT * FROM nodes WHERE state = 'Ready' AND is_simulated = 0`);
+    let readyNodes = this.sqlExec(`SELECT * FROM nodes WHERE state = 'Ready' AND is_simulated = 0`);
     if (readyNodes.length === 0) return;
+
+    const weights = {
+      charging: 0.25,
+      battery: 0.15,
+      thermal: 0.20,
+      network: 0.15,
+      reliability: 0.15,
+      load: 0.05,
+      latency: 0.05
+    };
 
     for (const job of pendingJobs) {
       if (readyNodes.length === 0) break;
-      const selectedNode = readyNodes.shift();
+
+      // Score each ready candidate node per scheduler-core algorithm
+      const scoredCandidates = readyNodes.map(node => {
+        let telemetry = {};
+        try {
+          telemetry = typeof node.telemetry === "string" ? JSON.parse(node.telemetry || "{}") : (node.telemetry || {});
+        } catch (_) {}
+
+        // 1. Charging state
+        let chargingScore = 20.0;
+        const cs = String(telemetry.charging_state || telemetry.charging || "").toLowerCase();
+        if (cs.includes("ac") || cs.includes("wireless") || cs === "full" || cs === "charging") {
+          chargingScore = 100.0;
+        } else if (cs.includes("usb")) {
+          chargingScore = 75.0;
+        }
+
+        // 2. Battery percentage
+        const batteryPct = Number(telemetry.battery_pct ?? telemetry.battery_level ?? 100);
+        const batteryScore = Math.max(0, Math.min(100, batteryPct));
+
+        // 3. Thermal headroom
+        let thermalScore = 100.0;
+        const ts = String(telemetry.thermal_status || "").toLowerCase();
+        if (ts === "light") thermalScore = 80.0;
+        else if (ts === "moderate") thermalScore = 40.0;
+        else if (ts === "severe") thermalScore = 10.0;
+        else if (ts === "critical" || ts === "emergency") thermalScore = 0.0;
+        else if (telemetry.temperature_c !== undefined) {
+          if (telemetry.temperature_c > 45) thermalScore = 10.0;
+          else if (telemetry.temperature_c > 38) thermalScore = 40.0;
+          else if (telemetry.temperature_c > 32) thermalScore = 80.0;
+        }
+
+        // 4. Network quality
+        let networkScore = 10.0;
+        const nt = String(telemetry.network_type || "").toLowerCase();
+        if (nt === "ethernet") networkScore = 100.0;
+        else if (nt.includes("wifi")) networkScore = 90.0;
+        else if (nt === "vpn") networkScore = 50.0;
+        else if (nt.includes("cellular")) networkScore = 30.0;
+        else networkScore = 70.0;
+
+        // 5. Reliability score
+        const relRaw = Number(telemetry.reliability_score ?? 1.0);
+        const relScore = Math.max(0, Math.min(100, relRaw <= 1.0 ? relRaw * 100 : relRaw));
+
+        // 6. Latency score
+        const ping = Number(telemetry.round_trip_ping_ms ?? 50);
+        const latencyScore = Math.max(0, Math.min(100, 100 - ping));
+
+        // 7. Load penalty
+        const loadPenalty = Math.max(0, Math.min(100, Number(telemetry.cpu_usage_pct ?? 0)));
+
+        const compositeScore = (chargingScore * weights.charging)
+          + (batteryScore * weights.battery)
+          + (thermalScore * weights.thermal)
+          + (networkScore * weights.network)
+          + (relScore * weights.reliability)
+          + (latencyScore * weights.latency)
+          - (loadPenalty * weights.load);
+
+        return {
+          node,
+          score: Math.max(0, compositeScore),
+          breakdown: {
+            charging: chargingScore,
+            battery: batteryScore,
+            thermal: thermalScore,
+            network: networkScore,
+            reliability: relScore,
+            ping
+          }
+        };
+      });
+
+      scoredCandidates.sort((a, b) => b.score - a.score);
+      const best = scoredCandidates[0];
+      const selectedNode = best.node;
+
+      // Remove selected node from candidates for subsequent jobs
+      readyNodes = readyNodes.filter(n => n.id !== selectedNode.id);
+
       const fencingToken = crypto.randomUUID();
       const leaseExpiresAt = Date.now() + 30000;
 
       const decision = {
         selected_node_id: selectedNode.id,
         selected_node_name: selectedNode.name,
-        rationale: `Selected ${selectedNode.name} based on capability score, thermal headroom, and low network latency.`,
-        candidates_evaluated: readyNodes.length + 1,
+        score: Math.round(best.score * 100) / 100,
+        score_breakdown: best.breakdown,
+        rationale: `Selected ${selectedNode.name} (composite score: ${best.score.toFixed(2)}) based on capability score, thermal headroom, and low network latency.`,
+        candidates_evaluated: scoredCandidates.length,
         epoch: this.epoch
       };
 
@@ -327,7 +421,7 @@ export class SPaaSCoordinator {
       );
 
       this.sqlExec(`UPDATE nodes SET state = 'Running' WHERE id = ?`, selectedNode.id);
-      this.logAudit("JOB_SCHEDULED", `Job ${job.id} placed on node ${selectedNode.id}`);
+      this.logAudit("JOB_SCHEDULED", `Job ${job.id} placed on node ${selectedNode.id} (score: ${best.score.toFixed(2)})`);
 
       // Push dispatch immediately over hibernated WebSocket if active
       if (this.ctx?.getWebSockets) {

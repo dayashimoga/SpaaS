@@ -55,7 +55,7 @@
             <div id="status-pulse" class="pulse-dot"></div>
             <span id="connection-label">Connecting...</span>
           </div>
-          <div class="connection-endpoint font-mono" id="connection-endpoint-label">http://127.0.0.1:8080</div>
+          <div class="connection-endpoint font-mono" id="connection-endpoint-label">Cloudflare Edge (Auto)</div>
         </div>
       </aside>
 
@@ -1112,7 +1112,7 @@
                     </tr>
                     <tr id="diag-row-cp">
                       <td><span class="icon">🎛️</span> <strong>Control Plane Orchestrator</strong></td>
-                      <td class="font-mono" id="diag-target-cp">http://127.0.0.1:8080/api/v1/system/health</td>
+                      <td class="font-mono" id="diag-target-cp">Primary Edge Fabric (Auto)</td>
                       <td><span id="diag-badge-cp" class="status-badge status-warning">CHECKING...</span></td>
                       <td id="diag-lat-cp">--</td>
                       <td id="diag-time-cp">--</td>
@@ -1230,11 +1230,11 @@
                 <div class="form-group">
                   <label for="input-api-url">Control Plane API Endpoint</label>
                   <div class="input-action-group">
-                    <input type="text" id="input-api-url" class="input-control" value="http://127.0.0.1:8080" />
+                    <input type="text" id="input-api-url" class="input-control" placeholder="https://spaas-control-plane.dayashimoga.workers.dev" value="" />
                     <button id="btn-save-api-url" class="btn btn-primary">Save &amp; Test</button>
                   </div>
                   <div id="settings-mixed-content-hint" style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.5rem; line-height: 1.5;">
-                    <span class="text-amber">⚠️ Cloudflare Pages Notice:</span> When hosted over HTTPS, browsers block direct unencrypted calls to <code class="font-mono text-cyan">http://127.0.0.1:8080</code>.
+                    <span class="text-cyan">ℹ️ Edge Control Plane:</span> Defaults to Cloudflare Workers backend. Override here to point to custom domain or local development endpoint.
                     <button type="button" id="btn-open-connect-guide" class="btn btn-xs btn-outline-cyan" style="margin-left: 0.5rem;">Connection Guide</button>
                   </div>
                 </div>
@@ -1316,72 +1316,42 @@
             </div>
           </div>
 
-          <!-- Host Network Reachability & Endpoint Discovery Card -->
-          <div class="card p-3 mt-3 mb-2" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(6, 182, 212, 0.3);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-              <span style="font-weight: 700; font-size: 0.88rem; color: #f8fafc; display: flex; align-items: center; gap: 0.4rem;">
-                <span>🌐</span> Device Reachability &amp; Host LAN IP
+          <!-- Universal Multi-Platform Enrollment Wizard -->
+          <div class="card p-3 mt-3 mb-2" style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(6, 182, 212, 0.35); border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+              <span style="font-weight: 700; font-size: 0.95rem; color: #f8fafc; display: flex; align-items: center; gap: 0.5rem;">
+                <span>🌐</span> Universal Multi-Platform Enrollment
               </span>
-              <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10B981;" id="lan-detect-status">Auto-Detected</span>
+              <span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #06B6D4;" id="enrollment-status-badge">Step 1: Choose Platform</span>
             </div>
-            
-            <p class="text-sub" style="font-size: 0.8rem; margin-bottom: 0.75rem;">
-              Your phone must connect to this computer over the local network. <strong>127.0.0.1 cannot be used on Android</strong> because it refers to the phone itself.
-            </p>
 
-            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-              <div style="flex: 1; min-width: 220px;">
-                <label for="input-host-lan-ip" class="text-sub font-mono" style="font-size: 0.75rem;">HOST PC LAN IP / URL:</label>
-                <div style="display: flex; gap: 0.4rem; margin-top: 0.25rem;">
-                  <input type="text" id="input-host-lan-ip" class="input-control font-mono" value="http://192.168.0.111:8080" placeholder="http://192.168.x.x:8080" style="font-size: 0.85rem;" />
-                  <button type="button" id="btn-copy-lan-url" class="btn btn-xs btn-outline-cyan" title="Copy endpoint URL">📋 Copy URL</button>
-                  <button type="button" id="btn-update-qr-ip" class="btn btn-xs btn-secondary" title="Update Pairing Code & QR with this IP">Update</button>
-                </div>
+            <!-- Platform Selector Tabs -->
+            <div class="enrollment-platform-tabs" style="display: flex; gap: 0.5rem; margin-bottom: 0.85rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.5rem;">
+              <button type="button" class="btn btn-xs btn-cyan-active enrollment-tab-btn" data-platform="android" id="tab-enroll-android" style="font-weight: 600;">📱 Android Smartphone</button>
+              <button type="button" class="btn btn-xs btn-outline-cyan enrollment-tab-btn" data-platform="ios" id="tab-enroll-ios" style="font-weight: 600;">🍎 Apple iOS</button>
+              <button type="button" class="btn btn-xs btn-outline-cyan enrollment-tab-btn" data-platform="desktop" id="tab-enroll-desktop" style="font-weight: 600;">💻 Desktop (Win/Mac/Linux)</button>
+            </div>
+
+            <!-- 5-Step Progress Bar -->
+            <div class="enrollment-steps-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.5rem; font-size: 0.78rem; margin-bottom: 0.85rem;">
+              <div style="background: rgba(6, 182, 212, 0.08); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(6, 182, 212, 0.25);">
+                <div style="font-weight: 700; color: #38bdf8;">1. Install &amp; Launch</div>
+                <div class="text-sub" id="enroll-step1-desc" style="font-size: 0.72rem; margin-top: 2px;">Install client app or download native binary.</div>
+              </div>
+              <div style="background: rgba(168, 85, 247, 0.08); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(168, 85, 247, 0.25);">
+                <div style="font-weight: 700; color: #c084fc;">2. Scan or Enter Code</div>
+                <div class="text-sub" id="enroll-step2-desc" style="font-size: 0.72rem; margin-top: 2px;">Scan the QR code or enter pairing code above.</div>
+              </div>
+              <div style="background: rgba(16, 185, 129, 0.08); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.25);">
+                <div style="font-weight: 700; color: #34d399;">3. TLS Auto-Benchmark</div>
+                <div class="text-sub" style="font-size: 0.72rem; margin-top: 2px;">Device benchmarks genuine capabilities &amp; enters Ready pool.</div>
               </div>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.78rem;">
-              <div style="background: rgba(6, 182, 212, 0.08); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(6, 182, 212, 0.2);">
-                <strong style="color: #06B6D4;">📱 Physical Phone on Wi-Fi:</strong>
-                <div class="text-sub font-mono font-bold" id="label-physical-target" style="color: #38bdf8;">http://192.168.0.111:8080</div>
-                <div class="text-sub" style="font-size: 0.72rem; margin-top: 0.2rem;">
-                  <strong>Quick Test:</strong> Open Chrome on your phone and browse to this URL. If it loads, pairing will succeed!
-                </div>
-              </div>
-              <div style="background: rgba(168, 85, 247, 0.08); padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(168, 85, 247, 0.2);">
-                <strong style="color: #A855F7;">💻 Android Studio Emulator:</strong>
-                <div class="text-sub font-mono font-bold" style="color: #c084fc;">http://10.0.2.2:8080</div>
-                <div class="text-sub" style="font-size: 0.72rem; margin-top: 0.2rem;">
-                  QEMU default virtual gateway aliases PC localhost directly.
-                </div>
-              </div>
-            </div>
-
-            <!-- Wi-Fi & Firewall Diagnostics Callout -->
-            <div class="mt-2 p-2" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 6px; font-size: 0.75rem; color: #fbbf24;">
-              <div style="display: flex; align-items: flex-start; gap: 0.4rem;">
-                <span style="font-size: 1rem;">⚠️</span>
-                <div>
-                  <strong>Guest Wi-Fi &amp; Firewall Notice:</strong>
-                  <ul style="margin: 0.25rem 0 0.25rem 1rem; padding: 0; line-height: 1.4;">
-                    <li><strong>Avoid "Guest" Wi-Fi networks (e.g. <code>TP-Link_Guest</code>):</strong> Routers isolate devices on guest Wi-Fi (AP Isolation), blocking phone-to-PC communication. Connect both PC and phone to your <strong>primary home Wi-Fi</strong> (e.g. <code>TP-Link_BEC7</code>) or turn on <strong>Mobile Hotspot</strong> on Windows.</li>
-                    <li><strong>Windows Firewall (Site can't be reached fix):</strong> Windows blocks port 8080 on new networks by default. Either:
-                      <div style="margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
-                        <a href="/downloads/allow-firewall-8080.bat" download="allow-firewall-8080.bat" class="btn btn-xs btn-outline-cyan" style="text-decoration: none; padding: 2px 6px; font-weight: bold;">
-                          🛡️ Download 1-Click Firewall Fix (.bat)
-                        </a>
-                        <span class="text-sub" style="font-size: 0.72rem;">or run in Administrator PowerShell:</span>
-                      </div>
-                      <code style="background: rgba(0,0,0,0.4); padding: 2px 4px; border-radius: 3px; font-size: 0.72rem; display: block; margin-top: 2px;">netsh advfirewall firewall add rule name="SPaaS Port 8080" dir=in action=allow protocol=TCP localport=8080</code>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-            <div class="mt-2 text-warning" style="font-size: 0.75rem; display: flex; align-items: center; gap: 0.35rem;">
-              <span>⚠️</span>
-              <span><strong>Android Warning:</strong> Never use <code>127.0.0.1</code> or <code>localhost</code> in the mobile app. The phone will attempt to connect to itself and fail.</span>
+            <!-- Active Endpoint Indicator -->
+            <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.3); padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.78rem;">
+              <span class="text-sub font-mono">Control Plane Endpoint: <strong id="enrollment-current-endpoint" style="color: #38bdf8;">https://spaas-control-plane.dayashimoga.workers.dev</strong></span>
+              <span class="text-emerald" style="font-weight: 600;">✓ Public Internet Edge Ready</span>
             </div>
           </div>
 
@@ -1451,7 +1421,7 @@
                 <span>POWERSHELL RUNNER</span>
                 <button type="button" id="btn-copy-ps-worker" class="btn btn-xs btn-secondary">Copy Command</button>
               </div>
-              <pre class="terminal-view" id="worker-ps-snippet">powershell -Command "irm http://127.0.0.1:8080/downloads/spaas-desktop-worker.ps1 | iex"</pre>
+              <pre class="terminal-view" id="worker-ps-snippet">powershell -Command "irm https://spaas-control-plane.dayashimoga.workers.dev/downloads/spaas-desktop-worker.ps1 | iex"</pre>
             </div>
           </div>
 
@@ -1542,59 +1512,54 @@
           <!-- Notice card -->
           <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.3); border-radius: 8px; padding: 0.875rem 1rem;">
             <div style="font-weight: 600; color: #38bdf8; margin-bottom: 0.25rem; display: flex; align-items: center; gap: 0.5rem;">
-              <span>ℹ️</span> Why does "Control Plane unavailable" show on Cloudflare Pages?
+              <span>🌐</span> Control Plane Connectivity Architecture
             </div>
             <p style="font-size: 0.85rem; color: #94a3b8; margin: 0; line-height: 1.5;">
-              This web console is served over <strong>HTTPS</strong> (<code class="font-mono text-cyan">pages.dev</code>). Web browsers strictly block HTTPS pages from making unencrypted requests to <code class="font-mono text-cyan">http://127.0.0.1:8080</code> (known as <em>Mixed Active Content</em>). Choose any of the quick options below to connect:
+              SPaaS uses a <strong>Cloudflare Workers + SQLite Durable Objects</strong> architecture as its primary edge control plane, backed by an optional Google Cloud Run disaster recovery standby. Choose your connection target below:
             </p>
           </div>
 
-          <!-- Option 1: Chrome Insecure Content Setting -->
+          <!-- Option 1: Primary Cloudflare Edge -->
           <div style="background: var(--bg-card, #131b2e); border: 1px solid var(--border-color, #1e293b); border-radius: 8px; padding: 1rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-              <span style="font-weight: 600; color: #f8fafc; font-size: 0.95rem;">Option 1: Allow Insecure Content in Chrome / Edge (10 Seconds, Zero-Install)</span>
-              <span class="badge badge-proven" style="font-size: 0.7rem;">Fastest for Local Dev</span>
-            </div>
-            <ol style="font-size: 0.85rem; color: #cbd5e1; margin: 0; padding-left: 1.25rem; line-height: 1.6;">
-              <li>In your browser's address bar, click the <strong>Site Settings icon</strong> (the tune/slider icon to the left of the URL).</li>
-              <li>Click <strong>Site settings</strong>.</li>
-              <li>Scroll down to <strong>Insecure content</strong> and change it from <em>Block</em> to <strong>Allow</strong>.</li>
-              <li>Return here and reload the page. The console will immediately connect to your local <code class="font-mono text-cyan">http://127.0.0.1:8080</code>!</li>
-            </ol>
-          </div>
-
-          <!-- Option 2: Cloudflare Tunnel -->
-          <div style="background: var(--bg-card, #131b2e); border: 1px solid var(--border-color, #1e293b); border-radius: 8px; padding: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-              <span style="font-weight: 600; color: #f8fafc; font-size: 0.95rem;">Option 2: Cloudflare Tunnel (HTTPS &mdash; Recommended for Real Phones &amp; Remote)</span>
-              <span class="badge badge-sim" style="font-size: 0.7rem; background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: rgba(16, 185, 129, 0.4);">Production Grade</span>
-            </div>
-            <p style="font-size: 0.85rem; color: #cbd5e1; margin: 0 0 0.75rem 0; line-height: 1.5;">
-              Create a free instant HTTPS tunnel to your local control plane using Cloudflare:
-            </p>
-            <div style="background: #0a0f1d; border: 1px solid #1e293b; border-radius: 6px; padding: 0.6rem 0.8rem; font-family: monospace; font-size: 0.8rem; color: #38bdf8; margin-bottom: 0.75rem;">
-              cloudflared tunnel --url http://127.0.0.1:8080
-            </div>
-            <p style="font-size: 0.8rem; color: #94a3b8; margin: 0 0 0.5rem 0;">
-              Paste the generated <code class="font-mono text-cyan">https://&lt;subdomain&gt;.trycloudflare.com</code> URL below:
-            </p>
-            <div style="display: flex; gap: 0.5rem;">
-              <input type="text" id="input-modal-tunnel-url" class="input-control" placeholder="https://random-words.trycloudflare.com" style="flex: 1; font-family: monospace; font-size: 0.85rem;">
-              <button id="btn-modal-save-tunnel" class="btn btn-primary" style="white-space: nowrap;">Connect</button>
-            </div>
-          </div>
-
-          <!-- Option 3: Localhost Direct -->
-          <div style="background: var(--bg-card, #131b2e); border: 1px solid var(--border-color, #1e293b); border-radius: 8px; padding: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-              <span style="font-weight: 600; color: #f8fafc; font-size: 0.95rem;">Option 3: Open Web Console Directly from Local Control Plane</span>
+              <span style="font-weight: 600; color: #f8fafc; font-size: 0.95rem;">Option 1: Primary Cloudflare Edge (Default &amp; Recommended)</span>
+              <span class="badge badge-sim" style="font-size: 0.7rem; background: rgba(16, 185, 129, 0.2); color: #34d399; border-color: rgba(16, 185, 129, 0.4);">Production Active</span>
             </div>
             <p style="font-size: 0.85rem; color: #cbd5e1; margin: 0 0 0.5rem 0; line-height: 1.5;">
-              Your local SPaaS Control Plane binary already serves the compiled web console directly on port 8080 with zero mixed-content barriers:
+              Connect directly to the global Cloudflare Edge cluster over HTTPS with zero mixed-content barriers:
             </p>
-            <a href="http://127.0.0.1:8080" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; font-size: 0.85rem;">
-              <span>🌐 Open http://127.0.0.1:8080</span> &rarr;
-            </a>
+            <div style="background: #0a0f1d; border: 1px solid #1e293b; border-radius: 6px; padding: 0.5rem 0.75rem; font-family: monospace; font-size: 0.82rem; color: #38bdf8; margin-bottom: 0.5rem;">
+              https://spaas-control-plane.dayashimoga.workers.dev
+            </div>
+            <button id="btn-modal-use-cf" class="btn btn-xs btn-primary">Connect to Cloudflare Edge</button>
+          </div>
+
+          <!-- Option 2: Custom Domain or Tunnel -->
+          <div style="background: var(--bg-card, #131b2e); border: 1px solid var(--border-color, #1e293b); border-radius: 8px; padding: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-weight: 600; color: #f8fafc; font-size: 0.95rem;">Option 2: Custom Domain or Cloudflare Tunnel</span>
+              <span class="badge badge-proven" style="font-size: 0.7rem;">Custom Ingress</span>
+            </div>
+            <p style="font-size: 0.85rem; color: #cbd5e1; margin: 0 0 0.5rem 0; line-height: 1.5;">
+              Paste your custom edge ingress or tunnel URL:
+            </p>
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="text" id="input-modal-tunnel-url" class="input-control font-mono" placeholder="https://controlplane.yourdomain.com" style="flex: 1; font-size: 0.85rem;">
+              <button id="btn-modal-save-tunnel" class="btn btn-secondary" style="white-space: nowrap;">Connect</button>
+            </div>
+          </div>
+
+          <!-- Option 3: Local Development -->
+          <div style="background: var(--bg-card, #131b2e); border: 1px solid var(--border-color, #1e293b); border-radius: 8px; padding: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <span style="font-weight: 600; color: #f8fafc; font-size: 0.95rem;">Option 3: Local Development Binary (spaas-coordinator)</span>
+            </div>
+            <p style="font-size: 0.85rem; color: #cbd5e1; margin: 0 0 0.5rem 0; line-height: 1.5;">
+              When testing locally, run the Rust coordinator with CORS enabled for localhost:
+            </p>
+            <div style="background: #0a0f1d; border: 1px solid #1e293b; border-radius: 6px; padding: 0.5rem 0.75rem; font-family: monospace; font-size: 0.8rem; color: #38bdf8;">
+              cargo run -p spaas-coordinator -- --port 8080
+            </div>
           </div>
         </div>
 
