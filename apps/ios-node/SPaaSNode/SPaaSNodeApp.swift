@@ -1,6 +1,8 @@
 import SwiftUI
 
+#if !SWIFT_PACKAGE
 @main
+#endif
 public struct SPaaSNodeApp: App {
     @StateObject private var workerService = WorkerService()
 
