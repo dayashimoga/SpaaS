@@ -185,10 +185,26 @@ jobs:
           name: spaas-android-node-apk
           path: apps/android-node/app/build/outputs/apk/debug/app-debug.apk
 
+  sbom-generation:
+    name: Generate CycloneDX SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate CycloneDX SBOM via Syft
+        uses: anchore/sbom-action@v0
+        with:
+          format: 'cyclonedx-json'
+          output-file: 'spaas-sbom.cdx.json'
+      - name: Upload CycloneDX SBOM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spaas-cyclonedx-sbom
+          path: spaas-sbom.cdx.json
+
   acceptance-gate:
     name: Full Acceptance Gate
     runs-on: ubuntu-latest
-    needs: [test-suite, web-console-build, android-build, cloudflare-worker-pipeline, cloud-run-standby-pipeline]
+    needs: [test-suite, web-console-build, android-build, cloudflare-worker-pipeline, cloud-run-standby-pipeline, sbom-generation]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -200,6 +216,11 @@ jobs:
         with:
           name: spaas-android-node-apk
           path: apps/android-node/app/build/outputs/apk/debug/
+      - name: Download CycloneDX SBOM
+        uses: actions/download-artifact@v4
+        with:
+          name: spaas-cyclonedx-sbom
+          path: ./
       - name: Install Web Console Deps
         run: cd apps/web-console && npm ci
       - name: Make Scripts Executable
@@ -208,11 +229,12 @@ jobs:
         run: ./scripts/acceptance
       - name: Generate Checksums & SBOM
         run: |
-          sha256sum acceptance-report.json > checksums.sha256
+          sha256sum acceptance-report.json spaas-sbom.cdx.json > checksums.sha256
       - name: Upload Acceptance Report
         uses: actions/upload-artifact@v4
         with:
           name: acceptance-certification-report
           path: |
             acceptance-report.json
+            spaas-sbom.cdx.json
             checksums.sha256

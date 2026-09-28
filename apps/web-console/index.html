@@ -266,7 +266,10 @@
           <!-- Real/Simulated Fleet Separation Filter Bar -->
           <div class="fleet-filter-bar mb-3">
             <div class="fleet-filter-pills">
-              <button type="button" class="btn btn-sm btn-filter-tab active" data-fleet-tab="physical" id="tab-filter-physical">
+              <button type="button" class="btn btn-sm btn-filter-tab active" data-fleet-tab="all" id="tab-filter-all">
+                🌐 All Fleet (<span id="tab-count-all">0</span>)
+              </button>
+              <button type="button" class="btn btn-sm btn-filter-tab" data-fleet-tab="physical" id="tab-filter-physical">
                 📱 Physical Android (<span id="tab-count-physical">0</span>)
               </button>
               <button type="button" class="btn btn-sm btn-filter-tab" data-fleet-tab="ios" id="tab-filter-ios">
@@ -280,9 +283,6 @@
               </button>
               <button type="button" class="btn btn-sm btn-filter-tab" data-fleet-tab="simulated" id="tab-filter-simulated">
                 🧪 Simulated (<span id="tab-count-simulated">0</span>)
-              </button>
-              <button type="button" class="btn btn-sm btn-filter-tab" data-fleet-tab="all" id="tab-filter-all">
-                🌐 All Fleet (<span id="tab-count-all">0</span>)
               </button>
             </div>
             <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
@@ -444,107 +444,108 @@
                 </div>
               </div>
 
-            <!-- Subtab 3: Power/Thermal -->
-            <div id="devicetab-view-power" class="device-pane">
-              <div class="spec-list">
-                <div class="spec-row"><span class="spec-label">Battery Level:</span> <span id="detail-hw-battery" class="spec-val font-bold">-</span></div>
-                <div class="spec-row"><span class="spec-label">Power Source:</span> <span id="detail-hw-charging" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Thermal Status:</span> <span id="detail-hw-thermal" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Estimated Temperature:</span> <span id="detail-hw-temp" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Thermal Safety Cutoff:</span> <span id="detail-policy-thermal-cutoff" class="spec-val text-amber">Moderate</span></div>
-              </div>
-            </div>
-
-            <!-- Subtab 4: Network -->
-            <div id="devicetab-view-network" class="device-pane">
-              <div class="spec-list">
-                <div class="spec-row"><span class="spec-label">Interface Type:</span> <span id="detail-hw-net" class="spec-val">-</span></div>
-                <div class="spec-row"><span class="spec-label">Unmetered Network Only:</span> <span id="detail-policy-unmetered" class="spec-val font-bold text-emerald">Enabled</span></div>
-                <div class="spec-row"><span class="spec-label">Round Trip Ping:</span> <span id="detail-hw-ping" class="spec-val font-mono">18 ms</span></div>
-                <div class="spec-row"><span class="spec-label">Downlink Bandwidth:</span> <span id="detail-hw-downlink" class="spec-val font-mono">50 Mbps</span></div>
-              </div>
-            </div>
-
-            <!-- Subtab 5: Security -->
-            <div id="devicetab-view-security" class="device-pane">
-              <div class="spec-list">
-                <div class="spec-row"><span class="spec-label">Ed25519 Public Key:</span> <span id="detail-hw-pubkey" class="spec-val font-mono truncate">-</span></div>
-                <div class="spec-row"><span class="spec-label">Enrollment Status:</span> <span id="detail-hw-enrollment" class="spec-val font-bold text-emerald">Enrolled</span></div>
-                <div class="spec-row"><span class="spec-label">WASM Sandboxing:</span> <span class="spec-val text-emerald">Deterministic Fuel Metering (wasmi Core)</span></div>
-                <div class="spec-row"><span class="spec-label">Qualification Signature:</span> <span id="detail-node-sig" class="spec-val font-mono truncate">-</span></div>
-              </div>
-            </div>
-
-            <!-- Subtab 6: Jobs -->
-            <div id="devicetab-view-jobs" class="device-pane">
-              <div class="spec-list">
-                <div class="spec-row"><span class="spec-label">Active Running Job:</span> <span id="detail-device-active-job" class="spec-val font-mono">None</span></div>
-                <div class="spec-row"><span class="spec-label">Total Jobs Completed:</span> <span id="detail-device-jobs-completed" class="spec-val font-bold text-emerald">0</span></div>
-                <div class="spec-row"><span class="spec-label">Total Jobs Failed:</span> <span id="detail-device-jobs-failed" class="spec-val text-rose">0</span></div>
-                <div class="spec-row"><span class="spec-label">Empirical Reliability Score:</span> <span id="detail-device-reliability" class="spec-val font-bold text-cyan">100%</span></div>
-              </div>
-              <div class="mt-3">
-                <button type="button" id="btn-cancel-device-job" class="btn btn-xs btn-outline-rose">Cancel Active Job</button>
-              </div>
-            </div>
-
-            <!-- Subtab 7: Earnings -->
-            <div id="devicetab-view-earnings" class="device-pane">
-              <div class="spec-list">
-                <div class="spec-row"><span class="spec-label">Accumulated TEST CREDITS:</span> <span id="detail-device-credits" class="spec-val font-bold text-emerald">0 CR</span></div>
-                <div class="spec-row"><span class="spec-label">Total Execution Fuel:</span> <span id="detail-device-fuel" class="spec-val font-mono">0</span></div>
-                <div class="spec-row"><span class="spec-label">Accounting Disclaimer:</span> <span class="spec-val text-muted">All settlements are in TEST CREDITS for demonstration purposes.</span></div>
-              </div>
-            </div>
-
-            <!-- Subtab 8: Diagnostics & Controls -->
-            <div id="devicetab-view-controls" class="device-pane">
-              <div class="device-action-bar">
-                <button type="button" id="btn-action-rename" class="btn btn-sm btn-secondary">✏️ Rename Device</button>
-                <button type="button" id="btn-action-toggle-pause" class="btn btn-sm btn-outline-cyan">⏸️ Pause Compute</button>
-                <button type="button" id="btn-action-drain" class="btn btn-sm btn-secondary">🛡️ Drain Jobs</button>
-                <button type="button" id="btn-action-requalify" class="btn btn-sm btn-secondary">⚡ Requalify</button>
-                <button type="button" id="btn-action-revoke" class="btn btn-sm btn-outline-rose">🚫 Revoke Identity</button>
-                <button type="button" id="btn-action-remove" class="btn btn-sm btn-outline-rose">🗑️ Remove</button>
-              </div>
-
-              <div class="card p-3 mt-3">
-                <h4 class="mb-2">Configurable Compute &amp; Safety Policy</h4>
-                <div class="policy-grid">
-                  <div class="form-group">
-                    <label for="policy-input-cpu">Max CPU Workload Limit (%)</label>
-                    <input type="number" id="policy-input-cpu" class="input-control" value="60" min="10" max="100" />
-                  </div>
-                  <div class="form-group">
-                    <label for="policy-input-ram">Max RAM Allocated (MB)</label>
-                    <input type="number" id="policy-input-ram" class="input-control" value="512" min="64" max="4096" />
-                  </div>
-                  <div class="form-group">
-                    <label for="policy-input-battery">Minimum Battery Level (%)</label>
-                    <input type="number" id="policy-input-battery" class="input-control" value="40" min="10" max="95" />
-                  </div>
-                  <div class="form-group">
-                    <label for="policy-select-thermal">Thermal Shutdown Cutoff</label>
-                    <select id="policy-select-thermal" class="input-control">
-                      <option value="LIGHT">Light</option>
-                      <option value="MODERATE" selected>Moderate</option>
-                      <option value="SEVERE">Severe</option>
-                      <option value="CRITICAL">Critical</option>
-                    </select>
-                  </div>
+              <!-- Subtab 3: Power/Thermal -->
+              <div id="devicetab-view-power" class="device-pane">
+                <div class="spec-list">
+                  <div class="spec-row"><span class="spec-label">Battery Level:</span> <span id="detail-hw-battery" class="spec-val font-bold">-</span></div>
+                  <div class="spec-row"><span class="spec-label">Power Source:</span> <span id="detail-hw-charging" class="spec-val">-</span></div>
+                  <div class="spec-row"><span class="spec-label">Thermal Status:</span> <span id="detail-hw-thermal" class="spec-val">-</span></div>
+                  <div class="spec-row"><span class="spec-label">Estimated Temperature:</span> <span id="detail-hw-temp" class="spec-val">-</span></div>
+                  <div class="spec-row"><span class="spec-label">Thermal Safety Cutoff:</span> <span id="detail-policy-thermal-cutoff" class="spec-val text-amber">Moderate</span></div>
                 </div>
-                <div class="form-row-checks mt-2">
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="policy-check-charging" checked />
-                    <span>Only accept compute while plugged into charger</span>
-                  </label>
-                  <label class="checkbox-label">
-                    <input type="checkbox" id="policy-check-unmetered" checked />
-                    <span>Require unmetered Wi-Fi / Ethernet connection</span>
-                  </label>
+              </div>
+
+              <!-- Subtab 4: Network -->
+              <div id="devicetab-view-network" class="device-pane">
+                <div class="spec-list">
+                  <div class="spec-row"><span class="spec-label">Interface Type:</span> <span id="detail-hw-net" class="spec-val">-</span></div>
+                  <div class="spec-row"><span class="spec-label">Unmetered Network Only:</span> <span id="detail-policy-unmetered" class="spec-val font-bold text-emerald">Enabled</span></div>
+                  <div class="spec-row"><span class="spec-label">Round Trip Ping:</span> <span id="detail-hw-ping" class="spec-val font-mono">18 ms</span></div>
+                  <div class="spec-row"><span class="spec-label">Downlink Bandwidth:</span> <span id="detail-hw-downlink" class="spec-val font-mono">50 Mbps</span></div>
+                </div>
+              </div>
+
+              <!-- Subtab 5: Security -->
+              <div id="devicetab-view-security" class="device-pane">
+                <div class="spec-list">
+                  <div class="spec-row"><span class="spec-label">Ed25519 Public Key:</span> <span id="detail-hw-pubkey" class="spec-val font-mono truncate">-</span></div>
+                  <div class="spec-row"><span class="spec-label">Enrollment Status:</span> <span id="detail-hw-enrollment" class="spec-val font-bold text-emerald">Enrolled</span></div>
+                  <div class="spec-row"><span class="spec-label">WASM Sandboxing:</span> <span class="spec-val text-emerald">Deterministic Fuel Metering (wasmi Core)</span></div>
+                  <div class="spec-row"><span class="spec-label">Qualification Signature:</span> <span id="detail-node-sig" class="spec-val font-mono truncate">-</span></div>
+                </div>
+              </div>
+
+              <!-- Subtab 6: Jobs -->
+              <div id="devicetab-view-jobs" class="device-pane">
+                <div class="spec-list">
+                  <div class="spec-row"><span class="spec-label">Active Running Job:</span> <span id="detail-device-active-job" class="spec-val font-mono">None</span></div>
+                  <div class="spec-row"><span class="spec-label">Total Jobs Completed:</span> <span id="detail-device-jobs-completed" class="spec-val font-bold text-emerald">0</span></div>
+                  <div class="spec-row"><span class="spec-label">Total Jobs Failed:</span> <span id="detail-device-jobs-failed" class="spec-val text-rose">0</span></div>
+                  <div class="spec-row"><span class="spec-label">Empirical Reliability Score:</span> <span id="detail-device-reliability" class="spec-val font-bold text-cyan">100%</span></div>
                 </div>
                 <div class="mt-3">
-                  <button type="button" id="btn-save-device-policy" class="btn btn-sm btn-primary">💾 Save Device Policy</button>
+                  <button type="button" id="btn-cancel-device-job" class="btn btn-xs btn-outline-rose">Cancel Active Job</button>
+                </div>
+              </div>
+
+              <!-- Subtab 7: Earnings -->
+              <div id="devicetab-view-earnings" class="device-pane">
+                <div class="spec-list">
+                  <div class="spec-row"><span class="spec-label">Accumulated TEST CREDITS:</span> <span id="detail-device-credits" class="spec-val font-bold text-emerald">0 CR</span></div>
+                  <div class="spec-row"><span class="spec-label">Total Execution Fuel:</span> <span id="detail-device-fuel" class="spec-val font-mono">0</span></div>
+                  <div class="spec-row"><span class="spec-label">Accounting Disclaimer:</span> <span class="spec-val text-muted">All settlements are in TEST CREDITS for demonstration purposes.</span></div>
+                </div>
+              </div>
+
+              <!-- Subtab 8: Diagnostics & Controls -->
+              <div id="devicetab-view-controls" class="device-pane">
+                <div class="device-action-bar">
+                  <button type="button" id="btn-action-rename" class="btn btn-sm btn-secondary">✏️ Rename Device</button>
+                  <button type="button" id="btn-action-toggle-pause" class="btn btn-sm btn-outline-cyan">⏸️ Pause Compute</button>
+                  <button type="button" id="btn-action-drain" class="btn btn-sm btn-secondary">🛡️ Drain Jobs</button>
+                  <button type="button" id="btn-action-requalify" class="btn btn-sm btn-secondary">⚡ Requalify</button>
+                  <button type="button" id="btn-action-revoke" class="btn btn-sm btn-outline-rose">🚫 Revoke Identity</button>
+                  <button type="button" id="btn-action-remove" class="btn btn-sm btn-outline-rose">🗑️ Remove</button>
+                </div>
+
+                <div class="card p-3 mt-3">
+                  <h4 class="mb-2">Configurable Compute &amp; Safety Policy</h4>
+                  <div class="policy-grid">
+                    <div class="form-group">
+                      <label for="policy-input-cpu">Max CPU Workload Limit (%)</label>
+                      <input type="number" id="policy-input-cpu" class="input-control" value="60" min="10" max="100" />
+                    </div>
+                    <div class="form-group">
+                      <label for="policy-input-ram">Max RAM Allocated (MB)</label>
+                      <input type="number" id="policy-input-ram" class="input-control" value="512" min="64" max="4096" />
+                    </div>
+                    <div class="form-group">
+                      <label for="policy-input-battery">Minimum Battery Level (%)</label>
+                      <input type="number" id="policy-input-battery" class="input-control" value="40" min="10" max="95" />
+                    </div>
+                    <div class="form-group">
+                      <label for="policy-select-thermal">Thermal Shutdown Cutoff</label>
+                      <select id="policy-select-thermal" class="input-control">
+                        <option value="LIGHT">Light</option>
+                        <option value="MODERATE" selected>Moderate</option>
+                        <option value="SEVERE">Severe</option>
+                        <option value="CRITICAL">Critical</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-row-checks mt-2">
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="policy-check-charging" checked />
+                      <span>Only accept compute while plugged into charger</span>
+                    </label>
+                    <label class="checkbox-label">
+                      <input type="checkbox" id="policy-check-unmetered" checked />
+                      <span>Require unmetered Wi-Fi / Ethernet connection</span>
+                    </label>
+                  </div>
+                  <div class="mt-3">
+                    <button type="button" id="btn-save-device-policy" class="btn btn-sm btn-primary">💾 Save Device Policy</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -944,6 +945,8 @@
               <div class="spec-row"><span class="spec-label">Provider Payout Ratio:</span> <span class="spec-val text-emerald font-bold">90% of total settlement</span></div>
               <div class="spec-row"><span class="spec-label">Protocol Safety Reserve:</span> <span class="spec-val text-muted">10% retained for zero-trust arbitration</span></div>
             </div>
+          </div>
+
           <!-- Consumer Account & Balance Section -->
           <div class="card mt-4 p-3" style="border-top: 3px solid var(--accent-cyan);">
             <div class="flex items-center justify-between mb-3" style="flex-wrap: wrap; gap: 0.75rem;">
@@ -1539,6 +1542,8 @@
           </div>
         </form>
       </div>
+    </div>
+
     <!-- Modal: Connect Control Plane Guide -->
     <div id="modal-connect-guide" class="modal-overlay hidden">
       <div class="modal-box modal-lg">

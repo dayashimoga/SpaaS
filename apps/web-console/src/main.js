@@ -287,7 +287,7 @@ spec:
 
 // Application State
 let currentTab = 'overview';
-let currentFleetTab = 'physical'; // Default to Real Physical Devices
+let currentFleetTab = 'all'; // Default to All Fleet so connected devices are immediately visible
 let cachedNodes = [];
 let cachedJobs = [];
 let cachedMetering = [];
@@ -3241,7 +3241,7 @@ function initDeviceControls() {
       try {
         const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/rename`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authedHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ name: newName.trim() })
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3259,7 +3259,7 @@ function initDeviceControls() {
       try {
         const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/state`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authedHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ state: newState })
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3277,7 +3277,7 @@ function initDeviceControls() {
       try {
         const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/state`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authedHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ state: 'Draining' })
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3298,7 +3298,8 @@ function initDeviceControls() {
     }
     try {
       const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/qualification/run`, {
-        method: 'POST'
+        method: 'POST',
+        headers: authedHeaders()
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -3331,7 +3332,8 @@ function initDeviceControls() {
       btnRunChallenge.disabled = true;
       try {
         const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/dispatch-challenge`, {
-          method: 'POST'
+          method: 'POST',
+          headers: authedHeaders()
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
@@ -3363,7 +3365,8 @@ function initDeviceControls() {
       if (!confirm(`Permanently remove device ${selectedNode.node_id.substring(0, 8)} from the cluster fabric?`)) return;
       try {
         const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}`, {
-          method: 'DELETE'
+          method: 'DELETE',
+          headers: authedHeaders()
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         selectedNode = null;
@@ -3387,7 +3390,7 @@ function initDeviceControls() {
       try {
         const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/policy`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authedHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             max_cpu_pct: cpu,
             max_ram_mb: ram,

@@ -17,3 +17,5 @@ SPAAS_ROLE = "PRIMARY"
 SPAAS_CONTROL_PLANE_EPOCH = "1"
 SPAAS_ENVIRONMENT = "production"
 SPAAS_RATE_LIMIT_RPS = "100"
+SPAAS_ALLOWED_ORIGINS = "https://spaas-console.pages.dev,http://localhost:5173,http://127.0.0.1:5173"
+

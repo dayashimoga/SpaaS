@@ -459,13 +459,14 @@ test("SPaaS Gateway — Ingress CORS & APK Download Metadata", async () => {
   assert.equal(apkInfoRes.headers.get("X-Content-Type-Options"), "nosniff");
   assert.equal(apkInfoRes.headers.get("X-Frame-Options"), "DENY");
 
-  // 3. Worker Gateway Fallback Dispatching
+  // 3. Worker Gateway Fallback Dispatching (Verifies Restricted CORS)
   const gwHealthRes = await workerGateway.fetch(
-    new Request("http://localhost/health"),
+    new Request("http://localhost/health", { headers: { Origin: "https://spaas-console.pages.dev" } }),
     { SPAAS_ROLE: "PRIMARY", SPAAS_API_SECRET: TEST_ADMIN_SECRET }
   );
   assert.equal(gwHealthRes.status, 200);
-  assert.equal(gwHealthRes.headers.get("Access-Control-Allow-Origin"), "*");
+  assert.equal(gwHealthRes.headers.get("Access-Control-Allow-Origin"), "https://spaas-console.pages.dev");
+  assert.equal(gwHealthRes.headers.get("Vary"), "Origin");
 
   // 4. Worker Gateway DO Binding Forwarding
   const mockStub = {

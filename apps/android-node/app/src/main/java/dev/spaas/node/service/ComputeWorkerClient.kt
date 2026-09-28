@@ -63,9 +63,46 @@ object ComputeWorkerClient {
     var appContext: android.content.Context? = null
     private var nodeKeyPair: java.security.KeyPair? = null
 
+    private fun getSecurePreferences(context: android.content.Context): android.content.SharedPreferences {
+        return try {
+            val masterKey = androidx.security.crypto.MasterKey.Builder(context)
+                .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            val securePrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
+                context,
+                "spaas_node_identity_secure",
+                masterKey,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+
+            // One-time automatic migration from legacy unencrypted prefs if present
+            val legacyPrefs = context.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE)
+            if (legacyPrefs.contains("paired_node_id") && !securePrefs.contains("paired_node_id")) {
+                val editor = securePrefs.edit()
+                for ((key, value) in legacyPrefs.all) {
+                    when (value) {
+                        is String -> editor.putString(key, value)
+                        is Boolean -> editor.putBoolean(key, value)
+                        is Int -> editor.putInt(key, value)
+                        is Long -> editor.putLong(key, value)
+                    }
+                }
+                editor.apply()
+                legacyPrefs.edit().clear().apply()
+                android.util.Log.i("ComputeWorkerClient", "Successfully migrated legacy node identity into Android Keystore EncryptedSharedPreferences.")
+            }
+
+            securePrefs
+        } catch (e: Throwable) {
+            android.util.Log.w("ComputeWorkerClient", "Hardware Keystore / EncryptedSharedPreferences unavailable (${e.message}). Falling back to private SharedPreferences.")
+            context.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE)
+        }
+    }
+
     fun initPersistence(context: android.content.Context) {
         appContext = context.applicationContext
-        val prefs = context.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE)
+        val prefs = getSecurePreferences(context)
         val savedNodeId = prefs.getString("paired_node_id", null)
         val savedToken = prefs.getString("auth_token", null)
         val savedPrimary = prefs.getString("primary_server_url", null)
@@ -110,7 +147,7 @@ object ComputeWorkerClient {
     fun persistIdentity(context: android.content.Context? = appContext) {
         val ctx = context ?: appContext ?: return
         try {
-            val prefs = ctx.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE)
+            val prefs = getSecurePreferences(ctx)
             val kp = getOrCreateKeyPair()
             val privB64 = android.util.Base64.encodeToString(kp.private.encoded, android.util.Base64.NO_WRAP)
             val pubB64 = android.util.Base64.encodeToString(kp.public.encoded, android.util.Base64.NO_WRAP)
@@ -134,7 +171,10 @@ object ComputeWorkerClient {
         connectionState = ConnectionState.DISCONNECTED
         val ctx = context ?: appContext
         try {
-            ctx?.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE)?.edit()?.clear()?.apply()
+            if (ctx != null) {
+                getSecurePreferences(ctx).edit().clear().apply()
+                ctx.getSharedPreferences("spaas_node_identity", android.content.Context.MODE_PRIVATE).edit().clear().apply()
+            }
         } catch (_: Throwable) {}
     }
 
@@ -443,7 +483,7 @@ object ComputeWorkerClient {
                         }
                     }
                 } catch (_: Throwable) {}
-            } else if (responseCode == 401 || responseCode == 403) {
+            } else if (responseCode == 401 || responseCode == 403 || responseCode == 404) {
                 // Device was revoked or deleted from cluster fabric
                 android.util.Log.w("ComputeWorkerClient", "Cluster rejected heartbeat with HTTP $responseCode (Device Revoked or Removed). Resetting identity.")
                 clearIdentity(appContext)
@@ -468,7 +508,7 @@ object ComputeWorkerClient {
                 readTimeout = 5000
             }
 
-            if (conn.responseCode == 401 || conn.responseCode == 403) {
+            if (conn.responseCode == 401 || conn.responseCode == 403 || conn.responseCode == 404) {
                 android.util.Log.w("ComputeWorkerClient", "Cluster rejected job poll with HTTP ${conn.responseCode}. Resetting identity.")
                 clearIdentity(appContext)
                 return@withContext null

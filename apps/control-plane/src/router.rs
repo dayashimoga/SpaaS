@@ -152,10 +152,35 @@ pub async fn rate_limit_middleware(
 }
 
 pub fn build_router(state: AppState) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    let allowed_origins_env = std::env::var("SPAAS_ALLOWED_ORIGINS").unwrap_or_default();
+    let cors = if allowed_origins_env == "*" {
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any)
+    } else {
+        use tower_http::cors::AllowOrigin;
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::predicate(move |origin, _| {
+                if let Ok(origin_str) = origin.to_str() {
+                    if !allowed_origins_env.is_empty() {
+                        for allowed in allowed_origins_env.split(',') {
+                            if allowed.trim() == origin_str {
+                                return true;
+                            }
+                        }
+                    }
+                    origin_str == "https://spaas-console.pages.dev"
+                        || origin_str.ends_with(".pages.dev")
+                        || origin_str.starts_with("http://localhost")
+                        || origin_str.starts_with("http://127.0.0.1")
+                } else {
+                    false
+                }
+            }))
+            .allow_methods(Any)
+            .allow_headers(Any)
+    };
 
     Router::new()
         // Node Management, Qualification & Operational Controls
@@ -180,7 +205,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/nodes/:node_id/state", post(set_node_state))
         .route("/api/v1/nodes/:node_id", get(get_node).delete(remove_node))
         .route("/api/v1/nodes/results", post(submit_result))
-        .route("/api/v1/nodes", get(list_nodes))
+        .route("/api/v1/nodes", get(list_nodes).delete(delete_nodes))
         // Device Pairing & Demo
         .route("/api/v1/devices/pairing-token", post(create_pairing_token))
         .route("/api/v1/devices/pair", post(pair_device))

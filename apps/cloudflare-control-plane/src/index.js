@@ -11,15 +11,16 @@ export default {
 
     // 1. Handle CORS Pre-flight Options
     if (request.method === "OPTIONS") {
-      const allowedOrigins = env?.SPAAS_ALLOWED_ORIGINS || "*";
+      const allowedOrigin = resolveAllowedOrigin(request, env);
       return new Response(null, {
         status: 204,
         headers: {
-          "Access-Control-Allow-Origin": allowedOrigins,
+          "Access-Control-Allow-Origin": allowedOrigin,
           "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Device-Auth, X-SPaaS-Key, Baggage, Sentry-Trace",
           "Access-Control-Expose-Headers": "X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After",
-          "Access-Control-Max-Age": "86400"
+          "Access-Control-Max-Age": "86400",
+          "Vary": "Origin"
         }
       });
     }
@@ -54,7 +55,8 @@ export default {
             headers: { "Content-Type": "application/json" }
           }
         ),
-        env
+        env,
+        request
       );
     }
 
@@ -67,7 +69,7 @@ export default {
           globalThis._mockCoordinator = new SPaaSCoordinator(null, env);
         }
         const response = await globalThis._mockCoordinator.fetch(request);
-        return addSecurityAndCorsHeaders(response, env);
+        return addSecurityAndCorsHeaders(response, env, request);
       } catch (err) {
         console.error("[Gateway Standalone Error]:", err);
         if (url.pathname === "/health" || url.pathname === "/api/v1/system/health") {
@@ -82,7 +84,8 @@ export default {
               }),
               { status: 200, headers: { "Content-Type": "application/json" } }
             ),
-            env
+            env,
+            request
           );
         }
         return addSecurityAndCorsHeaders(
@@ -90,7 +93,8 @@ export default {
             JSON.stringify({ error: "COORDINATOR_ERROR", message: err.message }),
             { status: 500, headers: { "Content-Type": "application/json" } }
           ),
-          env
+          env,
+          request
         );
       }
     }
@@ -102,7 +106,7 @@ export default {
 
     try {
       const response = await stub.fetch(request);
-      return addSecurityAndCorsHeaders(response, env);
+      return addSecurityAndCorsHeaders(response, env, request);
     } catch (err) {
       console.error("[Gateway Error] DO dispatch exception:", err);
       if (url.pathname === "/health" || url.pathname === "/api/v1/system/health") {
@@ -119,7 +123,8 @@ export default {
             }),
             { status: 200, headers: { "Content-Type": "application/json" } }
           ),
-          env
+          env,
+          request
         );
       }
       return addSecurityAndCorsHeaders(
@@ -127,19 +132,46 @@ export default {
           JSON.stringify({ error: "COORDINATOR_DISPATCH_ERROR", message: err.message }),
           { status: 500, headers: { "Content-Type": "application/json" } }
         ),
-        env
+        env,
+        request
       );
     }
   }
 };
 
-function addSecurityAndCorsHeaders(res, env) {
-  const allowedOrigins = env?.SPAAS_ALLOWED_ORIGINS || "*";
+function resolveAllowedOrigin(request, env) {
+  const configured = env?.SPAAS_ALLOWED_ORIGINS;
+  if (configured === "*") return "*";
+
+  const origin = request?.headers?.get("Origin");
+  if (!origin) {
+    return configured ? configured.split(",")[0].trim() : "https://spaas-console.pages.dev";
+  }
+
+  if (configured) {
+    const list = configured.split(",").map(o => o.trim());
+    if (list.includes(origin)) return origin;
+  }
+
+  // Known production and development console origins
+  if (origin === "https://spaas-console.pages.dev" ||
+      /^https:\/\/[a-zA-Z0-9-]+\.spaas-console\.pages\.dev$/.test(origin) ||
+      /^https:\/\/[a-zA-Z0-9-]+\.pages\.dev$/.test(origin) ||
+      /^http:\/\/(localhost|127\.0\.0\.1)(:[0-9]+)?$/.test(origin)) {
+    return origin;
+  }
+
+  return configured ? configured.split(",")[0].trim() : "https://spaas-console.pages.dev";
+}
+
+function addSecurityAndCorsHeaders(res, env, request) {
+  const allowedOrigin = resolveAllowedOrigin(request, env);
   const newHeaders = new Headers(res.headers);
-  newHeaders.set("Access-Control-Allow-Origin", allowedOrigins);
+  newHeaders.set("Access-Control-Allow-Origin", allowedOrigin);
   newHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   newHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Device-Auth, X-SPaaS-Key");
   newHeaders.set("Access-Control-Expose-Headers", "X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After");
+  newHeaders.set("Vary", "Origin");
 
   // Enterprise Security Headers
   newHeaders.set("X-Content-Type-Options", "nosniff");

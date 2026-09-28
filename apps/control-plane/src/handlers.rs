@@ -1,6 +1,6 @@
 use crate::state::AppState;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
@@ -92,6 +92,13 @@ pub async fn heartbeat(
         let node = nodes
             .get_mut(&payload.node_id)
             .ok_or((StatusCode::NOT_FOUND, "Node not found".into()))?;
+
+        if node.enrollment == EnrollmentStatus::Revoked {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "Node has been revoked and cannot communicate with the fabric".into(),
+            ));
+        }
 
         let now = chrono::Utc::now().timestamp_millis();
         node.last_heartbeat_ms = now;
@@ -1359,6 +1366,27 @@ pub async fn pair_device(
     let node_id = Uuid::new_v4();
     let now = chrono::Utc::now().timestamp_millis();
 
+    // Deduplicate: If another node already exists with the same public key, remove the stale record
+    if !payload.public_key.is_empty() && payload.public_key != "ed25519_pk" {
+        let old_node_ids: Vec<Uuid> = {
+            let nodes = state.nodes.read().await;
+            nodes
+                .iter()
+                .filter(|(_, n)| n.public_key == payload.public_key)
+                .map(|(id, _)| *id)
+                .collect()
+        };
+        for old_id in old_node_ids {
+            let mut nodes = state.nodes.write().await;
+            nodes.remove(&old_id);
+            drop(nodes);
+            let _ = state
+                .storage
+                .append_event(WalEvent::RemoveNode { node_id: old_id })
+                .await;
+        }
+    }
+
     let (_token, token_str) = AuthToken::issue(
         &state.server_keypair,
         node_id.to_string(),
@@ -1944,6 +1972,10 @@ pub async fn remove_node(
     let mut nodes = state.nodes.write().await;
     if nodes.remove(&node_id).is_some() {
         drop(nodes);
+        let _ = state
+            .storage
+            .append_event(WalEvent::RemoveNode { node_id })
+            .await;
         state.broadcast_event("NODE_REMOVED", serde_json::json!({ "node_id": node_id }));
         Ok(Json(
             serde_json::json!({ "removed": true, "node_id": node_id }),
@@ -1951,6 +1983,54 @@ pub async fn remove_node(
     } else {
         Err((StatusCode::NOT_FOUND, format!("Node {node_id} not found")))
     }
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct DeleteNodesQuery {
+    pub revoked_only: Option<bool>,
+}
+
+pub async fn delete_nodes(
+    State(state): State<AppState>,
+    Query(query): Query<DeleteNodesQuery>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let revoked_only = query.revoked_only.unwrap_or(false);
+    let to_remove: Vec<Uuid> = {
+        let nodes = state.nodes.read().await;
+        nodes
+            .iter()
+            .filter(|(_, n)| {
+                if revoked_only {
+                    n.enrollment == EnrollmentStatus::Revoked
+                } else {
+                    true
+                }
+            })
+            .map(|(id, _)| *id)
+            .collect()
+    };
+
+    let count = to_remove.len();
+    for node_id in &to_remove {
+        let mut nodes = state.nodes.write().await;
+        nodes.remove(node_id);
+        drop(nodes);
+        let _ = state
+            .storage
+            .append_event(WalEvent::RemoveNode { node_id: *node_id })
+            .await;
+    }
+
+    state.broadcast_event(
+        "NODES_PRUNED",
+        serde_json::json!({ "count": count, "revoked_only": revoked_only }),
+    );
+
+    Ok(Json(serde_json::json!({
+        "status": "pruned",
+        "count": count,
+        "revoked_only": revoked_only
+    })))
 }
 
 // -------------------------------------------------------------------------
@@ -2794,5 +2874,64 @@ mod tests {
         assert_eq!(state.epoch.load(Ordering::Relaxed), 3);
         assert!(state.is_authoritative().await);
         assert_eq!(state.nodes.read().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_revocation_heartbeat_rejection_and_pruning() {
+        let dir = tempdir().unwrap();
+        let state = AppState::new(dir.path());
+        let node_id = Uuid::new_v4();
+
+        let record = NodeRecord {
+            node_id,
+            public_key: "test_revocation_node_pk".into(),
+            device_type: NodeDeviceType::AndroidSmartphone,
+            enrollment: EnrollmentStatus::Enrolled,
+            state: NodeState::Idle,
+            capabilities: NodeHardwareCapabilities::default(),
+            telemetry: NodeTelemetry::default(),
+            policy: ProviderPolicy::default(),
+            qualification: None,
+            enrolled_at_ms: 1000,
+            last_heartbeat_ms: 1000,
+            region: "local".into(),
+            is_simulated: false,
+        };
+        state.upsert_node(record).await;
+
+        // 1. Heartbeat on active node succeeds
+        let hb_req = HeartbeatRequest {
+            node_id,
+            telemetry: NodeTelemetry::default(),
+            policy: ProviderPolicy::default(),
+            timestamp_ms: 2000,
+            signature: "sig".into(),
+        };
+        let hb_res = heartbeat(State(state.clone()), Json(hb_req.clone())).await;
+        assert!(hb_res.is_ok());
+
+        // 2. Revoke the node
+        let revoke_req = RevokeNodeRequest {
+            reason: "Device compromised".into(),
+        };
+        let revoke_res = revoke_node(State(state.clone()), Path(node_id), Json(revoke_req)).await;
+        assert!(revoke_res.is_ok());
+
+        // 3. Heartbeat on revoked node must be rejected with 403 FORBIDDEN
+        let hb_revoked_err = heartbeat(State(state.clone()), Json(hb_req)).await.unwrap_err();
+        assert_eq!(hb_revoked_err.0, StatusCode::FORBIDDEN);
+
+        // 4. Pruning revoked nodes removes it from cluster
+        let prune_res = delete_nodes(
+            State(state.clone()),
+            axum::extract::Query(DeleteNodesQuery {
+                revoked_only: Some(true),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(prune_res["count"], 1);
+        assert_eq!(state.nodes.read().await.len(), 0);
     }
 }

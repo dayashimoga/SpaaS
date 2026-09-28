@@ -265,9 +265,16 @@ export class SPaaSCoordinator {
 
       if (data.type === "heartbeat" || data.type === "Heartbeat") {
         if (nodeId) {
+          // Reject heartbeats from revoked devices over WebSocket
+          const nodeRows = this.sqlExec(`SELECT state FROM nodes WHERE id = ?`, nodeId);
+          if (nodeRows.length > 0 && nodeRows[0].state === "Revoked") {
+            ws.send(JSON.stringify({ type: "error", error: "DEVICE_REVOKED", message: "This device has been revoked" }));
+            try { ws.close(4003, "Device revoked"); } catch (_) {}
+            return;
+          }
           const now = Date.now();
           this.sqlExec(
-            `UPDATE nodes SET last_heartbeat = ?, telemetry = ?, state = CASE WHEN state IN ('Offline', 'Registered') THEN 'Ready' ELSE state END WHERE id = ?`,
+            `UPDATE nodes SET last_heartbeat = ?, telemetry = ?, state = CASE WHEN state IN ('Offline', 'Registered') THEN 'Ready' ELSE state END WHERE id = ? AND state != 'Revoked'`,
             now,
             JSON.stringify(data.telemetry || {}),
             nodeId
@@ -659,9 +666,36 @@ export class SPaaSCoordinator {
   }
 
   /**
+   * Resolve strictly allowed CORS origin
+   */
+  resolveCorsOrigin(req) {
+    const configured = this.env?.SPAAS_ALLOWED_ORIGINS;
+    if (configured === "*") return "*";
+
+    const origin = req?.headers?.get("Origin");
+    if (!origin) {
+      return configured ? configured.split(",")[0].trim() : "https://spaas-console.pages.dev";
+    }
+
+    if (configured) {
+      const list = configured.split(",").map(o => o.trim());
+      if (list.includes(origin)) return origin;
+    }
+
+    if (origin === "https://spaas-console.pages.dev" ||
+        /^https:\/\/[a-zA-Z0-9-]+\.pages\.dev$/.test(origin) ||
+        /^http:\/\/(localhost|127\.0\.0\.1)(:[0-9]+)?$/.test(origin)) {
+      return origin;
+    }
+
+    return configured ? configured.split(",")[0].trim() : "https://spaas-console.pages.dev";
+  }
+
+  /**
    * Main HTTP Request Router for the Coordinator DO
    */
   async fetch(req) {
+    const corsOrigin = this.resolveCorsOrigin(req);
     const url = new URL(req.url);
     const path = url.pathname;
     const method = req.method;
@@ -715,7 +749,8 @@ export class SPaaSCoordinator {
         status: 200,
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
+          "Access-Control-Allow-Origin": corsOrigin,
+          "Vary": "Origin"
         }
       });
     }
@@ -754,7 +789,8 @@ export class SPaaSCoordinator {
           "Retry-After": String(rateCheck.retryAfter),
           "X-RateLimit-Limit": String(rateCheck.limit),
           "X-RateLimit-Remaining": "0",
-          "Access-Control-Allow-Origin": "*"
+          "Access-Control-Allow-Origin": corsOrigin,
+          "Vary": "Origin"
         }
       });
     }
@@ -765,7 +801,8 @@ export class SPaaSCoordinator {
         status,
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Origin": corsOrigin,
+          "Vary": "Origin",
           "X-RateLimit-Limit": String(rateCheck.limit || 6000),
           "X-RateLimit-Remaining": String(rateCheck.remaining !== undefined ? rateCheck.remaining : 6000),
           ...extraHeaders
@@ -1169,7 +1206,7 @@ export class SPaaSCoordinator {
       const nodeId = body.node_id;
       const now = Date.now();
       this.sqlExec(
-        `UPDATE nodes SET last_heartbeat = ?, telemetry = ?, state = CASE WHEN state IN ('Offline', 'Registered') THEN 'Ready' ELSE state END WHERE id = ?`,
+        `UPDATE nodes SET last_heartbeat = ?, telemetry = ?, state = CASE WHEN state IN ('Offline', 'Registered') THEN 'Ready' ELSE state END WHERE id = ? AND state != 'Revoked'`,
         now,
         JSON.stringify(body.telemetry || {}),
         nodeId
@@ -1423,9 +1460,19 @@ export class SPaaSCoordinator {
         return json({ error: "UNAUTHORIZED", message: "Admin authorization required" }, 401);
       }
       const nodeId = path.split("/")[4];
+      const existing = this.sqlExec(`SELECT id, state FROM nodes WHERE id = ?`, nodeId);
+      if (existing.length === 0) {
+        return json({ error: "NOT_FOUND", message: `Node ${nodeId} not found in cluster` }, 404);
+      }
+      if (existing[0].state === "Revoked") {
+        return json({ status: "already_revoked", node_id: nodeId, message: "Device was already revoked" });
+      }
+      // Return any running jobs assigned to this node back to queue
+      const reassigned = this.sqlExec(`SELECT id FROM jobs WHERE assigned_node_id = ? AND state = 'Running'`, nodeId);
+      this.sqlExec(`UPDATE jobs SET assigned_node_id = NULL, state = 'Pending' WHERE assigned_node_id = ? AND state = 'Running'`, nodeId);
       this.sqlExec(`UPDATE nodes SET state = 'Revoked' WHERE id = ?`, nodeId);
-      this.logAudit("NODE_REVOKED", `Node ${nodeId} revoked`);
-      return json({ status: "revoked", node_id: nodeId });
+      this.logAudit("NODE_REVOKED", `Node ${nodeId} revoked; ${reassigned.length} job(s) returned to queue`);
+      return json({ status: "revoked", node_id: nodeId, jobs_reassigned: reassigned.length });
     }
 
     if (path.startsWith("/api/v1/nodes/") && method === "DELETE") {
@@ -1617,7 +1664,8 @@ export class SPaaSCoordinator {
         status: 200,
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
-          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Origin": corsOrigin,
+          "Vary": "Origin",
           "Access-Control-Allow-Methods": "GET, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type, Authorization",
           "Content-Disposition": `attachment; filename="spaas-ledger-epoch-${this.epoch}.csv"`
