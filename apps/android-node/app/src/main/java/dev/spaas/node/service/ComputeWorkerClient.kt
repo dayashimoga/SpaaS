@@ -23,9 +23,12 @@ object ComputeWorkerClient {
         DISCONNECTED
     }
 
-    var primaryServerUrl: String = if (isRunningInEmulator()) "http://10.0.2.2:8080" else ""
+    // Production-first: default to public Cloudflare Worker endpoint
+    private const val PRODUCTION_CONTROL_PLANE = "https://spaas-control-plane.dayashimoga.workers.dev"
+
+    var primaryServerUrl: String = PRODUCTION_CONTROL_PLANE
     var backupServerUrl: String = ""
-    var serverBaseUrl: String = if (primaryServerUrl.isNotBlank()) primaryServerUrl else if (isRunningInEmulator()) "http://10.0.2.2:8080" else ""
+    var serverBaseUrl: String = PRODUCTION_CONTROL_PLANE
     var pairedNodeId: String? = null
     var authToken: String? = null
     var isPaired: Boolean = false

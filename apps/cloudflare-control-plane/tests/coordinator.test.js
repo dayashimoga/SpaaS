@@ -76,33 +76,40 @@ test("SPaaSCoordinator — Administrative Authentication Boundaries", async () =
     SPAAS_REQUIRE_AUTH: "true"
   });
 
-  // 1. Mutating call WITHOUT auth header must be rejected with 401
+  // 1. Admin-only endpoint WITHOUT auth header must be rejected with 401
   const unauthRes = await coordinator.fetch(
-    new Request("http://localhost/api/v1/devices/pairing-token", { method: "POST" })
+    new Request("http://localhost/api/v1/fabric/pause", { method: "POST" })
   );
   assert.equal(unauthRes.status, 401);
   const unauth = await unauthRes.json();
   assert.equal(unauth.error, "UNAUTHORIZED");
 
-  // 2. Mutating call with WRONG auth header must be rejected with 401
+  // 2. Admin-only endpoint with WRONG auth header must be rejected with 401
   const badAuthRes = await coordinator.fetch(
-    new Request("http://localhost/api/v1/devices/pairing-token", {
+    new Request("http://localhost/api/v1/fabric/pause", {
       method: "POST",
       headers: { "Authorization": "Bearer invalid_secret_token" }
     })
   );
   assert.equal(badAuthRes.status, 401);
 
-  // 3. Mutating call with VALID auth header succeeds
+  // 3. Enrollment endpoint is PUBLIC (no admin auth required)
+  const publicRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/enrollment/create", { method: "POST" })
+  );
+  assert.equal(publicRes.status, 200);
+  const enrollData = await publicRes.json();
+  assert.ok(enrollData.pairing_code.startsWith("SP-"));
+  assert.ok(enrollData.opaque_credential);
+
+  // 4. Admin-only endpoint with VALID auth header succeeds
   const validRes = await coordinator.fetch(
-    new Request("http://localhost/api/v1/devices/pairing-token", {
+    new Request("http://localhost/api/v1/fabric/pause", {
       method: "POST",
       headers: ADMIN_HEADERS
     })
   );
   assert.equal(validRes.status, 200);
-  const tokenData = await validRes.json();
-  assert.ok(tokenData.token.startsWith("SP-"));
 });
 
 test("SPaaSCoordinator — Single-Use Pairing Tokens & Device Registration", async () => {
@@ -111,21 +118,24 @@ test("SPaaSCoordinator — Single-Use Pairing Tokens & Device Registration", asy
     SPAAS_API_SECRET: TEST_ADMIN_SECRET
   });
 
-  // 1. Issue pairing token (admin authenticated)
+  // 1. Issue enrollment session (public endpoint, no admin auth needed)
   const tokenRes = await coordinator.fetch(
-    new Request("http://localhost/api/v1/devices/pairing-token", {
-      method: "POST",
-      headers: ADMIN_HEADERS
+    new Request("http://localhost/api/v1/enrollment/create", {
+      method: "POST"
     })
   );
   assert.equal(tokenRes.status, 200);
-  const { token, expires_at } = await tokenRes.json();
-  assert.ok(token.startsWith("SP-"));
-  assert.ok(expires_at > Date.now());
+  const enrollData = await tokenRes.json();
+  const shortCode = enrollData.pairing_code || enrollData.short_code;
+  const opaqueToken = enrollData.opaque_credential || enrollData.token;
+  assert.ok(shortCode.startsWith("SP-"), `Short code should start with SP-, got: ${shortCode}`);
+  assert.ok(opaqueToken.length > 10, "Opaque credential should be a UUID");
+  assert.ok(enrollData.expires_at_ms > Date.now(), "Expiry must be in the future");
+  assert.equal(enrollData.ttl_seconds, 600, "TTL should be 10 minutes");
 
-  // 2. Pair a new Android phone
+  // 2. Pair a new Android phone using the opaque credential
   const pairPayload = {
-    pairing_token: token,
+    pairing_token: opaqueToken,
     node_id: "phone-pixel-test-01",
     device_name: "Pixel 8 Pro (Test)",
     device_type: "Phone",
@@ -156,7 +166,7 @@ test("SPaaSCoordinator — Single-Use Pairing Tokens & Device Registration", asy
   );
   assert.equal(replayRes.status, 400);
   const replay = await replayRes.json();
-  assert.equal(replay.error, "INVALID_PAIRING_TOKEN");
+  assert.equal(replay.error, "TOKEN_ALREADY_CONSUMED");
 
   // 4. Verify node exists in fleet and auth_token is redacted
   const nodeRes = await coordinator.fetch(new Request("http://localhost/api/v1/nodes/phone-pixel-test-01"));

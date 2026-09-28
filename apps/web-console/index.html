@@ -1325,7 +1325,7 @@
           <div class="pairing-container">
             <div class="pairing-card">
               <span class="pairing-badge">SINGLE-USE ENROLLMENT CODE</span>
-              <div class="pairing-code font-mono" id="modal-pairing-code">SP-8492</div>
+              <div class="pairing-code font-mono" id="modal-pairing-code">------</div>
               <div class="pairing-expiry text-sub">Expires in <span id="modal-pairing-timer">10:00</span></div>
               <button id="btn-refresh-pairing-code" class="btn btn-xs btn-secondary mt-2">Generate New Code</button>
             </div>
@@ -1344,7 +1344,11 @@
                 </svg>
               </div>
               <span class="text-sub font-mono" id="modal-qr-uri-caption" style="word-break: break-all; font-size: 0.75rem;">spaas://pair?code=...</span>
-              <button type="button" id="btn-copy-pairing-uri" class="btn btn-xs btn-outline-cyan mt-1">📋 Copy Pairing URI</button>
+              <div style="display: flex; gap: 0.35rem; margin-top: 0.35rem; flex-wrap: wrap;">
+                <button type="button" id="btn-copy-pairing-uri" class="btn btn-xs btn-outline-cyan">📋 Copy Pairing URI</button>
+                <button type="button" id="btn-share-pairing-link" class="btn btn-xs btn-outline-cyan">📤 Share Link</button>
+                <button type="button" id="btn-open-deep-link" class="btn btn-xs btn-outline-cyan">📱 Open on Phone</button>
+              </div>
             </div>
           </div>
 
@@ -1430,7 +1434,7 @@
               <div class="step-num">2</div>
               <div class="step-body">
                 <strong>Launch &amp; Enter Single-Use Pairing Code</strong>
-                <p>Launch SPaaS Node and enter code <strong class="text-cyan font-mono" id="modal-code-display-step">SP-8492</strong> or scan the QR code.</p>
+                <p>Launch SPaaS Node and enter code <strong class="text-cyan font-mono" id="modal-code-display-step">------</strong> or scan the QR code.</p>
               </div>
             </div>
             <div class="step-item">

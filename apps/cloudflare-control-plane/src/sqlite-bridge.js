@@ -104,24 +104,58 @@ function createMinimalFallbackEngine() {
 
       // PAIRING_TOKENS
       if (qu.startsWith("INSERT INTO PAIRING_TOKENS")) {
-        const [token, expires_at, status, created_at] = params.length === 4 ? params : [params[0], params[1], "Active", params[2] || Date.now()];
+        const [token, short_code, opaque_credential, expires_at, status_unused, created_at] =
+          params.length >= 5 ? params : [params[0], params[0], params[0], params[1], "Active", params[2] || Date.now()];
         tables.pairing_tokens.set(token, {
           token,
+          short_code: short_code || token,
+          opaque_credential: opaque_credential || token,
           expires_at,
-          status: status || "Active",
+          status: "Active",
           claimed_by: null,
+          consumed_at: null,
           created_at: created_at || Date.now()
         });
+        return [];
+      }
+      if (qu.startsWith("UPDATE PAIRING_TOKENS SET STATUS = 'CONSUMING'")) {
+        // Atomic: only succeed if status is Active and not expired
+        const tokenKey = params[0];
+        const now = params[1] || Date.now();
+        const t = tables.pairing_tokens.get(tokenKey);
+        if (t && t.status === "Active" && t.expires_at > now) {
+          t.status = "Consuming";
+        }
+        return [];
+      }
+      if (qu.startsWith("UPDATE PAIRING_TOKENS SET STATUS = 'CONSUMED'")) {
+        const [claimed_by, consumed_at, tokenKey] = params;
+        const t = tables.pairing_tokens.get(tokenKey);
+        if (t) {
+          t.status = "Consumed";
+          t.claimed_by = claimed_by;
+          t.consumed_at = consumed_at;
+        }
         return [];
       }
       if (qu.startsWith("UPDATE PAIRING_TOKENS SET STATUS = 'CLAIMED'")) {
         const [claimed_by, token] = params;
         const t = tables.pairing_tokens.get(token);
         if (t) {
-          t.status = "Claimed";
+          t.status = "Consumed";
           t.claimed_by = claimed_by;
+          t.consumed_at = Date.now();
         }
         return [];
+      }
+      if (qu.includes("FROM PAIRING_TOKENS WHERE OPAQUE_CREDENTIAL =")) {
+        const match = Array.from(tables.pairing_tokens.values()).find(t => t.opaque_credential === params[0]);
+        return match ? [match] : [];
+      }
+      if (qu.includes("FROM PAIRING_TOKENS WHERE SHORT_CODE =")) {
+        const code = params[0];
+        const matches = Array.from(tables.pairing_tokens.values()).filter(t => t.short_code === code && t.status === "Active");
+        return matches.length > 0 ? [matches[0]] : [];
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM PAIRING_TOKENS WHERE TOKEN =")) {
         const t = tables.pairing_tokens.get(params[0]);

@@ -113,15 +113,48 @@ class MainActivity : ComponentActivity() {
 
     private fun handleDeepLink(intent: Intent?) {
         val data = intent?.data ?: return
-        if (data.scheme == "spaas") {
+        if (data.scheme.equals("spaas", ignoreCase = true)) {
             val code = data.getQueryParameter("code")
-            val server = data.getQueryParameter("server")
+                ?: data.getQueryParameter("token")
+                ?: data.lastPathSegment?.takeIf { it != "pair" && it != "enroll" }
+            val server = data.getQueryParameter("server") ?: data.getQueryParameter("primary")
+            val backup = data.getQueryParameter("backup")
             if (!code.isNullOrBlank()) {
                 initialPairingCode = code
             }
             if (!server.isNullOrBlank()) {
                 initialServerUrl = server
                 ComputeWorkerClient.serverBaseUrl = server
+                ComputeWorkerClient.primaryServerUrl = server
+            }
+            if (!backup.isNullOrBlank()) {
+                ComputeWorkerClient.backupServerUrl = backup
+            }
+        }
+    }
+
+    @Deprecated("Use ActivityResultContracts", ReplaceWith(""))
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 1001 && resultCode == RESULT_OK && data != null) {
+            // QR scan result
+            val scannedUri = data.getStringExtra("scanned_uri")
+            val pairingCode = data.getStringExtra("pairing_code")
+            val primaryUrl = data.getStringExtra("primary_url")
+            val backupUrl = data.getStringExtra("backup_url")
+
+            if (!primaryUrl.isNullOrBlank()) {
+                initialServerUrl = primaryUrl
+                ComputeWorkerClient.serverBaseUrl = primaryUrl
+                ComputeWorkerClient.primaryServerUrl = primaryUrl
+            }
+            if (!backupUrl.isNullOrBlank()) {
+                ComputeWorkerClient.backupServerUrl = backupUrl
+            }
+
+            val code = pairingCode ?: scannedUri ?: return
+            if (code.isNotBlank()) {
+                initialPairingCode = code
             }
         }
     }
@@ -165,6 +198,34 @@ fun SpaasAppScaffold(
             isRunning = ComputeForegroundService.isRunning
             isPaused = ComputeForegroundService.isPaused
             delay(1000)
+        }
+    }
+
+    // Auto-enroll when pairing code is supplied via QR scan or deep link
+    LaunchedEffect(initialPairingCode) {
+        if (initialPairingCode.isNotBlank() && !ComputeWorkerClient.isPaired) {
+            pairingCodeInput = initialPairingCode
+            isPairingLoading = true
+            pairingStatusMsg = "Enrolling device with code $initialPairingCode..."
+            val tel = telemetry ?: monitor.collectTelemetry()
+            val res = ComputeWorkerClient.pairWithCode(
+                baseUrl = serverUrlInput,
+                pairingCode = initialPairingCode,
+                deviceName = android.os.Build.MODEL ?: "Android Smartphone",
+                telemetry = tel,
+                policy = safetyPolicy
+            )
+            isPairingLoading = false
+            when (res) {
+                is PairResult.Success -> {
+                    pairingStatusMsg = "Paired successfully as ${res.nodeId}!"
+                    sessionStartTime = System.currentTimeMillis()
+                    onStartService()
+                }
+                is PairResult.Failure -> {
+                    pairingStatusMsg = res.error
+                }
+            }
         }
     }
 
@@ -523,44 +584,88 @@ fun HomeView(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("CLUSTER ENROLLMENT", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold)
+                    Text("DEVICE ENROLLMENT", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold)
 
                     if (isPaired) {
-                        Text("Paired Node ID:", fontSize = 12.sp, color = Color.Gray)
+                        // Connected state
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                color = Color(0xFF10B981).copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    "✓ ENROLLED",
+                                    color = Color(0xFF10B981),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Node ID:", fontSize = 12.sp, color = Color.Gray)
                         Text(
                             ComputeWorkerClient.pairedNodeId ?: "-",
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace,
                             color = Color(0xFF00E5FF)
                         )
+                        Text(
+                            "Connected to: ${ComputeWorkerClient.serverBaseUrl}",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color.Gray
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
                         Button(
                             onClick = onUnpairClick,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Disconnect / Unpair")
+                            Text("🔌 Disconnect / Unpair")
                         }
                     } else {
-                        OutlinedTextField(
-                            value = serverUrl,
-                            onValueChange = onServerUrlChange,
-                            label = { Text("Control Plane LAN URL") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                        // Enrollment options
+                        Text(
+                            "Connect this device to the SPaaS compute fabric",
+                            fontSize = 13.sp,
+                            color = Color.White
                         )
 
-                        OutlinedButton(
-                            onClick = onTestReachability,
-                            enabled = !isPairingLoading && serverUrl.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth()
+                        // Option 1: QR Code Scan (primary / easiest)
+                        Button(
+                            onClick = {
+                                // Launch QR scanner activity
+                                try {
+                                    val intent = android.content.Intent(context, Class.forName("dev.spaas.node.QrScanActivity"))
+                                    (context as? android.app.Activity)?.startActivityForResult(intent, 1001)
+                                } catch (_: Throwable) {
+                                    // QR scanner not available, show toast
+                                    android.widget.Toast.makeText(context, "QR Scanner: Enter the code manually or use a deep link", android.widget.Toast.LENGTH_LONG).show()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
                         ) {
-                            Text("⚡ Test Reachability / Ping", fontSize = 13.sp, color = Color(0xFF38BDF8))
+                            Text("📷 Scan QR Code", color = Color.White, fontWeight = FontWeight.Bold)
                         }
 
+                        // Divider
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Divider(modifier = Modifier.weight(1f), color = Color(0xFF334155))
+                            Text("  or enter code manually  ", fontSize = 11.sp, color = Color.Gray)
+                            Divider(modifier = Modifier.weight(1f), color = Color(0xFF334155))
+                        }
+
+                        // Option 2: Manual code entry
                         OutlinedTextField(
                             value = pairingCode,
                             onValueChange = onPairingCodeChange,
-                            label = { Text("Pairing Code (SP-XXXX)") },
+                            label = { Text("Enrollment Code (SP-XXXX)") },
+                            placeholder = { Text("SP-A1B2", color = Color.Gray) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )
@@ -572,15 +677,50 @@ fun HomeView(
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF))
                         ) {
                             Text(
-                                if (isPairingLoading) "Connecting..." else "Pair With Cluster",
+                                if (isPairingLoading) "⏳ Enrolling..." else "🔗 Enroll Device",
                                 color = Color.Black,
                                 fontWeight = FontWeight.Bold
                             )
                         }
+
+                        // Advanced: custom server URL (collapsed by default)
+                        var showAdvanced by remember { mutableStateOf(false) }
+                        TextButton(
+                            onClick = { showAdvanced = !showAdvanced },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                if (showAdvanced) "▼ Hide Advanced Options" else "▶ Advanced: Custom Server URL",
+                                fontSize = 11.sp,
+                                color = Color.Gray
+                            )
+                        }
+                        if (showAdvanced) {
+                            OutlinedTextField(
+                                value = serverUrl,
+                                onValueChange = onServerUrlChange,
+                                label = { Text("Server URL (default: production)") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                            OutlinedButton(
+                                onClick = onTestReachability,
+                                enabled = !isPairingLoading && serverUrl.isNotBlank(),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("⚡ Test Connectivity", fontSize = 13.sp, color = Color(0xFF38BDF8))
+                            }
+                        }
                     }
 
                     pairingStatusMsg?.let { msg ->
-                        Text(msg, fontSize = 12.sp, color = Color.White)
+                        val msgColor = when {
+                            msg.contains("success", ignoreCase = true) -> Color(0xFF10B981)
+                            msg.contains("error", ignoreCase = true) || msg.contains("fail", ignoreCase = true) || msg.contains("rejected", ignoreCase = true) -> Color(0xFFEF4444)
+                            msg.contains("ONLINE", ignoreCase = true) -> Color(0xFF10B981)
+                            else -> Color(0xFF94A3B8)
+                        }
+                        Text(msg, fontSize = 12.sp, color = msgColor)
                     }
                 }
             }

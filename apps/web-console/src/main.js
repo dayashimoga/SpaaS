@@ -2620,8 +2620,95 @@ function initModals() {
   }
 
   if (btnRefreshCode) {
-    btnRefreshCode.addEventListener('click', () => {
-      fetchPairingCode();
+    btnRefreshCode.addEventListener('click', async () => {
+      btnRefreshCode.disabled = true;
+      btnRefreshCode.textContent = '⏳ Generating...';
+      const codeEl = document.getElementById('modal-pairing-code');
+      if (codeEl) codeEl.textContent = '------';
+      await fetchPairingCode();
+      btnRefreshCode.disabled = false;
+      btnRefreshCode.textContent = 'Generate New Code';
+    });
+  }
+
+  // Copy Pairing URI button
+  const btnCopyPairingUri = document.getElementById('btn-copy-pairing-uri');
+  if (btnCopyPairingUri) {
+    btnCopyPairingUri.addEventListener('click', () => {
+      if (currentPairingUri) {
+        navigator.clipboard.writeText(currentPairingUri).then(() => {
+          btnCopyPairingUri.textContent = '✓ Copied!';
+          setTimeout(() => { btnCopyPairingUri.textContent = '📋 Copy Pairing URI'; }, 2000);
+        }).catch(() => {
+          // Fallback for non-HTTPS contexts
+          const textarea = document.createElement('textarea');
+          textarea.value = currentPairingUri;
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+          btnCopyPairingUri.textContent = '✓ Copied!';
+          setTimeout(() => { btnCopyPairingUri.textContent = '📋 Copy Pairing URI'; }, 2000);
+        });
+      }
+    });
+  }
+
+  // Click-to-copy on the pairing code itself
+  const pairingCodeEl = document.getElementById('modal-pairing-code');
+  if (pairingCodeEl) {
+    pairingCodeEl.style.cursor = 'pointer';
+    pairingCodeEl.title = 'Click to copy';
+    pairingCodeEl.addEventListener('click', () => {
+      const code = pairingCodeEl.textContent;
+      if (code && code !== '------' && code !== 'EXPIRED' && code !== 'ERROR') {
+        navigator.clipboard.writeText(code).catch(() => {});
+        const orig = pairingCodeEl.textContent;
+        pairingCodeEl.textContent = '✓ Copied!';
+        setTimeout(() => { pairingCodeEl.textContent = orig; }, 1200);
+      }
+    });
+  }
+
+  // Share Pairing Link via Web Share API (great for mobile → mobile)
+  const btnShareLink = document.getElementById('btn-share-pairing-link');
+  if (btnShareLink) {
+    btnShareLink.addEventListener('click', async () => {
+      if (!currentPairingUri) return;
+      const shareCode = document.getElementById('modal-pairing-code')?.textContent || '';
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: 'SPaaS Device Enrollment',
+            text: `Enroll your device in SPaaS compute fabric. Code: ${shareCode}`,
+            url: currentPairingUri
+          });
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            navigator.clipboard.writeText(currentPairingUri).catch(() => {});
+            btnShareLink.textContent = '✓ Link Copied!';
+            setTimeout(() => { btnShareLink.textContent = '📤 Share Link'; }, 2000);
+          }
+        }
+      } else {
+        // Fallback: copy to clipboard
+        navigator.clipboard.writeText(currentPairingUri).catch(() => {});
+        btnShareLink.textContent = '✓ Copied!';
+        setTimeout(() => { btnShareLink.textContent = '📤 Share Link'; }, 2000);
+      }
+    });
+  }
+
+  // Open Deep Link directly (opens spaas:// URI — triggers Android/iOS app)
+  const btnOpenDeepLink = document.getElementById('btn-open-deep-link');
+  if (btnOpenDeepLink) {
+    btnOpenDeepLink.addEventListener('click', () => {
+      if (!currentPairingUri) return;
+      // Try to open the deep link
+      const link = document.createElement('a');
+      link.href = currentPairingUri;
+      link.target = '_blank';
+      link.click();
     });
   }
 
@@ -2889,76 +2976,106 @@ async function renderPairingQr(text) {
 
 async function fetchPairingCode(overrideIp = null) {
   try {
-    let lanOverride = overrideIp;
-    if (!lanOverride) {
-      const netInput = document.getElementById('input-host-lan-ip');
-      if (netInput && netInput.value.trim()) {
-        try {
-          const urlObj = new URL(netInput.value.trim());
-          lanOverride = urlObj.hostname;
-        } catch (_) {
-          lanOverride = netInput.value.trim();
-        }
-      }
-    }
-
     const payload = {
       device_type: 'android_smartphone',
       label: 'Web Console'
     };
-    if (lanOverride && lanOverride !== '127.0.0.1' && lanOverride !== 'localhost') {
-      payload.lan_ip_override = lanOverride;
+
+    let targetBase = API_BASE || CLOUDFLARE_WORKER_URL;
+    let res;
+
+    // 1. Try modern public enrollment endpoint
+    try {
+      res = await fetch(`${targetBase}/api/v1/enrollment/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (netErr) {
+      // If primary failed on network (e.g. localhost down), try production worker fallback
+      if (targetBase !== CLOUDFLARE_WORKER_URL) {
+        console.warn(`[SPaaS] Primary ${targetBase} unreachable, falling back to ${CLOUDFLARE_WORKER_URL}`);
+        targetBase = CLOUDFLARE_WORKER_URL;
+        res = await fetch(`${targetBase}/api/v1/enrollment/create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } else {
+        throw netErr;
+      }
     }
 
-    const res = await fetch(`${API_BASE}/api/v1/devices/pairing-token`, {
-      method: 'POST',
-      headers: authedHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // 2. If 404, fallback to legacy pairing-token endpoint
+    if (res.status === 404) {
+      res = await fetch(`${targetBase}/api/v1/devices/pairing-token`, {
+        method: 'POST',
+        headers: authedHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(payload)
+      });
+    }
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      const msg = errorData.message || errorData.error || `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
     const data = await res.json();
 
-    const code = data.pairing_code || data.token;
-    if (!code) throw new Error('Server did not return a valid pairing code');
+    const code = data.pairing_code || data.short_code || data.token;
+    if (!code) throw new Error('Server did not return a valid enrollment code');
+
+    // Update all code display elements
     const codeEl = document.getElementById('modal-pairing-code');
-    if (codeEl) codeEl.textContent = code;
+    if (codeEl) {
+      codeEl.textContent = code;
+      codeEl.title = 'Click to copy pairing code';
+    }
     const codeStep = document.getElementById('modal-code-display-step');
     if (codeStep) codeStep.textContent = code;
     const codePreview = document.getElementById('enroll-code-preview');
     if (codePreview) codePreview.textContent = code;
 
-    const primaryUrl = API_BASE || CLOUDFLARE_WORKER_URL;
+    // Update desktop snippets to include this active pairing code
+    const psSnippet = document.getElementById('worker-ps-snippet');
+    if (psSnippet) {
+      psSnippet.textContent = `powershell -Command "irm ${targetBase}/downloads/spaas-desktop-worker.ps1 | iex" -PairingCode "${code}"`;
+    }
+    const cmdSnippet = document.getElementById('worker-cmd-snippet');
+    if (cmdSnippet) {
+      cmdSnippet.textContent = `cargo run -p spaas-cli -- node worker --name "Desktop-Host-Worker" --pairing-code "${code}"`;
+    }
+
+    // Build the pairing URI with opaque credential
+    const primaryUrl = targetBase;
     const backupUrl = localStorage.getItem('spaas_backup_url') || 'https://spaas-dr.a.run.app';
-    currentPairingUri = data.qr_payload || `spaas://pair?code=${code}&primary=${encodeURIComponent(primaryUrl)}&backup=${encodeURIComponent(backupUrl)}`;
+    const opaqueToken = data.opaque_credential || data.token || code;
+    currentPairingUri = data.qr_payload || `spaas://pair?code=${encodeURIComponent(opaqueToken)}&primary=${encodeURIComponent(primaryUrl)}&backup=${encodeURIComponent(backupUrl)}`;
     const uriCaption = document.getElementById('modal-qr-uri-caption');
-    if (uriCaption) uriCaption.textContent = currentPairingUri;
+    if (uriCaption) uriCaption.textContent = currentPairingUri.length > 55 ? currentPairingUri.substring(0, 55) + '...' : currentPairingUri;
 
     const endpointEl = document.getElementById('enrollment-current-endpoint');
     if (endpointEl) endpointEl.textContent = primaryUrl;
 
-    if (data.lan_url) {
-      const lanInput = document.getElementById('input-host-lan-ip');
-      if (lanInput) lanInput.value = data.lan_url;
-      const targetLabel = document.getElementById('label-physical-target');
-      if (targetLabel) targetLabel.textContent = data.lan_url;
-      const detectStatus = document.getElementById('lan-detect-status');
-      if (detectStatus) detectStatus.textContent = 'Active: ' + (data.lan_url.replace('http://', ''));
-    }
-
     // Dynamic standard QR generation
     await renderPairingQr(currentPairingUri);
 
-    // Start 10 minute countdown timer
-    let remainingSec = Math.max(0, Math.floor((data.expires_at_ms - Date.now()) / 1000));
+    // Start countdown timer from server-provided expiry
+    const expiresAtMs = data.expires_at_ms || data.expires_at || (Date.now() + 600000);
+    let remainingSec = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
     if (pairingTimerInterval) clearInterval(pairingTimerInterval);
 
     const updateTimerDisplay = () => {
       const mins = Math.floor(remainingSec / 60);
       const secs = remainingSec % 60;
-      document.getElementById('modal-pairing-timer').textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+      const timerEl = document.getElementById('modal-pairing-timer');
+      if (timerEl) timerEl.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
       if (remainingSec <= 0) {
         clearInterval(pairingTimerInterval);
-        document.getElementById('modal-pairing-code').textContent = 'EXPIRED';
+        const codeEl = document.getElementById('modal-pairing-code');
+        if (codeEl) codeEl.textContent = 'EXPIRED';
+        const codeStep = document.getElementById('modal-code-display-step');
+        if (codeStep) codeStep.textContent = 'EXPIRED';
       }
       remainingSec--;
     };
@@ -2966,9 +3083,18 @@ async function fetchPairingCode(overrideIp = null) {
     updateTimerDisplay();
     pairingTimerInterval = setInterval(updateTimerDisplay, 1000);
   } catch (err) {
-    document.getElementById('modal-pairing-code').textContent = 'SP-8492';
+    console.error('[SPaaS] Failed to create enrollment session:', err);
+    const codeEl = document.getElementById('modal-pairing-code');
+    if (codeEl) {
+      codeEl.textContent = 'ERROR';
+      codeEl.title = err.message;
+    }
     const codeStep = document.getElementById('modal-code-display-step');
-    if (codeStep) codeStep.textContent = 'SP-8492';
+    if (codeStep) codeStep.textContent = 'Retry →';
+    const timerEl = document.getElementById('modal-pairing-timer');
+    if (timerEl) {
+      timerEl.textContent = `Error: ${err.message}. Click "Generate New Code" to retry.`;
+    }
   }
 }
 

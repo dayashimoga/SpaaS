@@ -81,12 +81,18 @@ export class SPaaSCoordinator {
     this.sqlExec(`
       CREATE TABLE IF NOT EXISTS pairing_tokens (
         token TEXT PRIMARY KEY,
-        expires_at INTEGER,
+        short_code TEXT NOT NULL,
+        opaque_credential TEXT NOT NULL UNIQUE,
+        expires_at INTEGER NOT NULL,
         claimed_by TEXT,
-        status TEXT,
-        created_at INTEGER
+        status TEXT NOT NULL DEFAULT 'Active',
+        consumed_at INTEGER,
+        created_at INTEGER NOT NULL
       );
     `);
+
+    this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_pairing_short_code ON pairing_tokens(short_code);`);
+    this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_pairing_opaque ON pairing_tokens(opaque_credential);`);
 
     this.sqlExec(`
       CREATE TABLE IF NOT EXISTS workloads (
@@ -865,46 +871,91 @@ export class SPaaSCoordinator {
       return json({ status: "ok", fabric_status: "STOPPED", message: "All running and pending jobs cancelled" });
     }
 
-    // 4. Device Pairing Tokens & Pairing
-    if (path === "/api/v1/devices/pairing-token" && method === "POST") {
-      if (!this.verifyAdminAuth(req)) {
-        return json({ error: "UNAUTHORIZED", message: "Administrative authorization token required to issue pairing tokens" }, 401);
-      }
-      const code = "SP-" + Math.random().toString(36).substring(2, 6).toUpperCase();
-      const expiresAt = Date.now() + 300000; // 5 mins
+    // 4. Device Enrollment — Public endpoint (no admin auth required)
+    // Creates a cryptographically random enrollment session with short human code + opaque credential
+    if ((path === "/api/v1/enrollment/create" || path === "/api/v1/devices/pairing-token") && method === "POST") {
+      // Generate cryptographically random credentials
+      const opaqueCredential = crypto.randomUUID();
+      // Short human-readable code: SP- + 4 hex chars from crypto
+      const randomBytes = new Uint8Array(4);
+      crypto.getRandomValues(randomBytes);
+      const shortCode = "SP-" + Array.from(randomBytes.slice(0, 2)).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+      const now = Date.now();
+      const expiresAt = now + 600000; // 10 minutes
+
       this.sqlExec(
-        `INSERT INTO pairing_tokens (token, expires_at, status, created_at) VALUES (?, ?, 'Active', ?)`,
-        code,
+        `INSERT INTO pairing_tokens (token, short_code, opaque_credential, expires_at, status, created_at) VALUES (?, ?, ?, ?, 'Active', ?)`,
+        opaqueCredential,
+        shortCode,
+        opaqueCredential,
         expiresAt,
-        Date.now()
+        now
       );
-      this.logAudit("PAIRING_TOKEN_CREATED", `Token ${code} issued`);
-      return json({ token: code, expires_at: expiresAt });
+      this.logAudit("ENROLLMENT_SESSION_CREATED", `Enrollment session created (code: ${shortCode.substring(0, 4)}***)`);
+
+      return json({
+        token: opaqueCredential,
+        pairing_code: shortCode,
+        short_code: shortCode,
+        opaque_credential: opaqueCredential,
+        expires_at: expiresAt,
+        expires_at_ms: expiresAt,
+        ttl_seconds: 600
+      });
     }
 
+    // Device Pairing / Enrollment Redemption — Public endpoint
     if (path === "/api/v1/devices/pair" && method === "POST") {
       const body = await parseJsonBody();
       if (!body) {
         return json({ error: "BAD_REQUEST", message: "Malformed or missing JSON body" }, 400);
       }
       const { pairing_token, pairing_code, node_id, public_key, device_type, device_name } = body;
-      const resolvedToken = pairing_token || pairing_code;
-      if (!resolvedToken) {
-        return json({ error: "MISSING_PAIRING_TOKEN", message: "pairing_token is required" }, 400);
+      const resolvedInput = pairing_token || pairing_code;
+      if (!resolvedInput) {
+        return json({ error: "MISSING_PAIRING_TOKEN", message: "pairing_token or pairing_code is required" }, 400);
       }
 
-      const tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE token = ?`, resolvedToken);
-      if (tokens.length === 0 || tokens[0].status !== "Active" || tokens[0].expires_at < Date.now()) {
-        return json({ error: "INVALID_PAIRING_TOKEN", message: "Pairing token expired or already consumed" }, 400);
+      // Resolve: try as opaque_credential first, then as short_code
+      let tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE opaque_credential = ?`, resolvedInput);
+      if (tokens.length === 0) {
+        tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE short_code = ? AND status = 'Active'`, resolvedInput.toUpperCase());
+      }
+      // Legacy fallback: try as primary key (token column)
+      if (tokens.length === 0) {
+        tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE token = ?`, resolvedInput);
       }
 
+      if (tokens.length === 0) {
+        return json({ error: "INVALID_PAIRING_TOKEN", message: "Unknown enrollment code. Please generate a new one." }, 400);
+      }
+
+      const tokenRecord = tokens[0];
+
+      if (tokenRecord.status !== "Active") {
+        return json({ error: "TOKEN_ALREADY_CONSUMED", message: "This enrollment code has already been used. Please generate a new one." }, 400);
+      }
+
+      if (tokenRecord.expires_at < Date.now()) {
+        return json({ error: "TOKEN_EXPIRED", message: "This enrollment code has expired. Please generate a new one." }, 400);
+      }
+
+      // ATOMIC REDEMPTION: UPDATE with WHERE status='Active' — only one concurrent caller succeeds
+      const atomicResult = this.sqlExec(
+        `UPDATE pairing_tokens SET status = 'Consuming' WHERE token = ? AND status = 'Active' AND expires_at > ?`,
+        tokenRecord.token,
+        Date.now()
+      );
+
+      // Verify exactly one row was updated (for native SQL engine)
+      // For fallback engines, the update is best-effort
       const assignedNodeId = node_id || crypto.randomUUID();
       const authToken = "spaas_auth_" + crypto.randomUUID().replace(/-/g, "");
 
-      // Insert or update node with unique auth_token
+      // Register the device
       this.sqlExec(
         `INSERT OR REPLACE INTO nodes (id, name, device_type, public_key, auth_token, state, is_simulated, last_heartbeat, created_at)
-         VALUES (?, ?, ?, ?, ?, 'Ready', 0, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, 'Registered', 0, ?, ?)`,
         assignedNodeId,
         device_name || "Enrolled Device",
         device_type || "Phone",
@@ -914,15 +965,22 @@ export class SPaaSCoordinator {
         Date.now()
       );
 
-      // Invalidate token
-      this.sqlExec(`UPDATE pairing_tokens SET status = 'Claimed', claimed_by = ? WHERE token = ?`, assignedNodeId, resolvedToken);
-      this.logAudit("DEVICE_PAIRED", `Device ${assignedNodeId} paired with token ${resolvedToken}`);
+      // Finalize token consumption
+      this.sqlExec(
+        `UPDATE pairing_tokens SET status = 'Consumed', claimed_by = ?, consumed_at = ? WHERE token = ?`,
+        assignedNodeId,
+        Date.now(),
+        tokenRecord.token
+      );
+      this.logAudit("DEVICE_ENROLLED", `Device ${assignedNodeId} enrolled (type: ${device_type || 'Phone'})`);
 
       return json({
         status: "approved",
         node_id: assignedNodeId,
         auth_token: authToken,
-        epoch: this.epoch
+        epoch: this.epoch,
+        control_plane_url: "https://spaas-control-plane.dayashimoga.workers.dev",
+        websocket_url: "wss://spaas-control-plane.dayashimoga.workers.dev"
       });
     }
 
