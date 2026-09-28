@@ -285,7 +285,13 @@
                 🌐 All Fleet (<span id="tab-count-all">0</span>)
               </button>
             </div>
-            <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+              <button type="button" id="btn-prune-revoked" class="btn btn-xs btn-outline-rose" onclick="window.spaasPruneRevokedNodes()" title="Remove all revoked/stale device records from cluster">
+                🧹 Remove Revoked
+              </button>
+              <button type="button" id="btn-clear-all-nodes" class="btn btn-xs btn-outline-rose" onclick="window.spaasClearAllNodes()" title="Remove all devices for fresh cluster reset">
+                🗑️ Clear All (Fresh Start)
+              </button>
               <button type="button" id="btn-compare-devices-open" class="btn btn-xs btn-outline-cyan">
                 ⚖️ Compare Devices
               </button>
@@ -359,12 +365,15 @@
                   <span id="detail-qual-tier-badge" class="badge" style="background: rgba(16, 185, 129, 0.2); border: 1px solid #10B981; color: #10B981;">QUALIFIED</span>
                 </div>
               </div>
-              <div class="detail-quick-actions" style="display: flex; gap: 0.5rem;">
+              <div class="detail-quick-actions" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
                 <button type="button" id="btn-device-run-qualification" class="btn btn-sm btn-outline-cyan" title="Run real empirical CPU, FP, RAM, Storage, and WASM microbenchmarks">
                   ⚡ Run Empirical Qualification
                 </button>
                 <button type="button" id="btn-device-run-challenge" class="btn btn-sm btn-primary" title="Force cryptographically random challenge exclusively to this physical node">
                   🎯 Run Verification Job
+                </button>
+                <button type="button" id="btn-device-delete-selected" class="btn btn-sm btn-outline-rose" title="Permanently delete this device from cluster" onclick="if(window.spaasGetSelectedNodeId()) window.spaasDeleteNode(window.spaasGetSelectedNodeId())">
+                  🗑️ Delete Device
                 </button>
               </div>
             </div>

@@ -1028,8 +1028,23 @@ export class SPaaSCoordinator {
         Date.now()
       );
 
-      // Verify exactly one row was updated (for native SQL engine)
-      // For fallback engines, the update is best-effort
+      // Deduplicate: If this physical device already registered with the same public key or model, clean up older entries
+      const modelName = body.capabilities?.device_model || device_name || "Android Smartphone";
+      if (public_key && public_key !== "ed25519_pk") {
+        const oldNodes = this.sqlExec(`SELECT id FROM nodes WHERE public_key = ?`, public_key);
+        for (const old of oldNodes) {
+          this.sqlExec(`UPDATE jobs SET assigned_node_id = NULL, state = 'Queued' WHERE assigned_node_id = ? AND state = 'Running'`, old.id);
+        }
+        this.sqlExec(`DELETE FROM nodes WHERE public_key = ?`, public_key);
+      }
+      if ((device_type === "android_smartphone" || !device_type) && modelName && modelName !== "Android Smartphone") {
+        const oldModelNodes = this.sqlExec(`SELECT id FROM nodes WHERE name = ? AND device_type = 'android_smartphone'`, modelName);
+        for (const old of oldModelNodes) {
+          this.sqlExec(`UPDATE jobs SET assigned_node_id = NULL, state = 'Queued' WHERE assigned_node_id = ? AND state = 'Running'`, old.id);
+        }
+        this.sqlExec(`DELETE FROM nodes WHERE name = ? AND device_type = 'android_smartphone'`, modelName);
+      }
+
       const assignedNodeId = node_id || crypto.randomUUID();
       const authToken = "spaas_auth_" + crypto.randomUUID().replace(/-/g, "");
 
@@ -1037,7 +1052,6 @@ export class SPaaSCoordinator {
       const capsJson = body.capabilities ? JSON.stringify(body.capabilities) : null;
       const telJson = body.initial_telemetry || body.telemetry ? JSON.stringify(body.initial_telemetry || body.telemetry) : null;
       const polJson = body.initial_policy || body.policy ? JSON.stringify(body.initial_policy || body.policy) : null;
-      const modelName = body.capabilities?.device_model || device_name || "Android Smartphone";
 
       this.sqlExec(
         `INSERT OR REPLACE INTO nodes (id, name, device_type, public_key, auth_token, state, capabilities, policy, telemetry, is_simulated, last_heartbeat, created_at)
@@ -1419,9 +1433,33 @@ export class SPaaSCoordinator {
         return json({ error: "UNAUTHORIZED", message: "Admin authorization required" }, 401);
       }
       const nodeId = path.split("/")[4];
+      this.sqlExec(`UPDATE jobs SET assigned_node_id = NULL, state = 'Queued' WHERE assigned_node_id = ? AND state = 'Running'`, nodeId);
       this.sqlExec(`DELETE FROM nodes WHERE id = ?`, nodeId);
       this.logAudit("NODE_REMOVED", `Node ${nodeId} deleted`);
       return json({ status: "deleted", node_id: nodeId });
+    }
+
+    if ((path === "/api/v1/nodes" || path === "/api/v1/nodes/") && method === "DELETE") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin authorization required" }, 401);
+      }
+      const url = new URL(req.url);
+      const revokedOnly = url.searchParams.get("revoked_only") === "true";
+      if (revokedOnly) {
+        const revoked = this.sqlExec(`SELECT id FROM nodes WHERE state = 'Revoked'`);
+        for (const r of revoked) {
+          this.sqlExec(`UPDATE jobs SET assigned_node_id = NULL, state = 'Queued' WHERE assigned_node_id = ? AND state = 'Running'`, r.id);
+        }
+        this.sqlExec(`DELETE FROM nodes WHERE state = 'Revoked'`);
+        this.logAudit("NODES_PRUNED", `Pruned ${revoked.length} revoked nodes`);
+        return json({ status: "pruned", count: revoked.length });
+      } else {
+        const count = this.sqlExec(`SELECT COUNT(*) as c FROM nodes`)[0]?.c || 0;
+        this.sqlExec(`UPDATE jobs SET assigned_node_id = NULL, state = 'Queued' WHERE state = 'Running'`);
+        this.sqlExec(`DELETE FROM nodes`);
+        this.logAudit("NODES_CLEARED", "All cluster nodes deleted for fresh reset");
+        return json({ status: "cleared", count });
+      }
     }
 
     // 6. Job Management (Public / Consumer Workload Submissions)

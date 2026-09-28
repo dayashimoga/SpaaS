@@ -883,8 +883,8 @@ function switchTab(tabId) {
 
 // Sub-tabs in Devices, Jobs, Advanced & Usage
 function initSubTabs() {
-  // Device Details Subtabs (8 subtabs)
-  const deviceSubtabBtns = document.querySelectorAll('.device-detail-subtabs .subtab-btn');
+  // Device Details Subtabs (8 subtabs: Overview, Performance, Power, Network, Security, Jobs, Earnings, Controls)
+  const deviceSubtabBtns = document.querySelectorAll('.device-subtabs .subtab-btn, .device-detail-subtabs .subtab-btn');
   deviceSubtabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       const target = btn.getAttribute('data-devicetab');
@@ -1157,25 +1157,37 @@ async function fetchNodes() {
     const elRam = document.getElementById('metric-fleet-ram');
     if (elRam) elRam.textContent = Math.round(totalRamMb / 1024);
 
-    // Prefer physical device for default selection!
-    if (!selectedNode || (selectedNode.is_simulated && physicalCount > 0)) {
-      const phys = cachedNodes.find(n => !n.is_simulated && n.device_type !== 'simulated_node' && !(n.capabilities?.device_model || '').toLowerCase().includes('emulator'));
-      if (phys) selectedNode = phys;
-      else if (!selectedNode && cachedNodes.length > 0) selectedNode = cachedNodes[0];
+    // Prefer physical active/ready device for default selection!
+    const isSelectedStale = !selectedNode || selectedNode.state === 'Revoked' || (selectedNode.is_simulated && physicalCount > 0);
+    if (isSelectedStale) {
+      const activePhys = cachedNodes.find(n => n.state !== 'Revoked' && !n.is_simulated && n.device_type !== 'simulated_node' && !(n.capabilities?.device_model || '').toLowerCase().includes('emulator'));
+      if (activePhys) {
+        selectedNode = activePhys;
+      } else {
+        const anyActive = cachedNodes.find(n => n.state !== 'Revoked');
+        if (anyActive) selectedNode = anyActive;
+        else if (cachedNodes.length > 0) selectedNode = cachedNodes[0];
+        else selectedNode = null;
+      }
     }
 
     renderNodesTable(cachedNodes);
 
     // If selected node was updated, refresh details
     if (selectedNode) {
-      const refreshed = cachedNodes.find(n => n.node_id === selectedNode.node_id);
+      const refreshed = cachedNodes.find(n => (n.node_id || n.id) === (selectedNode.node_id || selectedNode.id));
       if (refreshed) {
         selectedNode = refreshed;
         renderNodeDetails(refreshed);
       } else if (cachedNodes.length > 0) {
         selectedNode = cachedNodes[0];
         renderNodeDetails(cachedNodes[0]);
+      } else {
+        selectedNode = null;
+        renderNodeDetails(null);
       }
+    } else {
+      renderNodeDetails(null);
     }
   } catch (err) {
     console.warn('Error fetching nodes:', err);
@@ -1312,9 +1324,13 @@ function renderNodesTable(nodes) {
         <td><span class="text-emerald">${n.telemetry?.thermal_status || 'NOMINAL'}</span></td>
         <td>${n.telemetry?.network_type || 'Wifi'}</td>
         <td class="font-mono text-emerald">${edgeScore}</td>
-        <td>
+        <td style="white-space: nowrap;">
           <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); window.spaasSelectNode('${nodeId}')">Inspect</button>
-          <button class="btn btn-xs btn-outline-cyan" onclick="event.stopPropagation(); window.spaasRevokeNode('${nodeId}')">Revoke</button>
+          ${n.state === 'Revoked'
+            ? `<button class="btn btn-xs btn-outline-cyan" style="border-color: #ef4444; color: #f87171;" onclick="event.stopPropagation(); window.spaasDeleteNode('${nodeId}')">🗑️ Delete</button>`
+            : `<button class="btn btn-xs btn-outline-cyan" onclick="event.stopPropagation(); window.spaasRevokeNode('${nodeId}')">Revoke</button>
+               <button class="btn btn-xs btn-outline-cyan" style="border-color: #ef4444; color: #f87171;" title="Permanently delete device" onclick="event.stopPropagation(); window.spaasDeleteNode('${nodeId}')">✕</button>`
+          }
         </td>
       </tr>
     `;
@@ -1335,19 +1351,108 @@ window.spaasRevokeNode = async function(nodeId) {
   try {
     const res = await fetch(`${API_BASE}/api/v1/nodes/${nodeId}/revoke`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authedHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ reason: 'Decommissioned by operator' })
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    fetchNodes();
-    fetchSystemHealth();
+    await fetchNodes();
+    await fetchSystemHealth();
   } catch (err) {
     alert(`Failed to revoke node: ${err.message}`);
   }
 };
 
+window.spaasDeleteNode = async function(nodeId) {
+  if (!nodeId) return;
+  if (!confirm(`Permanently delete device ${nodeId.substring(0, 8)} from the cluster?`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/nodes/${nodeId}`, {
+      method: 'DELETE',
+      headers: authedHeaders()
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (selectedNode && (selectedNode.node_id === nodeId || selectedNode.id === nodeId)) {
+      selectedNode = null;
+    }
+    await fetchNodes();
+    await fetchSystemHealth();
+  } catch (err) {
+    alert(`Failed to delete node: ${err.message}`);
+  }
+};
+
+window.spaasPruneRevokedNodes = async function() {
+  if (!confirm('Remove all revoked / stale devices from the cluster? Active ready devices will not be affected.')) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/nodes?revoked_only=true`, {
+      method: 'DELETE',
+      headers: authedHeaders()
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (selectedNode && selectedNode.state === 'Revoked') {
+      selectedNode = null;
+    }
+    await fetchNodes();
+    await fetchSystemHealth();
+  } catch (err) {
+    alert(`Failed to prune devices: ${err.message}`);
+  }
+};
+
+window.spaasClearAllNodes = async function() {
+  if (!confirm('⚠️ WARNING: Clear ALL enrolled devices from the cluster fabric for a completely fresh start? All mobile workers will need to re-pair.')) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/nodes`, {
+      method: 'DELETE',
+      headers: authedHeaders()
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    selectedNode = null;
+    await fetchNodes();
+    await fetchSystemHealth();
+  } catch (err) {
+    alert(`Failed to clear devices: ${err.message}`);
+  }
+};
+
+window.spaasGetSelectedNodeId = function() {
+  return selectedNode ? (selectedNode.node_id || selectedNode.id) : null;
+};
+
 function renderNodeDetails(node) {
-  if (!node) return;
+  if (!node) {
+    const elTitle = document.getElementById('detail-node-title');
+    if (elTitle) elTitle.textContent = 'None Selected';
+    const elId = document.getElementById('detail-node-id');
+    if (elId) elId.textContent = 'None Selected';
+    const elModel = document.getElementById('detail-hw-model');
+    if (elModel) elModel.textContent = '-';
+    const elType = document.getElementById('detail-hw-type');
+    if (elType) elType.textContent = '-';
+    const elEvidence = document.getElementById('detail-device-evidence');
+    if (elEvidence) { elEvidence.textContent = 'NO DEVICE'; elEvidence.className = 'badge badge-simulated'; }
+    const elState = document.getElementById('detail-hw-state');
+    if (elState) { elState.textContent = 'NO DEVICE'; elState.className = 'spec-val font-bold text-muted'; }
+    const elBattery = document.getElementById('detail-hw-battery');
+    if (elBattery) elBattery.textContent = '-';
+    const elCharging = document.getElementById('detail-hw-charging');
+    if (elCharging) elCharging.textContent = '-';
+    const elThermal = document.getElementById('detail-hw-thermal');
+    if (elThermal) elThermal.textContent = '-';
+    const elTemp = document.getElementById('detail-hw-temp');
+    if (elTemp) elTemp.textContent = '-';
+    const elNet = document.getElementById('detail-hw-net');
+    if (elNet) elNet.textContent = '-';
+    const elPing = document.getElementById('detail-hw-ping');
+    if (elPing) elPing.textContent = '-';
+    const elDownlink = document.getElementById('detail-hw-downlink');
+    if (elDownlink) elDownlink.textContent = '-';
+    const elPubkey = document.getElementById('detail-hw-pubkey');
+    if (elPubkey) elPubkey.textContent = '-';
+    const rawTable = document.getElementById('raw-benchmarks-table-body');
+    if (rawTable) rawTable.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No device selected. Enroll or select a device above.</td></tr>';
+    return;
+  }
 
   // Subtab 1: Overview
   const elNodeId = document.getElementById('detail-node-id');

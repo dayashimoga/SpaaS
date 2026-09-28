@@ -859,6 +859,18 @@ body {
   background: rgba(6, 182, 212, 0.12);
 }
 
+.btn-outline-rose {
+  background: transparent;
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+}
+
+.btn-outline-rose:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+  color: #fca5a5;
+}
+
 /* Callout Card */
 .callout-card {
   display: flex;

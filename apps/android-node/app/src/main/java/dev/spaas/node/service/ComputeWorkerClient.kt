@@ -407,7 +407,8 @@ object ComputeWorkerClient {
             }
 
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
-            val ok = conn.responseCode in 200..299
+            val responseCode = conn.responseCode
+            val ok = responseCode in 200..299
             if (ok) {
                 consecutiveHeartbeatFailures = 0
                 heartbeatSuccessCount++
@@ -442,6 +443,10 @@ object ComputeWorkerClient {
                         }
                     }
                 } catch (_: Throwable) {}
+            } else if (responseCode == 401 || responseCode == 403) {
+                // Device was revoked or deleted from cluster fabric
+                android.util.Log.w("ComputeWorkerClient", "Cluster rejected heartbeat with HTTP $responseCode (Device Revoked or Removed). Resetting identity.")
+                clearIdentity(appContext)
             } else {
                 handleHeartbeatFailure()
             }
@@ -463,6 +468,11 @@ object ComputeWorkerClient {
                 readTimeout = 5000
             }
 
+            if (conn.responseCode == 401 || conn.responseCode == 403) {
+                android.util.Log.w("ComputeWorkerClient", "Cluster rejected job poll with HTTP ${conn.responseCode}. Resetting identity.")
+                clearIdentity(appContext)
+                return@withContext null
+            }
             if (conn.responseCode !in 200..299) return@withContext null
             val responseText = conn.inputStream.bufferedReader().use { it.readText() }
             val root = JSONObject(responseText)
