@@ -1830,9 +1830,9 @@ function renderJobsTable(jobs) {
   }
 
   tbody.innerHTML = jobs.map(j => {
-    const stateClass = j.state === 'Completed' ? 'status-healthy'
+    const stateClass = (j.state === 'Completed' || j.state === 'Settled') ? 'status-healthy'
       : (j.state === 'Running' ? 'status-active'
-      : (j.state === 'Queued' ? 'status-paused'
+      : ((j.state === 'Queued' || j.state === 'Pending') ? 'status-paused'
       : (j.state === 'Scheduled' ? 'status-active' : 'status-error')));
 
     const leaseId = j.current_lease ? `${j.current_lease.lease_id.substring(0, 8)}...` : '-';
@@ -1867,9 +1867,9 @@ function renderRecentJobs(jobs) {
   }
 
   tbody.innerHTML = jobs.slice(0, 5).map(j => {
-    const stateClass = j.state === 'Completed' ? 'status-healthy'
+    const stateClass = (j.state === 'Completed' || j.state === 'Settled') ? 'status-healthy'
       : (j.state === 'Running' ? 'status-active'
-      : (j.state === 'Queued' ? 'status-paused' : 'status-error'));
+      : ((j.state === 'Queued' || j.state === 'Pending') ? 'status-paused' : 'status-error'));
     const credits = j.result ? '+10 CR' : '-';
     const duration = j.result ? `${j.result.wall_time_ms}ms` : '-';
 

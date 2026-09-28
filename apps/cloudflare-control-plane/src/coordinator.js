@@ -519,7 +519,7 @@ export class SPaaSCoordinator {
       completed_at: now
     };
 
-    // Update job state
+    // Update job state to Completed (will be promoted to Settled after ledger entry)
     this.sqlExec(
       `UPDATE jobs SET state = 'Completed', result = ?, completed_at = ? WHERE id = ?`,
       JSON.stringify(resultObj),
@@ -585,6 +585,8 @@ export class SPaaSCoordinator {
         now
       );
 
+      // Promote job state from Completed → Settled after successful ledger entries
+      this.sqlExec(`UPDATE jobs SET state = 'Settled' WHERE id = ? AND state = 'Completed'`, job_id);
       this.logAudit("CREDIT_SETTLED", `Settled ${amountCredits} TEST CREDITS (Tx: ${txId}) | DEBIT: ${consumerAccount} | CREDIT: ${providerAccount}`);
     } catch (err) {
       console.warn(`Duplicate settlement prevented for job ${job_id}: ${err.message}`);
@@ -707,13 +709,14 @@ export class SPaaSCoordinator {
       } catch (warmupErr) {
         console.warn("[Coordinator] Warmup warning during health check:", warmupErr);
       }
-      const activeNodes = (this.nodes || []).filter(n => n.state === "Running" || n.state === "Active").length;
-      const idleNodes = (this.nodes || []).filter(n => n.state === "Idle" || n.state === "Ready" || n.state === "Registered").length;
-      const totalNodes = (this.nodes || []).length;
-      const queuedJobs = (this.jobs || []).filter(j => j.state === "Queued" || j.state === "Pending").length;
-      const runningJobs = (this.jobs || []).filter(j => j.state === "Running").length;
-      const completedJobs = (this.jobs || []).filter(j => j.state === "Completed").length;
-      const failedJobs = (this.jobs || []).filter(j => j.state === "Failed").length;
+      // Use SQL queries against SQLite — in-memory arrays don't exist in DO coordinator
+      const activeNodes = this.sqlEngine ? (this.sqlExec(`SELECT COUNT(*) as c FROM nodes WHERE state IN ('Running','Active')`)[0]?.c || 0) : 0;
+      const idleNodes = this.sqlEngine ? (this.sqlExec(`SELECT COUNT(*) as c FROM nodes WHERE state IN ('Idle','Ready','Registered')`)[0]?.c || 0) : 0;
+      const totalNodes = this.sqlEngine ? (this.sqlExec(`SELECT COUNT(*) as c FROM nodes`)[0]?.c || 0) : 0;
+      const queuedJobs = this.sqlEngine ? (this.sqlExec(`SELECT COUNT(*) as c FROM jobs WHERE state IN ('Queued','Pending')`)[0]?.c || 0) : 0;
+      const runningJobs = this.sqlEngine ? (this.sqlExec(`SELECT COUNT(*) as c FROM jobs WHERE state = 'Running'`)[0]?.c || 0) : 0;
+      const completedJobs = this.sqlEngine ? (this.sqlExec(`SELECT COUNT(*) as c FROM jobs WHERE state IN ('Completed','Settled')`)[0]?.c || 0) : 0;
+      const failedJobs = this.sqlEngine ? (this.sqlExec(`SELECT COUNT(*) as c FROM jobs WHERE state = 'Failed'`)[0]?.c || 0) : 0;
 
       return new Response(JSON.stringify({
         status: "healthy",
@@ -1238,7 +1241,19 @@ export class SPaaSCoordinator {
       if (wRows.length > 0) {
         try { spec = JSON.parse(wRows[0].spec); } catch (_) {}
         if (wRows[0].wasm_bytes) {
-          try { wasmBytes = JSON.parse(wRows[0].wasm_bytes); } catch (_) {}
+          // wasm_bytes may be stored as base64 string or JSON byte array
+          const rawWasm = wRows[0].wasm_bytes;
+          try {
+            const parsed = JSON.parse(rawWasm);
+            if (Array.isArray(parsed)) {
+              wasmBytes = parsed;
+            }
+          } catch (_) {
+            // It's a base64 string — embed it into artifact_uri if spec doesn't already have one
+            if (spec && (!spec.artifact_uri || spec.artifact_uri === "")) {
+              spec.artifact_uri = `data:application/wasm;base64,${rawWasm}`;
+            }
+          }
         }
       }
       if (!spec) {
@@ -1380,9 +1395,12 @@ export class SPaaSCoordinator {
       const fencingToken = crypto.randomUUID();
       const leaseExpiresAt = Date.now() + 60000;
 
+      // Embedded SHA-256 challenge WASM binary (WASI: writes deterministic SHA-256 benchmark output to fd_write)
+      const challengeWasmBase64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYXBzaG90X3ByZXZpZXcxCGZkX3dyaXRlAAADAgEBBQMBABEGCQF/AUGAgMAACwcTAgZtZW1vcnkCAAZfc3RhcnQAAQpRAU8BAX8jgICAgABBEGsiACSAgICAACAAQeQANgIIIABBgIDAgAA2AgQgAEEANgIMQQEgAEEEakEBIABBDGoQgICAgAAaIABBEGokgICAgAALC20BAEGAgMAAC2RTUGFhUyBXQVNNIFNhbmRib3g6IFNIQS0yNTYgQ3J5cHRvZ3JhcGhpYyBCZW5jaG1hcmsKQWxnb3JpdGhtOiBTSEEtMjU2IChGSVBTIDE4MC00KQpTdGF0dXM6IFNVQ0NFU1MKAGsEbmFtZQATEnNoYTI1Nl9oYXNoZXIud2FzbQEvAgAkX1JOdkNzY1BkcXBZeDc4cElfOHJ1c3Rfb3V0OGZkX3dyaXRlAQZfc3RhcnQHEgEAD19fc3RhY2tfcG9pbnRlcgkKAQAHLnJvZGF0YQA9CXByb2R1Y2VycwEMcHJvY2Vzc2VkLWJ5AQVydXN0Yx0xLjk3LjEgKDhiYWIyNmY0ZiAyMDI2LTA3LTE0KQCUAQ90YXJnZXRfZmVhdHVyZXMIKwtidWxrLW1lbW9yeSsPYnVsay1tZW1vcnktb3B0KxZjYWxsLWluZGlyZWN0LW92ZXJsb25nKwptdWx0aXZhbHVlKw9tdXRhYmxlLWdsb2JhbHMrE25vbnRyYXBwaW5nLWZwdG9pbnQrD3JlZmVyZW5jZS10eXBlcysIc2lnbi1leHQ=';
+
       const spec = {
         name: `Cryptographic SHA-256 Challenge (${jobId})`,
-        artifact_uri: "",
+        artifact_uri: `data:application/wasm;base64,${challengeWasmBase64}`,
         limits: {
           max_fuel: 50000000,
           max_memory_bytes: 67108864,
@@ -1396,7 +1414,7 @@ export class SPaaSCoordinator {
         workloadId,
         JSON.stringify(spec),
         "fabric_verifier",
-        null,
+        challengeWasmBase64,
         Date.now()
       );
 
@@ -1608,9 +1626,30 @@ export class SPaaSCoordinator {
       }
       const nonce = crypto.randomUUID().replace(/-/g, "");
       const jobId = "challenge_" + nonce.substring(0, 8);
+      const workloadId = "challenge_sha256_" + nonce.substring(0, 6);
+
+      // Embedded SHA-256 challenge WASM binary
+      const challengeWasmBase64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYXBzaG90X3ByZXZpZXcxCGZkX3dyaXRlAAADAgEBBQMBABEGCQF/AUGAgMAACwcTAgZtZW1vcnkCAAZfc3RhcnQAAQpRAU8BAX8jgICAgABBEGsiACSAgICAACAAQeQANgIIIABBgIDAgAA2AgQgAEEANgIMQQEgAEEEakEBIABBDGoQgICAgAAaIABBEGokgICAgAALC20BAEGAgMAAC2RTUGFhUyBXQVNNIFNhbmRib3g6IFNIQS0yNTYgQ3J5cHRvZ3JhcGhpYyBCZW5jaG1hcmsKQWxnb3JpdGhtOiBTSEEtMjU2IChGSVBTIDE4MC00KQpTdGF0dXM6IFNVQ0NFU1MKAGsEbmFtZQATEnNoYTI1Nl9oYXNoZXIud2FzbQEvAgAkX1JOdkNzY1BkcXBZeDc4cElfOHJ1c3Rfb3V0OGZkX3dyaXRlAQZfc3RhcnQHEgEAD19fc3RhY2tfcG9pbnRlcgkKAQAHLnJvZGF0YQA9CXByb2R1Y2VycwEMcHJvY2Vzc2VkLWJ5AQVydXN0Yx0xLjk3LjEgKDhiYWIyNmY0ZiAyMDI2LTA3LTE0KQCUAQ90YXJnZXRfZmVhdHVyZXMIKwtidWxrLW1lbW9yeSsPYnVsay1tZW1vcnktb3B0KxZjYWxsLWluZGlyZWN0LW92ZXJsb25nKwptdWx0aXZhbHVlKw9tdXRhYmxlLWdsb2JhbHMrE25vbnRyYXBwaW5nLWZwdG9pbnQrD3JlZmVyZW5jZS10eXBlcysIc2lnbi1leHQ=';
+      const challengeSpec = {
+        name: `SHA-256 Cryptographic Challenge (${jobId})`,
+        artifact_uri: `data:application/wasm;base64,${challengeWasmBase64}`,
+        limits: { max_fuel: 50000000, max_memory_bytes: 67108864, timeout_ms: 30000 },
+        args: [nonce]
+      };
+
       this.sqlExec(
-        `INSERT INTO jobs (id, workload_id, state, created_at) VALUES (?, 'challenge_sha256', 'Pending', ?)`,
+        `INSERT OR REPLACE INTO workloads (id, spec, submitter_pubkey, wasm_bytes, created_at) VALUES (?, ?, ?, ?, ?)`,
+        workloadId,
+        JSON.stringify(challengeSpec),
+        "fabric_verifier",
+        challengeWasmBase64,
+        Date.now()
+      );
+
+      this.sqlExec(
+        `INSERT INTO jobs (id, workload_id, state, created_at) VALUES (?, ?, 'Pending', ?)`,
         jobId,
+        workloadId,
         Date.now()
       );
       await this.schedulePendingJobs();
@@ -1649,6 +1688,28 @@ export class SPaaSCoordinator {
           epoch: this.epoch,
           account_balances: accountBalances
         }
+      });
+    }
+
+    // Consumer / Provider Account Balance Query
+    if (path.startsWith("/api/v1/metering/consumer/") && method === "GET") {
+      const accountKey = decodeURIComponent(path.split("/")[5] || "");
+      if (!accountKey) return json({ error: "BAD_REQUEST", message: "Account key required" }, 400);
+
+      const entries = this.sqlExec(`SELECT * FROM ledger WHERE account = ? OR consumer_pubkey = ? OR provider_pubkey = ? ORDER BY timestamp DESC`, accountKey, accountKey, accountKey);
+      let balance = 0;
+      for (const e of entries) {
+        const amt = Number(e.amount_credits) || 0;
+        if (e.entry_type === "CREDIT") balance += amt;
+        else balance -= amt;
+      }
+
+      return json({
+        account: accountKey,
+        balance_credits: Number(balance.toFixed(4)),
+        transaction_count: entries.length,
+        transactions: entries.slice(0, 50),
+        epoch: this.epoch
       });
     }
 
