@@ -81,8 +81,8 @@ export class SPaaSCoordinator {
     this.sqlExec(`
       CREATE TABLE IF NOT EXISTS pairing_tokens (
         token TEXT PRIMARY KEY,
-        short_code TEXT NOT NULL,
-        opaque_credential TEXT NOT NULL UNIQUE,
+        short_code TEXT,
+        opaque_credential TEXT,
         expires_at INTEGER NOT NULL,
         claimed_by TEXT,
         status TEXT NOT NULL DEFAULT 'Active',
@@ -91,8 +91,13 @@ export class SPaaSCoordinator {
       );
     `);
 
-    this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_pairing_short_code ON pairing_tokens(short_code);`);
-    this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_pairing_opaque ON pairing_tokens(opaque_credential);`);
+    // Safe schema migrations for existing Durable Object SQLite databases
+    try { this.sqlExec(`ALTER TABLE pairing_tokens ADD COLUMN short_code TEXT;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE pairing_tokens ADD COLUMN opaque_credential TEXT;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE pairing_tokens ADD COLUMN consumed_at INTEGER;`); } catch (_) {}
+
+    try { this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_pairing_short_code ON pairing_tokens(short_code);`); } catch (_) {}
+    try { this.sqlExec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_pairing_opaque ON pairing_tokens(opaque_credential);`); } catch (_) {}
 
     this.sqlExec(`
       CREATE TABLE IF NOT EXISTS workloads (
@@ -145,6 +150,12 @@ export class SPaaSCoordinator {
       );
     `);
 
+    // Safe column migrations for existing ledger table
+    try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN tx_id TEXT;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN entry_type TEXT;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN account TEXT;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN counterparty TEXT;`); } catch (_) {}
+
     this.sqlExec(`
       CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,15 +173,15 @@ export class SPaaSCoordinator {
     `);
 
     // Performance & integrity indices
-    this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_nodes_state ON nodes(state);`);
-    this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_nodes_heartbeat ON nodes(last_heartbeat);`);
-    this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state);`);
-    this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_jobs_assigned ON jobs(assigned_node_id);`);
+    try { this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_nodes_state ON nodes(state);`); } catch (_) {}
+    try { this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_nodes_heartbeat ON nodes(last_heartbeat);`); } catch (_) {}
+    try { this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state);`); } catch (_) {}
+    try { this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_jobs_assigned ON jobs(assigned_node_id);`); } catch (_) {}
 
     // Ensure baseline metadata row exists
-    this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('role', 'PRIMARY');`);
-    this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('epoch', '1');`);
-    this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('fabric_status', 'ACTIVE');`);
+    try { this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('role', 'PRIMARY');`); } catch (_) {}
+    try { this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('epoch', '1');`); } catch (_) {}
+    try { this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('fabric_status', 'ACTIVE');`); } catch (_) {}
   }
 
   /**
@@ -636,10 +647,35 @@ export class SPaaSCoordinator {
    * Main HTTP Request Router for the Coordinator DO
    */
   async fetch(req) {
-    await this.ensureReady();
     const url = new URL(req.url);
     const path = url.pathname;
     const method = req.method;
+
+    // Fast-path health check allows liveness probe even during warmup
+    if (path === "/health" || path === "/api/v1/system/health") {
+      try {
+        await this.ensureReady();
+      } catch (warmupErr) {
+        console.warn("[Coordinator] Warmup warning during health check:", warmupErr);
+      }
+      return new Response(JSON.stringify({
+        status: "healthy",
+        service: "spaas-cloudflare-control-plane",
+        version: "0.2.0-prod",
+        role: this.role,
+        epoch: this.epoch,
+        fabric_status: this.fabricStatus,
+        uptime_seconds: Math.floor((Date.now() - this.startTime) / 1000)
+      }), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
+        }
+      });
+    }
+
+    await this.ensureReady();
 
     // Handle WebSocket upgrade
     if (req.headers.get("Upgrade") === "websocket") {

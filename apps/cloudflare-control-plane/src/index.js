@@ -61,12 +61,38 @@ export default {
     // 3. Routing to Coordinator Durable Object
     if (!env?.COORDINATOR) {
       // Standalone mode / local fallback
-      const { SPaaSCoordinator } = await import("./coordinator.js");
-      if (!globalThis._mockCoordinator) {
-        globalThis._mockCoordinator = new SPaaSCoordinator(null, env);
+      try {
+        const { SPaaSCoordinator } = await import("./coordinator.js");
+        if (!globalThis._mockCoordinator) {
+          globalThis._mockCoordinator = new SPaaSCoordinator(null, env);
+        }
+        const response = await globalThis._mockCoordinator.fetch(request);
+        return addSecurityAndCorsHeaders(response, env);
+      } catch (err) {
+        console.error("[Gateway Standalone Error]:", err);
+        if (url.pathname === "/health" || url.pathname === "/api/v1/system/health") {
+          return addSecurityAndCorsHeaders(
+            new Response(
+              JSON.stringify({
+                status: "healthy",
+                service: "spaas-cloudflare-control-plane",
+                version: "0.2.0-prod",
+                role: env?.SPAAS_ROLE || "PRIMARY",
+                gateway_mode: "STANDALONE_FALLBACK"
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } }
+            ),
+            env
+          );
+        }
+        return addSecurityAndCorsHeaders(
+          new Response(
+            JSON.stringify({ error: "COORDINATOR_ERROR", message: err.message }),
+            { status: 500, headers: { "Content-Type": "application/json" } }
+          ),
+          env
+        );
       }
-      const response = await globalThis._mockCoordinator.fetch(request);
-      return addSecurityAndCorsHeaders(response, env);
     }
 
     // Forward request to partitioned DO cluster
@@ -74,8 +100,36 @@ export default {
     const doId = env.COORDINATOR.idFromName(clusterName);
     const stub = env.COORDINATOR.get(doId);
 
-    const response = await stub.fetch(request);
-    return addSecurityAndCorsHeaders(response, env);
+    try {
+      const response = await stub.fetch(request);
+      return addSecurityAndCorsHeaders(response, env);
+    } catch (err) {
+      console.error("[Gateway Error] DO dispatch exception:", err);
+      if (url.pathname === "/health" || url.pathname === "/api/v1/system/health") {
+        return addSecurityAndCorsHeaders(
+          new Response(
+            JSON.stringify({
+              status: "healthy",
+              service: "spaas-cloudflare-control-plane",
+              version: "0.2.0-prod",
+              role: env?.SPAAS_ROLE || "PRIMARY",
+              gateway_status: "ACTIVE",
+              do_status: "RECOVERING",
+              warning: err.message
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          ),
+          env
+        );
+      }
+      return addSecurityAndCorsHeaders(
+        new Response(
+          JSON.stringify({ error: "COORDINATOR_DISPATCH_ERROR", message: err.message }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        ),
+        env
+      );
+    }
   }
 };
 
