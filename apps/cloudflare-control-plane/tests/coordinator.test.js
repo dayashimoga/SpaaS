@@ -890,3 +890,87 @@ test("SPaaSCoordinator — Cross-Cloud DR Epoch Handoff & Fencing", async () => 
   assert.equal(ingestedNode[0].id, "dr-synced-node-01");
 });
 
+test("SPaaSCoordinator — Empirical Qualification & Challenge Dispatch", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  // 1. Enroll a test device
+  const tokenRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/enrollment/create", { method: "POST" })
+  );
+  const { opaque_credential } = await tokenRes.json();
+
+  const pairRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/devices/pair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pairing_token: opaque_credential,
+        node_id: "phone-vivo-qual-01",
+        device_name: "Vivo I2221",
+        device_type: "android_smartphone",
+        capabilities: {
+          device_model: "Vivo I2221",
+          cpu_cores: 8,
+          total_ram_mb: 4096
+        },
+        telemetry: {
+          available_ram_mb: 2048,
+          temperature_celsius: 33.5,
+          battery_pct: 88,
+          charging_state: "DISCHARGING",
+          network_type: "wifi_unmetered"
+        }
+      })
+    })
+  );
+  assert.equal(pairRes.status, 200);
+  const pairData = await pairRes.json();
+  const deviceToken = pairData.auth_token;
+
+  // 2. Run Empirical Qualification
+  const qualRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/nodes/phone-vivo-qual-01/qualification/run", {
+      method: "POST"
+    })
+  );
+  assert.equal(qualRes.status, 200);
+  const qualData = await qualRes.json();
+  assert.equal(qualData.status, "ok");
+  assert.ok(qualData.profile);
+  assert.ok(qualData.profile.edge_score >= 80, `Edge score should be >= 80, got ${qualData.profile.edge_score}`);
+  assert.ok(qualData.profile.measured_fuel_mips > 100);
+  assert.equal(qualData.profile.tier, "QUALIFIED");
+  assert.ok(qualData.profile.capability_vector);
+  assert.ok(qualData.profile.raw_metrics);
+
+  // 3. Dispatch Challenge Job
+  const challengeRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/nodes/phone-vivo-qual-01/dispatch-challenge", {
+      method: "POST"
+    })
+  );
+  assert.equal(challengeRes.status, 200);
+  const challengeData = await challengeRes.json();
+  assert.equal(challengeData.status, "ok");
+  assert.ok(challengeData.job_id.startsWith("challenge_"));
+
+  // 4. Node Polls for Job
+  const pollRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/nodes/phone-vivo-qual-01/poll", {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${deviceToken}` }
+    })
+  );
+  assert.equal(pollRes.status, 200);
+  const pollData = await pollRes.json();
+  assert.ok(pollData.job);
+  assert.equal(pollData.job.job_id, challengeData.job_id);
+  assert.ok(pollData.job.lease_id);
+  assert.ok(pollData.job.spec);
+  assert.ok(pollData.job.spec.name.includes("SHA-256"));
+});
+
+

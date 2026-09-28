@@ -239,6 +239,12 @@ function createMinimalFallbackEngine() {
         if (n) n.name = name;
         return [];
       }
+      if (qu.startsWith("UPDATE NODES SET QUALIFICATION =")) {
+        const [qual, id] = params;
+        const n = tables.nodes.get(id);
+        if (n) n.qualification = qual;
+        return [];
+      }
       if (qu.startsWith("DELETE FROM NODES WHERE ID =")) {
         tables.nodes.delete(params[0]);
         return [];
@@ -269,8 +275,50 @@ function createMinimalFallbackEngine() {
         return Array.from(tables.nodes.values());
       }
 
+      // WORKLOADS
+      if (qu.startsWith("INSERT OR REPLACE INTO WORKLOADS") || qu.startsWith("INSERT INTO WORKLOADS")) {
+        const [id, spec, submitter_pubkey, wasm_bytes, created_at] = params;
+        tables.workloads.set(id, {
+          id,
+          spec,
+          signature: null,
+          submitter_pubkey: submitter_pubkey || "public_consumer",
+          wasm_bytes: wasm_bytes || null,
+          created_at: created_at || Date.now()
+        });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM WORKLOADS WHERE ID =")) {
+        const id = params[0];
+        const w = tables.workloads.get(id);
+        return w ? [w] : [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM WORKLOADS")) {
+        return Array.from(tables.workloads.values());
+      }
+
       // JOBS
       if (qu.startsWith("INSERT INTO JOBS")) {
+        if (qu.includes("FENCING_TOKEN") && params.length >= 8) {
+          const [jId, wId, jState, aNodeId, fToken, lExpires, ep, sDecision, cAt] = params;
+          tables.jobs.set(jId, {
+            id: jId,
+            workload_id: wId,
+            state: jState,
+            assigned_node_id: aNodeId,
+            lease_term: 1,
+            lease_expires_at: lExpires,
+            epoch: ep || 1,
+            fencing_token: fToken,
+            retry_count: 0,
+            max_retries: 3,
+            result: null,
+            scheduler_decision: sDecision,
+            created_at: cAt || Date.now(),
+            completed_at: null
+          });
+          return [];
+        }
         let id = params[0];
         let workload_id = params[1] || "workload";
         let state = qu.includes("'RUNNING'") ? "Running" : qu.includes("'COMPLETED'") ? "Completed" : "Pending";

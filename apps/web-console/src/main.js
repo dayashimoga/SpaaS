@@ -301,8 +301,8 @@ let eventSource = null;
 let reconnectBackoffMs = 1000;
 let pairingTimerInterval = null;
 
-// Initialize on DOM Ready
-window.addEventListener('DOMContentLoaded', () => {
+// Initialize on DOM Ready or immediately if DOM already loaded
+function bootApp() {
   initNavigation();
   initModals();
   initDeviceControls();
@@ -317,7 +317,13 @@ window.addEventListener('DOMContentLoaded', () => {
   refreshAllData();
   connectEventStream();
   startPolling();
-});
+}
+
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', bootApp);
+} else {
+  bootApp();
+}
 
 let lastSyncTimestamp = null;
 
@@ -1048,8 +1054,17 @@ async function fetchNodes() {
   try {
     const res = await fetch(`${API_BASE}/api/v1/nodes`);
     if (!res.ok) return;
-    const data = await res.json();
-    cachedNodes = data.nodes || [];
+    cachedNodes = (data.nodes || []).map(n => ({
+      ...n,
+      node_id: n.node_id || n.id,
+      id: n.id || n.node_id,
+      capabilities: n.capabilities || {
+        device_model: n.name || "Android Smartphone",
+        architecture: "aarch64",
+        total_ram_mb: n.telemetry?.available_ram_mb ? Math.round(n.telemetry.available_ram_mb * 1.5) : 4096,
+        cpu_cores: 8
+      }
+    }));
 
     document.getElementById('node-list-count').textContent = cachedNodes.length;
 
@@ -1274,29 +1289,32 @@ function renderNodesTable(nodes) {
             ? '<span class="badge badge-emulator">🤖 EMULATOR</span>'
             : '<span class="badge badge-simulated">🧪 SIMULATED</span>')));
 
-    const rowClass = (isPhysical || isIos ? 'row-physical ' : '') + (selectedNode && selectedNode.node_id === n.node_id ? 'row-selected' : '');
+    const nodeId = n.node_id || n.id || 'unknown';
+    const rowClass = (isPhysical || isIos ? 'row-physical ' : '') + (selectedNode && (selectedNode.node_id === nodeId || selectedNode.id === nodeId) ? 'row-selected' : '');
+    const modelName = n.capabilities?.device_model || n.name || 'Android Smartphone';
+    const ramGb = n.capabilities?.total_ram_mb ? Math.round(n.capabilities.total_ram_mb / 1024) : (n.telemetry?.available_ram_mb ? Math.round(n.telemetry.available_ram_mb / 1024 * 1.5) : 4);
 
-    const stateClass = n.state === 'Active' ? 'status-active'
-      : (n.state === 'Idle' ? 'status-healthy'
-      : (n.state === 'Paused' ? 'status-paused' : 'status-error'));
+    const stateClass = n.state === 'Active' || n.state === 'Running' ? 'status-active'
+      : (n.state === 'Idle' || n.state === 'Ready' ? 'status-healthy'
+      : (n.state === 'Paused' ? 'status-paused' : 'status-healthy'));
 
     const chargingIcon = n.telemetry?.charging_state === 'ChargingAc' ? '⚡ AC' : '🔋 Batt';
     const edgeScore = n.qualification?.edge_score ? `${n.qualification.edge_score}/100` : (n.qualification ? 'QUALIFIED' : 'Pending');
 
     return `
-      <tr class="${rowClass}" onclick="window.spaasSelectNode('${n.node_id}')">
+      <tr class="${rowClass}" onclick="window.spaasSelectNode('${nodeId}')">
         <td>${typeBadge}</td>
-        <td><strong>${escapeHtml(n.capabilities?.device_model || 'Unknown Device')}</strong> ${isPhysical ? '✨' : (isIos ? '🍎' : '')}</td>
-        <td class="font-mono text-muted">${n.node_id.substring(0, 8)}...</td>
-        <td class="font-mono">${n.capabilities?.architecture || 'aarch64'} / ${Math.round((n.capabilities?.total_ram_mb || 0)/1024)}GB</td>
-        <td><span class="status-badge ${stateClass}">${(n.state || 'IDLE').toUpperCase()}</span></td>
+        <td><strong>${escapeHtml(modelName)}</strong> ${isPhysical ? '✨' : (isIos ? '🍎' : '')}</td>
+        <td class="font-mono text-muted">${nodeId.substring(0, 8)}...</td>
+        <td class="font-mono">${n.capabilities?.architecture || 'aarch64'} / ${ramGb}GB</td>
+        <td><span class="status-badge ${stateClass}">${(n.state || 'READY').toUpperCase()}</span></td>
         <td>${n.telemetry?.battery_pct || 90}% <span class="text-sub font-mono">(${chargingIcon})</span></td>
         <td><span class="text-emerald">${n.telemetry?.thermal_status || 'NOMINAL'}</span></td>
         <td>${n.telemetry?.network_type || 'Wifi'}</td>
         <td class="font-mono text-emerald">${edgeScore}</td>
         <td>
-          <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); window.spaasSelectNode('${n.node_id}')">Inspect</button>
-          <button class="btn btn-xs btn-outline-cyan" onclick="event.stopPropagation(); window.spaasRevokeNode('${n.node_id}')">Revoke</button>
+          <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); window.spaasSelectNode('${nodeId}')">Inspect</button>
+          <button class="btn btn-xs btn-outline-cyan" onclick="event.stopPropagation(); window.spaasRevokeNode('${nodeId}')">Revoke</button>
         </td>
       </tr>
     `;
@@ -1304,7 +1322,7 @@ function renderNodesTable(nodes) {
 }
 
 window.spaasSelectNode = function(nodeId) {
-  const node = cachedNodes.find(n => n.node_id === nodeId);
+  const node = cachedNodes.find(n => (n.node_id === nodeId || n.id === nodeId));
   if (!node) return;
   selectedNode = node;
   renderNodeDetails(node);
@@ -1312,6 +1330,7 @@ window.spaasSelectNode = function(nodeId) {
 };
 
 window.spaasRevokeNode = async function(nodeId) {
+  if (!nodeId) return;
   if (!confirm(`Revoke device ${nodeId.substring(0, 8)}? Active leases will be returned to queue.`)) return;
   try {
     const res = await fetch(`${API_BASE}/api/v1/nodes/${nodeId}/revoke`, {
@@ -2525,7 +2544,7 @@ async function submitCurrentWorkload() {
   try {
     const res = await fetch(`${API_BASE}/api/v1/jobs`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authedHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(payload)
     });
 
