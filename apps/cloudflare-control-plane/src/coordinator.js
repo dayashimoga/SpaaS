@@ -14,7 +14,7 @@ export class SPaaSCoordinator {
     this.startTime = Date.now();
     this.adminSecret = this.env.SPAAS_API_SECRET || this.env.SPAAS_ADMIN_KEY || "";
     this.rateLimitRps = parseInt(this.env.SPAAS_RATE_LIMIT_RPS || "100", 10);
-    this.requireAuth = this.env.SPAAS_REQUIRE_AUTH !== "false";
+    this.requireAuth = Boolean(this.adminSecret || this.env.SPAAS_REQUIRE_AUTH === "true");
     this.fabricStatus = "ACTIVE"; // ACTIVE | PAUSED | DRAINING | STOPPED
 
     this._rateLimitBuckets = new Map();
@@ -1390,9 +1390,9 @@ export class SPaaSCoordinator {
       return json({ status: "deleted", node_id: nodeId });
     }
 
-    // 6. Job Management (Submit requires Admin Auth if explicitly enforced)
+    // 6. Job Management (Public / Consumer Workload Submissions)
     if (path === "/api/v1/jobs" && method === "POST") {
-      if (this.requireAuth && !this.verifyAdminAuth(req)) {
+      if (this.env.SPAAS_REQUIRE_JOB_AUTH === "true" && !this.verifyAdminAuth(req)) {
         return json({ error: "UNAUTHORIZED", message: "Authorization token required to submit workloads" }, 401);
       }
       if (this.fabricStatus === "DRAINING" || this.fabricStatus === "STOPPED") {
