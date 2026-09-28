@@ -270,11 +270,11 @@ test("SPaaSCoordinator — Workload Submission, Placement & Dynamic Settlement",
   )).json();
   const deviceAuthToken = pairData.auth_token;
 
-  // Submit job (authenticated)
+  // Submit job (authenticated with X-Correlation-ID)
   const submitRes = await coordinator.fetch(
     new Request("http://localhost/api/v1/jobs", {
       method: "POST",
-      headers: ADMIN_HEADERS,
+      headers: { ...ADMIN_HEADERS, "X-Correlation-ID": "corr-matrix-test-999" },
       body: JSON.stringify({
         job_id: "job-matrix-wasm-001",
         workload_id: "matrix_compute"
@@ -286,6 +286,7 @@ test("SPaaSCoordinator — Workload Submission, Placement & Dynamic Settlement",
   assert.equal(job.id, "job-matrix-wasm-001");
   assert.equal(job.state, "Running");
   assert.equal(job.assigned_node_id, "node-desktop-compute-01");
+  assert.equal(job.correlation_id, "corr-matrix-test-999");
   assert.ok(job.fencing_token);
 
   // Submit result with valid device auth and correct fencing token
@@ -309,7 +310,13 @@ test("SPaaSCoordinator — Workload Submission, Placement & Dynamic Settlement",
   assert.equal(resultRes.status, 200);
   const result = await resultRes.json();
   assert.equal(result.status, "accepted");
+  assert.equal(result.correlation_id, "corr-matrix-test-999");
   assert.ok(result.credits_settled > 0);
+
+  // Invariant: ledger entries store correlation_id
+  const ledgerRows = coordinator.sqlExec(`SELECT correlation_id FROM ledger WHERE job_id = 'job-matrix-wasm-001'`);
+  assert.ok(ledgerRows.length >= 2);
+  assert.equal(ledgerRows[0].correlation_id, "corr-matrix-test-999");
 
   // Stale fencing token submission must be rejected
   const staleRes = await coordinator.fetch(
@@ -676,6 +683,64 @@ test("SPaaSCoordinator — Job Queries, Decisions, Cancellation & Challenge Work
   );
   assert.equal(cancelRes.status, 200);
   assert.equal((await cancelRes.json()).status, "cancelled");
+
+  // 6. Test cancellation command dispatched to assigned node via heartbeat side-channel
+  coordinator.sqlExec(
+    `INSERT OR REPLACE INTO nodes (id, name, device_type, public_key, auth_token, state, is_simulated, last_heartbeat, created_at)
+     VALUES (?, ?, ?, ?, ?, 'Ready', 0, ?, ?)`,
+    "cancel-node-1",
+    "Test Node",
+    "Phone",
+    "ed25519_pk",
+    "tok_cancel_1",
+    Date.now(),
+    Date.now()
+  );
+  coordinator.sqlExec(
+    `INSERT INTO jobs (id, workload_id, state, assigned_node_id, lease_expires_at, retry_count, max_retries, created_at)
+     VALUES (?, ?, 'Running', ?, ?, 0, 3, ?)`,
+    "cancel-job-1",
+    "wl_test",
+    "cancel-node-1",
+    Date.now() + 60000,
+    Date.now()
+  );
+
+  const cancelRunningRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/jobs/cancel-job-1/cancel`, {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(cancelRunningRes.status, 200);
+
+  // Heartbeat from cancel-node-1 receives command
+  const hbRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/heartbeat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer tok_cancel_1"
+      },
+      body: JSON.stringify({ node_id: "cancel-node-1" })
+    })
+  );
+  assert.equal(hbRes.status, 200);
+  const hbData = await hbRes.json();
+  assert.deepEqual(hbData.command, { action: "cancel_job", job_id: "cancel-job-1" });
+
+  // Subsequent heartbeat has null command (consumed)
+  const hb2Res = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/heartbeat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer tok_cancel_1"
+      },
+      body: JSON.stringify({ node_id: "cancel-node-1" })
+    })
+  );
+  assert.equal((await hb2Res.json()).command, null);
 });
 
 test("SPaaSCoordinator — Ledger, Demo Simulated Cluster & Audit Log", async () => {

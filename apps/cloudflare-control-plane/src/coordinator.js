@@ -155,6 +155,18 @@ export class SPaaSCoordinator {
     try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN entry_type TEXT;`); } catch (_) {}
     try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN account TEXT;`); } catch (_) {}
     try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN counterparty TEXT;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN correlation_id TEXT;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE jobs ADD COLUMN correlation_id TEXT;`); } catch (_) {}
+
+    this.sqlExec(`
+      CREATE TABLE IF NOT EXISTS node_commands (
+        id TEXT PRIMARY KEY,
+        node_id TEXT,
+        command TEXT,
+        created_at INTEGER
+      );
+    `);
+    try { this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_node_commands_node ON node_commands(node_id);`); } catch (_) {}
 
     this.sqlExec(`
       CREATE TABLE IF NOT EXISTS audit_log (
@@ -459,6 +471,7 @@ export class SPaaSCoordinator {
             sockets[0].send(JSON.stringify({
               type: "JobDispatch",
               job_id: job.id,
+              correlation_id: job.correlation_id || `corr_${job.id}`,
               workload_id: job.workload_id,
               fencing_token: fencingToken,
               epoch: this.epoch,
@@ -478,6 +491,7 @@ export class SPaaSCoordinator {
     const job_id = payload.job_id || resPayload.job_id;
     const node_id = payload.node_id || resPayload.node_id;
     const fencing_token = payload.fencing_token || payload.lease_id || resPayload.lease_id;
+    const correlation_id = payload.correlation_id || resPayload.correlation_id || null;
     const stdout = payload.stdout ?? resPayload.stdout ?? "";
     const stderr = payload.stderr ?? resPayload.stderr ?? "";
     const exit_code = payload.exit_code ?? resPayload.exit_code ?? 0;
@@ -495,6 +509,7 @@ export class SPaaSCoordinator {
       return { status: "rejected", reason: "JOB_NOT_FOUND" };
     }
     const job = jobs[0];
+    const correlationId = correlation_id || job.correlation_id || `corr_${job_id}`;
 
     // Fencing token verification
     if (job.fencing_token && fencing_token && job.fencing_token !== fencing_token) {
@@ -543,8 +558,8 @@ export class SPaaSCoordinator {
     try {
       // 1. DEBIT consumer account
       this.sqlExec(
-        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
         txId,
         debitKey,
@@ -560,13 +575,14 @@ export class SPaaSCoordinator {
         duration_ms || 1200,
         memory_mb || 64,
         "SETTLED",
-        now
+        now,
+        correlationId
       );
 
       // 2. CREDIT provider account
       this.sqlExec(
-        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
         txId,
         creditKey,
@@ -582,17 +598,18 @@ export class SPaaSCoordinator {
         duration_ms || 1200,
         memory_mb || 64,
         "SETTLED",
-        now
+        now,
+        correlationId
       );
 
       // Promote job state from Completed → Settled after successful ledger entries
       this.sqlExec(`UPDATE jobs SET state = 'Settled' WHERE id = ? AND state = 'Completed'`, job_id);
-      this.logAudit("CREDIT_SETTLED", `Settled ${amountCredits} TEST CREDITS (Tx: ${txId}) | DEBIT: ${consumerAccount} | CREDIT: ${providerAccount}`);
+      this.logAudit("CREDIT_SETTLED", `Settled ${amountCredits} TEST CREDITS (Tx: ${txId}) | DEBIT: ${consumerAccount} | CREDIT: ${providerAccount} | CorrID: ${correlationId}`);
     } catch (err) {
       console.warn(`Duplicate settlement prevented for job ${job_id}: ${err.message}`);
     }
 
-    return { status: "accepted", job_id, credits_settled: amountCredits };
+    return { status: "accepted", job_id, correlation_id: correlationId, credits_settled: amountCredits };
   }
 
   /**
@@ -1215,8 +1232,18 @@ export class SPaaSCoordinator {
         nodeId
       );
 
+      // Check for queued node commands (e.g. cancel_job side-channel)
+      const pendingCmds = this.sqlExec(`SELECT id, command FROM node_commands WHERE node_id = ? ORDER BY created_at ASC LIMIT 1`, nodeId);
+      let commandObj = null;
+      if (pendingCmds.length > 0) {
+        try {
+          commandObj = JSON.parse(pendingCmds[0].command);
+        } catch (_) {}
+        this.sqlExec(`DELETE FROM node_commands WHERE id = ?`, pendingCmds[0].id);
+      }
+
       const assigned = this.sqlExec(`SELECT * FROM jobs WHERE assigned_node_id = ? AND state = 'Running' LIMIT 1`, nodeId);
-      return json({ status: "ok", timestamp: now, assigned_job: assigned[0] || null });
+      return json({ status: "ok", timestamp: now, assigned_job: assigned[0] || null, command: commandObj });
     }
 
     // Authenticated Device Job Polling
@@ -1271,6 +1298,7 @@ export class SPaaSCoordinator {
       const jobPayload = {
         ...j,
         job_id: j.id,
+        correlation_id: j.correlation_id || `corr_${j.id}`,
         lease_id: j.fencing_token || `lease_${j.id}`,
         spec,
         wasm_bytes: wasmBytes
@@ -1392,6 +1420,7 @@ export class SPaaSCoordinator {
       const nonce = crypto.randomUUID().replace(/-/g, "");
       const jobId = "challenge_" + nonce.substring(0, 8);
       const workloadId = "challenge_sha256_" + nonce.substring(0, 6);
+      const correlationId = req.headers.get("X-Correlation-ID") || `corr_ch_${nonce.substring(0, 8)}`;
       const fencingToken = crypto.randomUUID();
       const leaseExpiresAt = Date.now() + 60000;
 
@@ -1427,8 +1456,8 @@ export class SPaaSCoordinator {
       };
 
       this.sqlExec(
-        `INSERT INTO jobs (id, workload_id, state, assigned_node_id, fencing_token, lease_expires_at, epoch, scheduler_decision, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO jobs (id, workload_id, state, assigned_node_id, fencing_token, lease_expires_at, epoch, scheduler_decision, correlation_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         jobId,
         workloadId,
         "Running",
@@ -1437,13 +1466,14 @@ export class SPaaSCoordinator {
         leaseExpiresAt,
         this.epoch,
         JSON.stringify(decision),
+        correlationId,
         Date.now()
       );
 
       this.sqlExec(`UPDATE nodes SET state = 'Running' WHERE id = ?`, nodeId);
-      this.logAudit("CHALLENGE_DISPATCHED", `Targeted challenge job ${jobId} placed on node ${nodeId}`);
+      this.logAudit("CHALLENGE_DISPATCHED", `Targeted challenge job ${jobId} placed on node ${nodeId} (corr: ${correlationId})`);
 
-      return json({ status: "ok", job_id: jobId, nonce, assigned_node_id: nodeId });
+      return json({ status: "ok", job_id: jobId, correlation_id: correlationId, nonce, assigned_node_id: nodeId });
     }
 
     // Node state transitions: rename, state, revoke, remove (Admin Auth Required)
@@ -1564,18 +1594,21 @@ export class SPaaSCoordinator {
         Date.now()
       );
 
+      const correlationId = req.headers.get("X-Correlation-ID") || body.correlation_id || `corr_${crypto.randomUUID().substring(0, 12)}`;
+
       this.sqlExec(
-        `INSERT INTO jobs (id, workload_id, state, created_at) VALUES (?, ?, 'Pending', ?)`,
+        `INSERT INTO jobs (id, workload_id, state, correlation_id, created_at) VALUES (?, ?, 'Pending', ?, ?)`,
         jobId,
         workloadId,
+        correlationId,
         Date.now()
       );
-      this.logAudit("JOB_SUBMITTED", `Job ${jobId} submitted`);
+      this.logAudit("JOB_SUBMITTED", `Job ${jobId} submitted (corr: ${correlationId})`);
 
       // Attempt immediate scheduling
       await this.schedulePendingJobs();
       const created = this.sqlExec(`SELECT * FROM jobs WHERE id = ?`, jobId);
-      return json(created[0] ? { ...created[0], job_id: created[0].id } : { id: jobId, job_id: jobId, state: "Pending" }, 201);
+      return json(created[0] ? { ...created[0], job_id: created[0].id, correlation_id: correlationId } : { id: jobId, job_id: jobId, correlation_id: correlationId, state: "Pending" }, 201);
     }
 
     if (path === "/api/v1/jobs" && method === "GET") {
@@ -1614,8 +1647,37 @@ export class SPaaSCoordinator {
         return json({ error: "UNAUTHORIZED", message: "Admin authorization required to cancel jobs" }, 401);
       }
       const jobId = path.split("/")[4];
+      const jobRows = this.sqlExec(`SELECT assigned_node_id FROM jobs WHERE id = ?`, jobId);
+      const assignedNodeId = jobRows[0]?.assigned_node_id;
+
       this.sqlExec(`UPDATE jobs SET state = 'Cancelled' WHERE id = ?`, jobId);
-      this.logAudit("JOB_CANCELLED", `Job ${jobId} cancelled`);
+
+      if (assignedNodeId) {
+        // Enqueue cancel command into side-channel for device heartbeat consumption
+        this.sqlExec(
+          `INSERT INTO node_commands (id, node_id, command, created_at) VALUES (?, ?, ?, ?)`,
+          crypto.randomUUID(),
+          assignedNodeId,
+          JSON.stringify({ action: "cancel_job", job_id: jobId }),
+          Date.now()
+        );
+
+        // Immediate push via hibernated WebSocket if device is actively connected
+        if (this.ctx?.getWebSockets) {
+          try {
+            const sockets = this.ctx.getWebSockets(assignedNodeId);
+            if (sockets && sockets.length > 0) {
+              sockets[0].send(JSON.stringify({
+                type: "JobCancel",
+                action: "cancel_job",
+                job_id: jobId
+              }));
+            }
+          } catch (_) {}
+        }
+      }
+
+      this.logAudit("JOB_CANCELLED", `Job ${jobId} cancelled (assigned: ${assignedNodeId || 'none'})`);
       return json({ status: "cancelled", job_id: jobId });
     }
 
@@ -1627,6 +1689,7 @@ export class SPaaSCoordinator {
       const nonce = crypto.randomUUID().replace(/-/g, "");
       const jobId = "challenge_" + nonce.substring(0, 8);
       const workloadId = "challenge_sha256_" + nonce.substring(0, 6);
+      const correlationId = req.headers.get("X-Correlation-ID") || `corr_ch_${nonce.substring(0, 8)}`;
 
       // Embedded SHA-256 challenge WASM binary
       const challengeWasmBase64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYXBzaG90X3ByZXZpZXcxCGZkX3dyaXRlAAADAgEBBQMBABEGCQF/AUGAgMAACwcTAgZtZW1vcnkCAAZfc3RhcnQAAQpRAU8BAX8jgICAgABBEGsiACSAgICAACAAQeQANgIIIABBgIDAgAA2AgQgAEEANgIMQQEgAEEEakEBIABBDGoQgICAgAAaIABBEGokgICAgAALC20BAEGAgMAAC2RTUGFhUyBXQVNNIFNhbmRib3g6IFNIQS0yNTYgQ3J5cHRvZ3JhcGhpYyBCZW5jaG1hcmsKQWxnb3JpdGhtOiBTSEEtMjU2IChGSVBTIDE4MC00KQpTdGF0dXM6IFNVQ0NFU1MKAGsEbmFtZQATEnNoYTI1Nl9oYXNoZXIud2FzbQEvAgAkX1JOdkNzY1BkcXBZeDc4cElfOHJ1c3Rfb3V0OGZkX3dyaXRlAQZfc3RhcnQHEgEAD19fc3RhY2tfcG9pbnRlcgkKAQAHLnJvZGF0YQA9CXByb2R1Y2VycwEMcHJvY2Vzc2VkLWJ5AQVydXN0Yx0xLjk3LjEgKDhiYWIyNmY0ZiAyMDI2LTA3LTE0KQCUAQ90YXJnZXRfZmVhdHVyZXMIKwtidWxrLW1lbW9yeSsPYnVsay1tZW1vcnktb3B0KxZjYWxsLWluZGlyZWN0LW92ZXJsb25nKwptdWx0aXZhbHVlKw9tdXRhYmxlLWdsb2JhbHMrE25vbnRyYXBwaW5nLWZwdG9pbnQrD3JlZmVyZW5jZS10eXBlcysIc2lnbi1leHQ=';
@@ -1647,13 +1710,14 @@ export class SPaaSCoordinator {
       );
 
       this.sqlExec(
-        `INSERT INTO jobs (id, workload_id, state, created_at) VALUES (?, ?, 'Pending', ?)`,
+        `INSERT INTO jobs (id, workload_id, state, correlation_id, created_at) VALUES (?, ?, 'Pending', ?, ?)`,
         jobId,
         workloadId,
+        correlationId,
         Date.now()
       );
       await this.schedulePendingJobs();
-      return json({ job_id: jobId, nonce, expected_digest: "sha256_challenge_ready" }, 201);
+      return json({ job_id: jobId, correlation_id: correlationId, nonce, expected_digest: "sha256_challenge_ready" }, 201);
     }
 
     // 8. Metering Ledger & Double-Entry Accounting

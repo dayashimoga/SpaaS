@@ -1720,7 +1720,7 @@ function renderNodeDetails(node) {
   const elActiveJob = document.getElementById('detail-device-active-job');
   if (elActiveJob) elActiveJob.textContent = node.current_job_id || 'None (Idle, awaiting scheduler placement)';
 
-  const completedCount = node.completed_jobs_count || cachedJobs.filter(j => j.assigned_node_id === node.node_id && j.state === 'Completed').length || 0;
+  const completedCount = node.completed_jobs_count || cachedJobs.filter(j => j.assigned_node_id === node.node_id && (j.state === 'Completed' || j.state === 'Settled')).length || 0;
   const elJobsCompleted = document.getElementById('detail-device-jobs-completed');
   if (elJobsCompleted) elJobsCompleted.textContent = completedCount;
 
@@ -1909,7 +1909,7 @@ function renderJobDetails(job) {
   const badge = document.getElementById('detail-job-state-badge');
   if (badge) {
     badge.textContent = (job.state || 'QUEUED').toUpperCase();
-    badge.className = `badge ${job.state === 'Completed' ? 'badge-proven' : (job.state === 'Running' ? 'badge-desktop' : 'badge-simulated')}`;
+    badge.className = `badge ${(job.state === 'Completed' || job.state === 'Settled') ? 'badge-proven' : (job.state === 'Running' ? 'badge-desktop' : 'badge-simulated')}`;
   }
 
   // Evidence badge calculation
@@ -2005,7 +2005,7 @@ function renderJobDetails(job) {
   const steps = ['tl-step-1', 'tl-step-2', 'tl-step-3', 'tl-step-4', 'tl-step-5', 'tl-step-6', 'tl-step-7', 'tl-step-8', 'tl-step-9', 'tl-step-10'];
   let completedCount = 1;
   let activeStep = null;
-  if (job.state === 'Completed') {
+  if (job.state === 'Completed' || job.state === 'Settled') {
     completedCount = 10;
   } else if (job.state === 'Running') {
     completedCount = 5;
@@ -2013,7 +2013,7 @@ function renderJobDetails(job) {
   } else if (job.state === 'Scheduled') {
     completedCount = 3;
     activeStep = 4;
-  } else if (job.state === 'Queued') {
+  } else if (job.state === 'Queued' || job.state === 'Pending') {
     completedCount = 1;
     activeStep = 2;
   }
@@ -2031,7 +2031,7 @@ function renderJobDetails(job) {
 
   const elPhaseDesc = document.getElementById('timeline-phase-desc');
   if (elPhaseDesc) {
-    elPhaseDesc.textContent = job.state === 'Completed'
+    elPhaseDesc.textContent = (job.state === 'Completed' || job.state === 'Settled')
       ? 'Execution Complete & Settled (Dual-entry accounting complete)'
       : (job.state === 'Running' ? 'Executing Sandboxed WASI inside Worker Node'
       : (job.state === 'Scheduled' ? 'Dispatched with Active Lease' : 'In Scheduler Queue'));
@@ -2082,7 +2082,7 @@ function renderJobDetails(job) {
   // Sub-tab 5: Verification & Proof
   const elVerStatus = document.getElementById('detail-job-verification-status');
   if (elVerStatus) {
-    elVerStatus.textContent = job.state === 'Completed' ? 'VERIFIED_VALID (Ed25519 & Digest Confirmed)' : (job.state === 'Running' ? 'Executing in Isolation' : 'Pending Verification');
+    elVerStatus.textContent = (job.state === 'Completed' || job.state === 'Settled') ? 'VERIFIED_VALID (Ed25519 & Digest Confirmed)' : (job.state === 'Running' ? 'Executing in Isolation' : 'Pending Verification');
   }
 
   const elSig = document.getElementById('detail-job-sig');
@@ -2647,10 +2647,14 @@ async function submitCurrentWorkload() {
   };
 
   try {
+    const correlationId = 'corr_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8);
     const res = await fetch(`${API_BASE}/api/v1/jobs`, {
       method: 'POST',
-      headers: authedHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(payload)
+      headers: authedHeaders({
+        'Content-Type': 'application/json',
+        'X-Correlation-ID': correlationId
+      }),
+      body: JSON.stringify({ ...payload, correlation_id: correlationId })
     });
 
     if (!res.ok) {
@@ -3331,9 +3335,10 @@ function initDeviceControls() {
       btnRunChallenge.textContent = '🎯 Dispatching Challenge...';
       btnRunChallenge.disabled = true;
       try {
+        const correlationId = 'corr_ch_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
         const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/dispatch-challenge`, {
           method: 'POST',
-          headers: authedHeaders()
+          headers: authedHeaders({ 'X-Correlation-ID': correlationId })
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();

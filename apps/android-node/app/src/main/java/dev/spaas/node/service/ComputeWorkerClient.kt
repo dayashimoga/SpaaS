@@ -520,6 +520,7 @@ object ComputeWorkerClient {
 
             val jobObj = root.getJSONObject("job")
             val jobId = jobObj.getString("job_id")
+            val correlationId = jobObj.optString("correlation_id", jobId)
             val leaseId = jobObj.getString("lease_id")
             val specObj = jobObj.getJSONObject("spec")
             val workloadName = specObj.optString("name", "Edge Workload")
@@ -635,9 +636,11 @@ object ComputeWorkerClient {
                 put("node_id", nodeId)
                 put("job_id", jobId)
                 put("lease_id", leaseId)
+                put("correlation_id", correlationId)
                 put("result", JSONObject().apply {
                     put("result_id", UUID.randomUUID().toString())
                     put("job_id", jobId)
+                    put("correlation_id", correlationId)
                     put("node_id", nodeId)
                     put("exit_code", execResult.exitCode)
                     put("stdout", execResult.stdout)

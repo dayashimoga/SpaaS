@@ -78,6 +78,7 @@ function createMinimalFallbackEngine() {
     workloads: new Map(),
     jobs: new Map(),
     ledger: new Map(),
+    node_commands: new Map(),
     audit_log: [],
     meta: new Map([["role", "PRIMARY"], ["epoch", "1"], ["fabric_status", "ACTIVE"]])
   };
@@ -88,7 +89,7 @@ function createMinimalFallbackEngine() {
       const q = query.trim().replace(/\s+/g, " ");
       const qu = q.toUpperCase();
 
-      if (qu.startsWith("CREATE")) return [];
+      if (qu.startsWith("CREATE") || qu.startsWith("ALTER TABLE")) return [];
 
       // META
       if (qu.startsWith("INSERT OR IGNORE INTO META")) {
@@ -326,9 +327,19 @@ function createMinimalFallbackEngine() {
         let lease_expires_at = null;
         let retry_count = 0;
         let max_retries = 3;
+        let correlation_id = null;
         let created_at = Date.now();
 
-        if (params.length === 5) {
+        if (params.length === 4) {
+          correlation_id = params[2];
+          created_at = params[3];
+        } else if (params.length === 10) {
+          state = params[2];
+          assigned_node_id = params[3];
+          lease_expires_at = params[5];
+          correlation_id = params[8];
+          created_at = params[9];
+        } else if (params.length === 5) {
           assigned_node_id = params[2];
           lease_expires_at = params[3];
           created_at = params[4];
@@ -359,6 +370,7 @@ function createMinimalFallbackEngine() {
           max_retries,
           result: null,
           scheduler_decision: null,
+          correlation_id,
           created_at,
           completed_at: null
         });
@@ -449,7 +461,7 @@ function createMinimalFallbackEngine() {
       if (qu.startsWith("INSERT OR IGNORE INTO LEDGER") || qu.startsWith("INSERT INTO LEDGER")) {
         let entry;
         if (qu.includes("ENTRY_TYPE") || params.length >= 16) {
-          const [id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now] = params;
+          const [id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now, correlation_id] = params;
           entry = {
             id,
             tx_id,
@@ -466,7 +478,8 @@ function createMinimalFallbackEngine() {
             duration_ms,
             memory_mb,
             status: status || "SETTLED",
-            timestamp: now
+            timestamp: now,
+            correlation_id: correlation_id || null
           };
         } else {
           const [id, idempotency_key, epoch, job_id, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, now] = params;
@@ -495,7 +508,29 @@ function createMinimalFallbackEngine() {
         return [];
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM LEDGER")) {
+        if (qu.includes("WHERE JOB_ID =")) {
+          const jobId = params[0] || q.match(/WHERE job_id = '([^']+)'/i)?.[1];
+          return Array.from(tables.ledger.values()).filter(e => e.job_id === jobId);
+        }
         return Array.from(tables.ledger.values());
+      }
+
+      // NODE COMMANDS
+      if (qu.startsWith("INSERT INTO NODE_COMMANDS")) {
+        const [id, node_id, command, created_at] = params;
+        tables.node_commands.set(id, { id, node_id, command, created_at: created_at || Date.now() });
+        return [];
+      }
+      if (qu.startsWith("SELECT ID, COMMAND FROM NODE_COMMANDS WHERE NODE_ID =")) {
+        const nodeId = params[0];
+        const match = Array.from(tables.node_commands.values())
+          .filter(c => c.node_id === nodeId)
+          .sort((a, b) => a.created_at - b.created_at)[0];
+        return match ? [{ id: match.id, command: match.command }] : [];
+      }
+      if (qu.startsWith("DELETE FROM NODE_COMMANDS WHERE ID =")) {
+        tables.node_commands.delete(params[0]);
+        return [];
       }
 
       // AUDIT_LOG
