@@ -107,14 +107,14 @@ jobs:
         run: |
           echo "Verifying live Cloudflare Worker control plane health..."
           WORKER_URL="${SPAAS_WORKER_URL:-https://spaas-control-plane.dayashimoga.workers.dev}"
-          for i in 1 2 3 4 5; do
+          for i in $(seq 1 10); do
             RESPONSE=$(curl -f -s "${WORKER_URL}/health" || true)
             if echo "$RESPONSE" | grep -q '"status":"healthy"'; then
               echo "Live Cloudflare Worker health verified: $RESPONSE"
               exit 0
             fi
-            echo "Waiting for edge propagation (attempt $i/5)..."
-            sleep 3
+            echo "Waiting for edge propagation (attempt $i/10)..."
+            sleep 5
           done
           echo "Failed to verify live health at ${WORKER_URL}"
           exit 1

@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
                         monitor = monitor,
                         initialPairingCode = initialPairingCode,
                         initialServerUrl = initialServerUrl,
+                        onScanQrClick = { startQrScanner() },
                         onStartService = {
                             val intent = Intent(this, ComputeForegroundService::class.java).apply {
                                 action = ComputeForegroundService.ACTION_START
@@ -103,6 +104,60 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    fun startQrScanner() {
+        try {
+            val options = com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE)
+                .enableAutoZoom()
+                .build()
+            val scanner = com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(this, options)
+            scanner.startScan()
+                .addOnSuccessListener { barcode ->
+                    val raw = barcode.rawValue ?: barcode.displayValue ?: ""
+                    if (raw.isNotBlank()) {
+                        handleScannedText(raw)
+                    }
+                }
+                .addOnFailureListener {
+                    val intent = Intent(this, QrScanActivity::class.java)
+                    startActivityForResult(intent, 1001)
+                }
+        } catch (_: Throwable) {
+            val intent = Intent(this, QrScanActivity::class.java)
+            startActivityForResult(intent, 1001)
+        }
+    }
+
+    private fun handleScannedText(rawText: String) {
+        val text = rawText.trim()
+        if (text.startsWith("spaas://", ignoreCase = true)) {
+            try {
+                val uri = android.net.Uri.parse(text)
+                val code = uri.getQueryParameter("code")
+                    ?: uri.getQueryParameter("token")
+                    ?: uri.lastPathSegment?.takeIf { it != "pair" && it != "enroll" }
+                val server = uri.getQueryParameter("server") ?: uri.getQueryParameter("primary")
+                val backup = uri.getQueryParameter("backup")
+                if (!server.isNullOrBlank()) {
+                    initialServerUrl = server
+                    ComputeWorkerClient.serverBaseUrl = server
+                    ComputeWorkerClient.primaryServerUrl = server
+                }
+                if (!backup.isNullOrBlank()) {
+                    ComputeWorkerClient.backupServerUrl = backup
+                }
+                if (!code.isNullOrBlank()) {
+                    initialPairingCode = code
+                }
+            } catch (_: Throwable) {
+                initialPairingCode = text
+            }
+        } else {
+            initialPairingCode = text
+        }
+        Toast.makeText(this, "QR Scanned: $initialPairingCode", Toast.LENGTH_SHORT).show()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -167,6 +222,7 @@ fun SpaasAppScaffold(
     monitor: AndroidTelemetryMonitor,
     initialPairingCode: String = "",
     initialServerUrl: String = "",
+    onScanQrClick: () -> Unit = {},
     onStartService: () -> Unit,
     onStopService: () -> Unit,
     onPauseToggle: () -> Unit
@@ -175,7 +231,7 @@ fun SpaasAppScaffold(
     var telemetry by remember { mutableStateOf<DeviceTelemetryData?>(null) }
     var isRunning by remember { mutableStateOf(ComputeForegroundService.isRunning) }
     var isPaused by remember { mutableStateOf(ComputeForegroundService.isPaused) }
-    val safetyPolicy = remember { ProviderSafetyPolicy() }
+    val safetyPolicy = remember { ComputeForegroundService.activePolicy }
     var sessionStartTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     var pairingCodeInput by remember(initialPairingCode) {
@@ -312,6 +368,7 @@ fun SpaasAppScaffold(
                         pairingStatusMsg = "Device disconnected."
                         onStopService()
                     },
+                    onScanQrClick = onScanQrClick,
                     onStart = onStartService,
                     onStop = onStopService,
                     onPauseToggle = onPauseToggle
@@ -366,6 +423,7 @@ fun HomeView(
     onTestReachability: () -> Unit,
     onPairClick: () -> Unit,
     onUnpairClick: () -> Unit,
+    onScanQrClick: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onPauseToggle: () -> Unit
@@ -402,38 +460,91 @@ fun HomeView(
     val totalCreditsEarned = if (isPaired) history.count { it.isSuccess } * 38 else 0
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // App Title & Connectivity Banner
+        // App Title & Connectivity Banner with Quick QR Trigger
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         "SPaaS Universal Edge",
-                        fontSize = 20.sp,
+                        fontSize = 19.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
                     Text(
                         if (isPaired) "Connected: ${ComputeWorkerClient.serverBaseUrl}" else "Cluster Standby (Unpaired)",
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         color = if (isPaired) Color(0xFF10B981) else Color.Gray,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1
                     )
                 }
 
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(
+                        onClick = onScanQrClick,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6)),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text("📷 QR", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                    Surface(
+                        color = stateColor.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            nodeState,
+                            color = stateColor,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Power Mode & Battery Awareness Card
+        item {
+            val isCharging = telemetry?.isCharging == true
+            val batteryPct = telemetry?.batteryPct ?: 100
+            val isYieldingOnBattery = safetyPolicy.onlyWhileCharging && !isCharging
+
+            if (isYieldingOnBattery) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF451A03))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("⚠️ COMPUTE PAUSED ON BATTERY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24))
+                        Text("Configured to compute only while charging. Tap below to compute on battery.", fontSize = 12.sp, color = Color.White)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Button(
+                            onClick = { safetyPolicy.onlyWhileCharging = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("⚡ Enable Compute on Battery ($batteryPct%)", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            } else if (!isCharging) {
                 Surface(
-                    color = stateColor.copy(alpha = 0.2f),
-                    shape = RoundedCornerShape(12.dp)
+                    color = Color(0xFF1E293B),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        nodeState,
-                        color = stateColor,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        "🔋 Operating on Battery ($batteryPct%) • Active compute safe above ${safetyPolicy.minBatteryThresholdPct}%",
+                        fontSize = 11.sp,
+                        color = Color(0xFF38BDF8),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
             }
@@ -616,13 +727,25 @@ fun HomeView(
                             fontFamily = FontFamily.Monospace,
                             color = Color.Gray
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Button(
-                            onClick = onUnpairClick,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
-                            modifier = Modifier.fillMaxWidth()
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("🔌 Disconnect / Unpair")
+                            Button(
+                                onClick = onScanQrClick,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("📷 Re-Pair QR", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                            Button(
+                                onClick = onUnpairClick,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("🔌 Disconnect", fontSize = 12.sp, color = Color.White)
+                            }
                         }
                     } else {
                         // Enrollment options
@@ -634,20 +757,11 @@ fun HomeView(
 
                         // Option 1: QR Code Scan (primary / easiest)
                         Button(
-                            onClick = {
-                                // Launch QR scanner activity
-                                try {
-                                    val intent = android.content.Intent(context, Class.forName("dev.spaas.node.QrScanActivity"))
-                                    (context as? android.app.Activity)?.startActivityForResult(intent, 1001)
-                                } catch (_: Throwable) {
-                                    // QR scanner not available, show toast
-                                    android.widget.Toast.makeText(context, "QR Scanner: Enter the code manually or use a deep link", android.widget.Toast.LENGTH_LONG).show()
-                                }
-                            },
+                            onClick = onScanQrClick,
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8B5CF6))
                         ) {
-                            Text("📷 Scan QR Code", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("📷 Scan QR Code to Enroll", color = Color.White, fontWeight = FontWeight.Bold)
                         }
 
                         // Divider

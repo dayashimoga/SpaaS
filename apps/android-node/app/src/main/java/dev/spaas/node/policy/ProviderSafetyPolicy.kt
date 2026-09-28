@@ -31,9 +31,9 @@ data class ProviderSafetyPolicy(
     var maxConcurrentJobs: Int = 1,
 
     // Power Safeguards
-    var onlyWhileCharging: Boolean = true,
-    var minBatteryThresholdPct: Int = 40,
-    var stopBatteryThresholdPct: Int = 20,
+    var onlyWhileCharging: Boolean = false, // Allow immediate compute on battery above safety cutoff
+    var minBatteryThresholdPct: Int = 25,
+    var stopBatteryThresholdPct: Int = 15,
     var dailyComputeLimitMinutes: Int = 480,
     var sessionComputeMinutesElapsed: Int = 0,
 

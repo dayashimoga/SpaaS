@@ -102,15 +102,30 @@ class QrScanActivity : ComponentActivity() {
     }
 
     private fun launchBarcodeScanner() {
-        // Try Google Code Scanner first (part of Google Play Services, no camera permission needed)
+        // Try Google Play Services Code Scanner first (native camera bottom sheet with auto-zoom)
         try {
-            val googleScannerIntent = Intent("com.google.zxing.client.android.SCAN")
-            googleScannerIntent.putExtra("SCAN_MODE", "QR_CODE_MODE")
-            barcodeScanLauncher.launch(googleScannerIntent)
+            val options = com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE)
+                .enableAutoZoom()
+                .build()
+            val scanner = com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(this, options)
+            scanner.startScan()
+                .addOnSuccessListener { barcode ->
+                    val raw = barcode.rawValue ?: barcode.displayValue ?: ""
+                    if (raw.isNotBlank()) {
+                        processScannedCode(raw)
+                    }
+                }
+                .addOnFailureListener {
+                    tryExternalScanIntents()
+                }
             return
-        } catch (_: Throwable) {}
+        } catch (_: Throwable) {
+            tryExternalScanIntents()
+        }
+    }
 
-        // Try common barcode scanner intents
+    private fun tryExternalScanIntents() {
         val scanIntents = listOf(
             "com.google.zxing.client.android.SCAN",
             "com.journeyapps.barcodescanner.CaptureActivity"
@@ -126,10 +141,10 @@ class QrScanActivity : ComponentActivity() {
             } catch (_: Throwable) {}
         }
 
-        // Fallback: show toast directing to manual entry
+        // Fallback: toast directing to manual entry
         Toast.makeText(
             this,
-            "No QR scanner app found. Enter the enrollment code manually below.",
+            "Enter the 6-character pairing code or paste URI manually below.",
             Toast.LENGTH_LONG
         ).show()
     }

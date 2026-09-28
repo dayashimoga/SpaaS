@@ -36,13 +36,14 @@ class ComputeForegroundService : Service() {
         var isPaused = false
         var currentNodeState = "IDLE"
         var currentActiveJob: String? = null
+        val activePolicy = ProviderSafetyPolicy()
     }
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
 
     private lateinit var telemetryMonitor: AndroidTelemetryMonitor
-    val safetyPolicy = ProviderSafetyPolicy()
+    val safetyPolicy: ProviderSafetyPolicy get() = activePolicy
 
     override fun onCreate() {
         super.onCreate()
