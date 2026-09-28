@@ -583,6 +583,7 @@ object ComputeWorkerClient {
 
             val resBody = JSONObject().apply {
                 put("node_id", nodeId)
+                put("job_id", jobId)
                 put("lease_id", leaseId)
                 put("result", JSONObject().apply {
                     put("result_id", UUID.randomUUID().toString())
