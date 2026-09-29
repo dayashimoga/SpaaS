@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ComputeWorkerClient.initPersistence(this)
+        dev.spaas.node.history.LocalJobHistoryRepository.init(this)
         monitor = AndroidTelemetryMonitor(this)
         handleDeepLink(intent)
 

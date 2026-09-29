@@ -449,15 +449,19 @@ function createMinimalFallbackEngine() {
         });
         return [];
       }
-      if (qu.startsWith("UPDATE JOBS SET STATE = 'RUNNING'")) {
-        const [assigned_node_id, fencing_token, lease_expires_at, scheduler_decision, id] = params;
+      if (qu.startsWith("UPDATE JOBS SET STATE = 'RUNNING'") || qu.startsWith("UPDATE JOBS SET STATE = 'DISPATCHED'")) {
+        const [assigned_node_id, fencing_token, lease_expires_at, scheduler_decision, ...rest] = params;
+        const id = rest[rest.length - 1];
         const j = tables.jobs.get(id);
         if (j) {
-          j.state = "Running";
+          j.state = qu.includes("'DISPATCHED'") ? "DISPATCHED" : "Running";
           j.assigned_node_id = assigned_node_id;
           j.fencing_token = fencing_token;
           j.lease_expires_at = lease_expires_at;
           j.scheduler_decision = scheduler_decision;
+          if (rest.length > 1 && !j.correlation_id) {
+            j.correlation_id = rest[0];
+          }
         }
         return [];
       }
@@ -515,8 +519,8 @@ function createMinimalFallbackEngine() {
         const now = params[params.length - 1];
         return Array.from(tables.jobs.values()).filter(j => j.lease_expires_at && j.lease_expires_at <= now && !["Completed", "COMPLETED", "Failed", "FAILED", "Cancelled", "CANCELLED"].includes(j.state));
       }
-      if (qu.startsWith("SELECT * FROM JOBS WHERE STATE = 'PENDING'") || qu.startsWith("SELECT * FROM JOBS WHERE STATE = 'QUEUED'")) {
-        return Array.from(tables.jobs.values()).filter(j => j.state === "Pending" || j.state === "QUEUED");
+      if (qu.startsWith("SELECT * FROM JOBS WHERE STATE = 'PENDING'") || qu.startsWith("SELECT * FROM JOBS WHERE STATE = 'QUEUED'") || qu.startsWith("SELECT * FROM JOBS WHERE STATE IN")) {
+        return Array.from(tables.jobs.values()).filter(j => j.state === "Pending" || j.state === "Queued" || j.state === "QUEUED");
       }
       if (qu.startsWith("SELECT * FROM JOBS WHERE ASSIGNED_NODE_ID = ?")) {
         const nodeId = params[0];

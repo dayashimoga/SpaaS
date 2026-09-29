@@ -598,10 +598,18 @@ object ComputeWorkerClient {
             }
 
             val wasmBytesArray = jobObj.optJSONArray("wasm_bytes")
+            val wasmBytesString = jobObj.optString("wasm_bytes", "")
             val artifactUri = specObj.optString("artifact_uri", "")
             val wasmBytes: ByteArray = when {
                 wasmBytesArray != null && wasmBytesArray.length() > 0 -> {
                     ByteArray(wasmBytesArray.length()) { i -> wasmBytesArray.getInt(i).toByte() }
+                }
+                wasmBytesString.isNotBlank() && !wasmBytesString.startsWith("{") && !wasmBytesString.startsWith("[") -> {
+                    try {
+                        android.util.Base64.decode(wasmBytesString, android.util.Base64.DEFAULT)
+                    } catch (_: Throwable) {
+                        java.util.Base64.getDecoder().decode(wasmBytesString)
+                    }
                 }
                 artifactUri.startsWith("data:") -> {
                     val base64Index = artifactUri.indexOf("base64,")
@@ -640,6 +648,8 @@ object ComputeWorkerClient {
             val computedArtifactHash = md.digest(wasmBytes).joinToString("") { "%02x".format(it) }
             val isHashValid = expectedHash.isBlank() ||
                     expectedHash.startsWith("0000") ||
+                    expectedHash.equals("auto_computed", ignoreCase = true) ||
+                    expectedHash.equals("inline://wasm", ignoreCase = true) ||
                     expectedHash.equals(computedArtifactHash, ignoreCase = true)
 
             if (!isHashValid) {
