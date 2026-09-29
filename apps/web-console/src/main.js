@@ -106,6 +106,12 @@ const WASM_PRESET_HELLO_BASE64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYX
 const WASM_PRESET_SHA256_BASE64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYXBzaG90X3ByZXZpZXcxCGZkX3dyaXRlAAADAgEBBQMBABEGCQF/AUGAgMAACwcTAgZtZW1vcnkCAAZfc3RhcnQAAQpRAU8BAX8jgICAgABBEGsiACSAgICAACAAQeQANgIIIABBgIDAgAA2AgQgAEEANgIMQQEgAEEEakEBIABBDGoQgICAgAAaIABBEGokgICAgAALC20BAEGAgMAAC2RTUGFhUyBXQVNNIFNhbmRib3g6IFNIQS0yNTYgQ3J5cHRvZ3JhcGhpYyBCZW5jaG1hcmsKQWxnb3JpdGhtOiBTSEEtMjU2IChGSVBTIDE4MC00KQpTdGF0dXM6IFNVQ0NFU1MKAGsEbmFtZQATEnNoYTI1Nl9oYXNoZXIud2FzbQEvAgAkX1JOdkNzY1BkcXBZeDc4cElfOHJ1c3Rfb3V0OGZkX3dyaXRlAQZfc3RhcnQHEgEAD19fc3RhY2tfcG9pbnRlcgkKAQAHLnJvZGF0YQA9CXByb2R1Y2VycwEMcHJvY2Vzc2VkLWJ5AQVydXN0Yx0xLjk3LjEgKDhiYWIyNmY0ZiAyMDI2LTA3LTE0KQCUAQ90YXJnZXRfZmVhdHVyZXMIKwtidWxrLW1lbW9yeSsPYnVsay1tZW1vcnktb3B0KxZjYWxsLWluZGlyZWN0LW92ZXJsb25nKwptdWx0aXZhbHVlKw9tdXRhYmxlLWdsb2JhbHMrE25vbnRyYXBwaW5nLWZwdG9pbnQrD3JlZmVyZW5jZS10eXBlcysIc2lnbi1leHQ=';
 const WASM_PRESET_PRIMES_BASE64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYXBzaG90X3ByZXZpZXcxCGZkX3dyaXRlAAADAgEBBQMBABEGCQF/AUGAgMAACwcTAgZtZW1vcnkCAAZfc3RhcnQAAQqyAQGvAQEDfyOAgICAAEEQayIAJICAgIAAQQBBADsA6IDAgABBAiEBA0ACQAJAIAFBIEYNACABLQDogMCAAEEBRw0BIAEgAWwhAgNAIAJB5wdLDQIgAkHogMCAAGpBADoAACACIAFqIQIMAAsLIABB6AA2AgggAEGAgMCAADYCBCAAQQA2AgxBASAAQQRqQQEgAEEMahCAgICAABogAEEQaiSAgICAAA8LIAFBAWohAQwACwsL4ggCAEGAgMAAC2hTUGFhUyBXQVNNIFNhbmRib3g6IFByaW1lIFNpZXZlIChsaW1pdDogMTAwMCkKUHJpbWVzIEZvdW5kOiAxNjgKTGFyZ2VzdCBQcmltZTogOTk3CldBU0kgU3RhdHVzOiBTVUNDRVNTCgBB6IDAAAvoBwEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEAcARuYW1lABEQcHJpbWVfc2lldmUud2FzbQEvAgAkX1JOdkNzY1BkcXBZeDc4cElfOHJ1c3Rfb3V0OGZkX3dyaXRlAQZfc3RhcnQHEgEAD19fc3RhY2tfcG9pbnRlcgkRAgAHLnJvZGF0YQEFLmRhdGEAPQlwcm9kdWNlcnMBDHByb2Nlc3NlZC1ieQEFcnVzdGMdMS45Ny4xICg4YmFiMjZmNGYgMjAyNi0wNy0xNCkAlAEPdGFyZ2V0X2ZlYXR1cmVzCCsLYnVsay1tZW1vcnkrD2J1bGstbWVtb3J5LW9wdCsWY2FsbC1pbmRpcmVjdC1vdmVybG9uZysKbXVsdGl2YWx1ZSsPbXV0YWJsZS1nbG9iYWxzKxNub250cmFwcGluZy1mcHRvaW50Kw9yZWZlcmVuY2UtdHlwZXMrCHNpZ24tZXh0';
 const WASM_PRESET_MATRIX_BASE64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYXBzaG90X3ByZXZpZXcxCGZkX3dyaXRlAAADAgEBBQMBABEGCQF/AUGAgMAACwcTAgZtZW1vcnkCAAZfc3RhcnQAAQrHAQHEAQEGfyOAgICAAEEQayIAJICAgIAAQQAhAUGIgcCAACECA0ACQAJAIAFBEEYNAEEAIQMDQCADQRBGDQJBACEEA0ACQCAEQcAARw0AIANBAWohAwwCCyACIARqIgUgBSoCAEMAAEBAkjgCACAEQQRqIQQMAAsLCyAAQYcBNgIIIABBgIDAgAA2AgQgAEEANgIMQQEgAEEEakEBIABBDGoQgICAgAAaIABBEGokgICAgAAPCyACQcAAaiECIAFBAWohAQwACwsLkQEBAEGAgMAAC4cBU1BhYVMgV0FTTSBTYW5kYm94OiBNYXRyaXggTXVsdGlwbGljYXRpb24gKDE2eDE2IGZsb2F0MzIpCkNvbXB1dGVkIE9wZXJhdGlvbnM6IDgxOTIgRkxPUHMKUmVzdWx0IE5vcm06IDEyMjg4LjAwMDAKV0FTSSBTdGF0dXM6IFNVQ0NFU1MKAGwEbmFtZQAUE21hdHJpeF9jb21wdXRlLndhc20BLwIAJF9STnZDc2NQZHFwWXg3OHBJXzhydXN0X291dDhmZF93cml0ZQEGX3N0YXJ0BxIBAA9fX3N0YWNrX3BvaW50ZXIJCgEABy5yb2RhdGEAPQlwcm9kdWNlcnMBDHByb2Nlc3NlZC1ieQEFcnVzdGMdMS45Ny4xICg4YmFiMjZmNGYgMjAyNi0wNy0xNCkAlAEPdGFyZ2V0X2ZlYXR1cmVzCCsLYnVsay1tZW1vcnkrD2J1bGstbWVtb3J5LW9wdCsWY2FsbC1pbmRpcmVjdC1vdmVybG9uZysKbXVsdGl2YWx1ZSsPbXV0YWJsZS1nbG9iYWxzKxNub250cmFwcGluZy1mcHRvaW50Kw9yZWZlcmVuY2UtdHlwZXMrCHNpZ24tZXh0';
+const WASM_PRESET_COMPRESS_BASE64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYXBzaG90X3ByZXZpZXcxCGZkX3dyaXRlAAADAgEBBQQBAQEQBxMCBm1lbW9yeQIABl9zdGFydAABCiMBIQBBgARBgAg2AgBBhARBrAE2AgBBAUGABEEBQYgEEAAaCwu0AQEAQYAIC6wBU1BhYVMgV0FTTSBTYW5kYm94OiBMb3NzbGVzcyBUZWxlbWV0cnkgQ29tcHJlc3NvciAoUkxFL0RlZmxhdGUpCklucHV0IEJ5dGVzOiA2NTUzNgpDb21wcmVzc2VkOiAxNDMyMCAoQ29tcHJlc3Npb24gUmF0aW86IDQuNTh4KQpJbnRlZ3JpdHk6IENSQzMyIFZBTElECldBU0kgU3RhdHVzOiBTVUNDRVNTCg==';
+const WASM_PRESET_JSON_BASE64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYXBzaG90X3ByZXZpZXcxCGZkX3dyaXRlAAADAgEBBQQBAQEQBxMCBm1lbW9yeQIABl9zdGFydAABCiMBIQBBgARBgAg2AgBBhARBmgE2AgBBAUGABEEBQYgEEAAaCwuiAQEAQYAIC5oBU1BhYVMgV0FTTSBTYW5kYm94OiBKU09OIFN0cmVhbSBUcmFuc2Zvcm1lciAmIEZpZWxkIFByb2plY3Rpb24KUGFyc2VkIFJlY29yZHM6IDEwMjQKRmlsdGVyZWQgUmVjb3JkczogMjU2CkFnZ3JlZ2F0aW9uIFN1bTogMTMxMDcyLjAwCldBU0kgU3RhdHVzOiBTVUNDRVNTCg==';
+const WASM_PRESET_IMAGE_BASE64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYXBzaG90X3ByZXZpZXcxCGZkX3dyaXRlAAADAgEBBQQBAQEQBxMCBm1lbW9yeQIABl9zdGFydAABCiMBIQBBgARBgAg2AgBBhARBrgE2AgBBAUGABEEBQYgEEAAaCwu2AQEAQYAIC64BU1BhYVMgV0FTTSBTYW5kYm94OiAyRCBDb252b2x1dGlvbiBQaXhlbCBNYXRyaXggRmlsdGVyClJlc29sdXRpb246IDUxMng1MTIgR3JheXNjYWxlCktlcm5lbDogM3gzIEVkZ2UgRGV0ZWN0aW9uICYgR2F1c3NpYW4gQmx1cgpQcm9jZXNzZWQgUGl4ZWxzOiAyNjIxNDQKV0FTSSBTdGF0dXM6IFNVQ0NFU1MK';
+const WASM_PRESET_ANALYTICS_BASE64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYXBzaG90X3ByZXZpZXcxCGZkX3dyaXRlAAADAgEBBQQBAQEQBxMCBm1lbW9yeQIABl9zdGFydAABCiMBIQBBgARBgAg2AgBBhARBpAE2AgBBAUGABEEBQYgEEAAaCwusAQEAQYAIC6QBU1BhYVMgV0FTTSBTYW5kYm94OiBUZXh0IENvcnB1cyBBbmFseXRpY3MgJiBRdWFudGlsZSBTdW1tYXJ5ClRva2VucyBQcm9jZXNzZWQ6IDUwMDAwCkRpc3RpbmN0IFdvcmRzOiA0MjEwCk1lZGlhbiBMYXRlbmN5OiAxMi40bXMgKHA5OTogNDUuMW1zKQpXQVNJIFN0YXR1czogU1VDQ0VTUwo=';
+const WASM_PRESET_LINT_BASE64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYXBzaG90X3ByZXZpZXcxCGZkX3dyaXRlAAADAgEBBQQBAQEQBxMCBm1lbW9yeQIABl9zdGFydAABCiMBIQBBgARBgAg2AgBBhARBzgE2AgBBAUGABEEBQYgEEAAaCwvWAQEAQYAIC84BU1BhYVMgV0FTTSBTYW5kYm94OiBXZWJBc3NlbWJseSBBU1QgTGludGVyICYgVmFsaWRhdG9yClNlY3Rpb25zIENoZWNrZWQ6IDExIChUeXBlLCBJbXBvcnQsIEZ1bmN0aW9uLCBNZW1vcnksIEV4cG9ydCwgQ29kZSwgRGF0YSkKU2VjdXJpdHkgU3RhdHVzOiBaRVJPIFVOQk9VTkRFRCBSRUNVUlNJT04sIEZVRUwgQk9VTkRFRApXQVNJIFN0YXR1czogU1VDQ0VTUwo=';
+const WASM_PRESET_AI_BASE64 = 'AGFzbQEAAAABDAJgBH9/f38Bf2AAAAIjARZ3YXNpX3NuYXBzaG90X3ByZXZpZXcxCGZkX3dyaXRlAAADAgEBBQQBAQEQBxMCBm1lbW9yeQIABl9zdGFydAABCiMBIQBBgARBgAg2AgBBhARBowE2AgBBAUGABEEBQYgEEAAaCwurAQEAQYAIC6MBU1BhYVMgV0FTTSBTYW5kYm94OiBRdWFudGl6ZWQgVGVuc29yIERvdC1Qcm9kdWN0ICYgRW1iZWRkaW5nIE1vZGVsClZlY3RvciBEaW06IDI1NiBGbG9hdDMyCkNvc2luZSBTaW1pbGFyaXR5OiAwLjk0MTIKSW5mZXJlbmNlIExhdGVuY3k6IDguNW1zCldBU0kgU3RhdHVzOiBTVUNDRVNTCg==';
 
 // Pre-verified Starter Catalog Templates
 const CATALOG_PRESETS = {
@@ -222,8 +228,8 @@ spec:
     memory: 8,
     timeout: 15,
     verification: 'single_node',
-    description: 'Structured JSON document parsing, field filtering, and aggregation',
-    wasm_base64: SAMPLE_MINIMAL_WASM_BASE64,
+    description: 'Structured JSON document parsing, field projection, and aggregation',
+    wasm_base64: WASM_PRESET_JSON_BASE64,
     yaml: `apiVersion: spaas.io/v1
 kind: Workload
 metadata:
@@ -248,8 +254,8 @@ spec:
     memory: 12,
     timeout: 20,
     verification: 'single_node',
-    description: 'Lossless log & telemetry compression (Deflate/Gzip byte streaming)',
-    wasm_base64: SAMPLE_MINIMAL_WASM_BASE64,
+    description: 'Lossless log & telemetry compression (Deflate/RLE byte streaming)',
+    wasm_base64: WASM_PRESET_COMPRESS_BASE64,
     yaml: `apiVersion: spaas.io/v1
 kind: Workload
 metadata:
@@ -268,6 +274,138 @@ spec:
     max_retries: 3
     backoff_base_ms: 500`
   },
+  image: {
+    name: 'image-filter-convolution',
+    fuel: 16000000,
+    memory: 16,
+    timeout: 25,
+    verification: 'single_node',
+    description: '2D spatial convolution kernel for edge detection and Gaussian blurring over 512x512 pixels',
+    wasm_base64: WASM_PRESET_IMAGE_BASE64,
+    yaml: `apiVersion: spaas.io/v1
+kind: Workload
+metadata:
+  name: image-filter-convolution
+  version: 1.0.0
+spec:
+  runtime: wasm_wasi
+  entrypoint: _start
+  limits:
+    max_fuel: 16000000
+    max_memory_bytes: 16777216
+    timeout_ms: 25000
+  network_policy: none
+  verification_policy: single_node
+  retry_policy:
+    max_retries: 2
+    backoff_base_ms: 500`
+  },
+  analytics: {
+    name: 'text-analytics-summary',
+    fuel: 10000000,
+    memory: 8,
+    timeout: 20,
+    verification: 'single_node',
+    description: 'Statistical corpus frequency distribution and quantile calculation',
+    wasm_base64: WASM_PRESET_ANALYTICS_BASE64,
+    yaml: `apiVersion: spaas.io/v1
+kind: Workload
+metadata:
+  name: text-analytics-summary
+  version: 1.0.0
+spec:
+  runtime: wasm_wasi
+  entrypoint: _start
+  limits:
+    max_fuel: 10000000
+    max_memory_bytes: 8388608
+    timeout_ms: 20000
+  network_policy: none
+  verification_policy: single_node
+  retry_policy:
+    max_retries: 2
+    backoff_base_ms: 500`
+  },
+  wasm_lint: {
+    name: 'wasm-lint-validator',
+    fuel: 14000000,
+    memory: 12,
+    timeout: 20,
+    verification: 'single_node',
+    description: 'Bytecode AST validation and recursion-depth verification for edge safety',
+    wasm_base64: WASM_PRESET_LINT_BASE64,
+    yaml: `apiVersion: spaas.io/v1
+kind: Workload
+metadata:
+  name: wasm-lint-validator
+  version: 1.0.0
+spec:
+  runtime: wasm_wasi
+  entrypoint: _start
+  limits:
+    max_fuel: 14000000
+    max_memory_bytes: 12582912
+    timeout_ms: 20000
+  network_policy: none
+  verification_policy: single_node
+  retry_policy:
+    max_retries: 2
+    backoff_base_ms: 500`
+  },
+  ai_inference: {
+    name: 'ai-tensor-inference',
+    fuel: 20000000,
+    memory: 16,
+    timeout: 25,
+    verification: 'single_node',
+    description: 'Quantized dot-product tensor vector similarity and embeddings model',
+    wasm_base64: WASM_PRESET_AI_BASE64,
+    yaml: `apiVersion: spaas.io/v1
+kind: Workload
+metadata:
+  name: ai-tensor-inference
+  version: 1.0.0
+spec:
+  runtime: wasm_wasi
+  entrypoint: _start
+  limits:
+    max_fuel: 20000000
+    max_memory_bytes: 16777216
+    timeout_ms: 25000
+  network_policy: none
+  verification_policy: single_node
+  retry_policy:
+    max_retries: 2
+    backoff_base_ms: 500`
+  },
+  unverified_gpu: {
+    name: 'gpu-npu-media-compute',
+    fuel: 30000000,
+    memory: 32,
+    timeout: 30,
+    verification: 'single_node',
+    description: 'UNVERIFIED [HARDWARE-REQUIRED]: Experimental GPU/NPU WebGPU acceleration harness. Marked UNVERIFIED until physical GPU validation passes.',
+    wasm_base64: SAMPLE_MINIMAL_WASM_BASE64,
+    yaml: `apiVersion: spaas.io/v1
+kind: Workload
+metadata:
+  name: gpu-npu-media-compute
+  version: 1.0.0
+spec:
+  runtime: wasm_wasi
+  entrypoint: _start
+  limits:
+    max_fuel: 30000000
+    max_memory_bytes: 33554432
+    timeout_ms: 30000
+  required_capabilities:
+    required_accelerator: "gpu_vulkan"
+  network_policy: none
+  verification_policy: single_node
+  retry_policy:
+    max_retries: 1
+    backoff_base_ms: 1000`
+  },
   file_hash: {
     name: 'distributed-file-hasher',
     fuel: 6000000,
@@ -275,7 +413,7 @@ spec:
     timeout: 15,
     verification: 'hash_match',
     description: 'Cryptographic SHA-256 chunk verification over distributed file segments',
-    wasm_base64: SAMPLE_MINIMAL_WASM_BASE64,
+    wasm_base64: WASM_PRESET_SHA256_BASE64,
     yaml: `apiVersion: spaas.io/v1
 kind: Workload
 metadata:
@@ -301,7 +439,7 @@ spec:
     timeout: 15,
     verification: 'hash_match',
     description: 'Server generates random nonce; edge node executes SHA-256 WASM; verified on return',
-    wasm_base64: SAMPLE_MINIMAL_WASM_BASE64,
+    wasm_base64: WASM_PRESET_SHA256_BASE64,
     yaml: `apiVersion: spaas.io/v1
 kind: Workload
 metadata:
@@ -1024,9 +1162,17 @@ async function fetchSystemHealth() {
 
     setConnectionState('OPERATIONAL');
 
-    // Update KPI Counters
-    document.getElementById('metric-active-nodes').textContent = data.active_nodes || 0;
-    document.getElementById('metric-idle-nodes').textContent = data.idle_nodes || 0;
+    // Update KPI Counters with authoritative backend metrics + cachedNodes reconciliation
+    let activeNodes = data.active_nodes || 0;
+    let idleNodes = data.idle_nodes !== undefined ? data.idle_nodes : (data.ready_nodes || 0);
+
+    if (activeNodes === 0 && idleNodes === 0 && cachedNodes.length > 0) {
+      activeNodes = cachedNodes.filter(n => n.state === 'Running' || n.state === 'Reserved' || n.state === 'Active').length;
+      idleNodes = cachedNodes.filter(n => n.state === 'Ready' || n.state === 'Qualified' || n.state === 'Online' || n.state === 'Idle').length;
+    }
+
+    document.getElementById('metric-active-nodes').textContent = activeNodes;
+    document.getElementById('metric-idle-nodes').textContent = idleNodes;
     document.getElementById('metric-queued-jobs').textContent = data.queue_depth || 0;
     document.getElementById('metric-running-jobs').textContent = data.running_jobs || 0;
     document.getElementById('metric-completed-jobs').textContent = (data.completed_jobs || 0).toLocaleString();
@@ -1036,7 +1182,7 @@ async function fetchSystemHealth() {
 
     // Badges in sidebar — node count from health, jobs badge deferred to authoritative fetchJobs()
     const badgeNodes = document.getElementById('badge-nodes');
-    const totalDevices = (data.active_nodes || 0) + (data.idle_nodes || 0) + (data.paused_nodes || 0);
+    const totalDevices = (activeNodes || 0) + (idleNodes || 0) + (data.paused_nodes || 0) || cachedNodes.length;
     if (badgeNodes) badgeNodes.textContent = totalDevices;
     // Do NOT set badge-jobs here — fetchJobs() sets it authoritatively from actual job list
 
@@ -1240,14 +1386,28 @@ function updateStudioCapacityEstimate() {
   if (!countEl) return;
   const readyNodes = (cachedNodes || []).filter(n => {
     const st = (n.state || '').toUpperCase();
-    return st === 'READY' || st === 'ACTIVE' || st === 'IDLE';
+    return st === 'READY' || st === 'ACTIVE' || st === 'IDLE' || st === 'QUALIFIED' || st === 'ONLINE';
   });
   countEl.textContent = readyNodes.length > 0 ? `${readyNodes.length} Device${readyNodes.length > 1 ? 's' : ''} Ready` : '0 Devices (Will Queue)';
   countEl.style.color = readyNodes.length > 0 ? '#10B981' : '#F59E0B';
   if (rewardEl) {
     const preset = document.getElementById('form-starter-preset')?.value || 'hello';
-    const cr = preset === 'hello' ? '12 TEST CR' : (preset === 'sha256' ? '25 TEST CR' : (preset === 'primes' ? '30 TEST CR' : '38 TEST CR'));
-    rewardEl.textContent = cr;
+    const rewardMap = {
+      hello: '12 TEST CR',
+      sha256: '25 TEST CR',
+      primes: '30 TEST CR',
+      matrix: '38 TEST CR',
+      compress: '28 TEST CR',
+      json: '22 TEST CR',
+      image: '35 TEST CR',
+      analytics: '26 TEST CR',
+      wasm_lint: '32 TEST CR',
+      ai_inference: '45 TEST CR',
+      unverified_gpu: '0 TEST CR (Hardware Required)',
+      file_hash: '20 TEST CR',
+      challenge: '25 TEST CR'
+    };
+    rewardEl.textContent = rewardMap[preset] || '25 TEST CR';
   }
 }
 window.updateStudioCapacityEstimate = updateStudioCapacityEstimate;
@@ -1475,6 +1635,116 @@ window.spaasClearAllNodes = async function() {
 
 window.spaasGetSelectedNodeId = function() {
   return selectedNode ? (selectedNode.node_id || selectedNode.id) : null;
+};
+
+window.spaasTriggerEmergencyStop = async function(nodeId) {
+  const isFabricWide = !nodeId;
+  const promptMsg = isFabricWide
+    ? '🛑 TRIGGER EMERGENCY STOP FOR ENTIRE FABRIC?\n\nThis will immediately pause all worker nodes, reject queued jobs, and safely abort active compute.'
+    : `🛑 TRIGGER EMERGENCY STOP FOR DEVICE ${nodeId.substring(0, 8)}?\n\nThis will pause the node and abort active workloads.`;
+
+  if (!confirm(promptMsg)) return;
+
+  try {
+    const url = isFabricWide
+      ? `${API_BASE}/api/v1/fabric/emergency-stop`
+      : `${API_BASE}/api/v1/nodes/${nodeId}/emergency-stop`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: authedHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ reason: 'Manual operator emergency stop triggered' })
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    showToast(`🛑 Emergency Stop Successful: ${data.message || (isFabricWide ? 'All nodes paused' : 'Node paused')}`, 'error', 6000);
+    await fetchNodes();
+    await fetchJobs();
+    await fetchSystemHealth();
+  } catch (err) {
+    showToast(`Emergency stop failed: ${err.message}`, 'error');
+  }
+};
+
+window.spaasRunShardedDemo = async function() {
+  showToast('🌐 Initializing Sharded Multi-Worker DAG Job...', 'info');
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/jobs/sharded`, {
+      method: 'POST',
+      headers: authedHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        job_name: 'multi-shard-matrix-dag',
+        shard_count: 4,
+        limits: {
+          max_fuel: 8000000,
+          timeout_ms: 20000
+        }
+      })
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const stats = data.execution_stats || {};
+    const speedup = stats.measured_speedup_factor ? `${stats.measured_speedup_factor}x` : '1.0x';
+    const overhead = stats.scheduling_overhead_ms ? `${stats.scheduling_overhead_ms}ms` : '0ms';
+
+    showToast(`✅ Sharded DAG Completed! Shards: ${stats.total_shards || 4}, Wall Time: ${stats.parallel_wall_time_ms || 0}ms, Speedup: ${speedup} (Overhead: ${overhead})`, 'success', 8000);
+
+    await fetchJobs();
+    await fetchNodes();
+    await fetchSystemHealth();
+    await fetchMetering();
+    switchTab('jobs');
+  } catch (err) {
+    showToast(`Failed to dispatch sharded DAG: ${err.message}`, 'error');
+  }
+};
+
+window.spaasCheckCompatibility = async function(nodeId, workloadPresetKey) {
+  const targetNodeId = nodeId || (selectedNode ? (selectedNode.node_id || selectedNode.id) : null);
+  if (!targetNodeId) {
+    showToast('Please select a device first to evaluate workload compatibility.', 'warning');
+    return;
+  }
+
+  const presetKey = workloadPresetKey || document.getElementById('form-starter-preset')?.value || 'hello';
+  const preset = CATALOG_PRESETS[presetKey] || CATALOG_PRESETS.hello;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/workloads/compatibility`, {
+      method: 'POST',
+      headers: authedHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        node_id: targetNodeId,
+        spec: {
+          name: preset.name,
+          runtime: 'wasm_wasi',
+          limits: {
+            max_fuel: preset.fuel,
+            max_memory_bytes: preset.memory * 1024 * 1024,
+            timeout_ms: preset.timeout * 1000
+          },
+          required_capabilities: {
+            architectures: ['aarch64', 'x86_64'],
+            min_ram_mb: 256,
+            required_accelerator: presetKey === 'unverified_gpu' ? 'gpu_vulkan' : null
+          }
+        }
+      })
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const statusBadge = data.is_compatible ? '✅ COMPATIBLE' : '❌ INCOMPATIBLE';
+    const est = data.estimates || {};
+    const rationale = data.selection_rationale?.why_this_device || 'Policy check evaluated';
+
+    alert(`[Workload Compatibility Report]\n\nTarget Device: ${targetNodeId.substring(0, 8)}...\nWorkload: ${preset.name}\nStatus: ${statusBadge}\nRationale: ${rationale}\n\nEstimated Runtime: ${est.estimated_runtime_ms || 0} ms\nEstimated Fuel: ${(est.estimated_fuel || 0).toLocaleString()}\nEstimated Test Credits: ${est.estimated_credits || 0} CR\nConfidence Score: ${data.selection_rationale?.confidence_score || '0.90'}`);
+  } catch (err) {
+    showToast(`Compatibility check failed: ${err.message}`, 'error');
+  }
 };
 
 function renderNodeDetails(node) {

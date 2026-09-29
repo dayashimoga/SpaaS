@@ -2036,6 +2036,269 @@ test("SPaaSCoordinator — Generic Workloads, Pareto Explainability, Provider As
   assert.ok(traceData.transitions.length >= 3);
 });
 
+test("SPaaSCoordinator — Subtest 24: Health Live Aggregates, Capability Vectors, Compatibility, Emergency Stop & Multi-Worker DAG Sharding", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  // 1. Enroll and register 2 nodes (1 physical Android node, 1 desktop worker)
+  const phoneId = "physical-vivo-test-01";
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, qualification, telemetry, last_heartbeat, created_at)
+     VALUES (?, ?, ?, 'Ready', 0, 'pk_phone', 'token_phone', ?, ?, ?, ?, ?)`,
+    phoneId,
+    "Vivo I2221 Testbed",
+    "android_smartphone",
+    JSON.stringify({ architecture: "aarch64", cpu_cores: 8, total_ram_mb: 8192, device_model: "Vivo I2221" }),
+    JSON.stringify({ wasm_conformance_passed: true, edge_score: 94.2, tier: "QUALIFIED", benchmark_version: "v1.2.0-verified" }),
+    JSON.stringify({ battery_pct: 88, charging_state: "CHARGING_AC", network_type: "Wi-Fi (Unmetered)", thermal_status: "NONE", round_trip_ping_ms: 14 }),
+    Date.now(),
+    Date.now()
+  );
+
+  const desktopId = "desktop-ubuntu-test-02";
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, qualification, telemetry, last_heartbeat, created_at)
+     VALUES (?, ?, ?, 'Ready', 0, 'pk_desktop', 'token_desktop', ?, ?, ?, ?, ?)`,
+    desktopId,
+    "Ubuntu 24.04 Rig",
+    "Desktop",
+    JSON.stringify({ architecture: "x86_64", cpu_cores: 16, total_ram_mb: 32768, device_model: "AMD Ryzen 9" }),
+    JSON.stringify({ wasm_conformance_passed: true, edge_score: 98.0, tier: "QUALIFIED", benchmark_version: "v1.2.0-verified" }),
+    JSON.stringify({ battery_pct: 100, charging_state: "CHARGING_AC", network_type: "Ethernet", thermal_status: "NONE", round_trip_ping_ms: 4 }),
+    Date.now(),
+    Date.now()
+  );
+
+  // 2. Test Health Endpoint Live Aggregates
+  const healthRes = await coordinator.fetch(new Request("http://localhost/api/v1/system/health"));
+  assert.equal(healthRes.status, 200);
+  const health = await healthRes.json();
+  assert.equal(health.status, "healthy");
+  assert.equal(health.total_nodes, 2);
+  assert.equal(health.physical_nodes, 1);
+  assert.equal(health.ready_nodes, 2);
+  assert.equal(health.fabric_status, "ACTIVE");
+  assert.ok(health.subsystems.scheduler === "PARETO_ACTIVE");
+
+  // 3. Test Capability Vector Endpoint for Vivo I2221
+  const capsRes = await coordinator.fetch(new Request(`http://localhost/api/v1/nodes/${phoneId}/capabilities`));
+  assert.equal(capsRes.status, 200);
+  const capsData = await capsRes.json();
+  assert.equal(capsData.status, "ok");
+  assert.equal(capsData.capabilities.is_physical, true);
+  assert.equal(capsData.capabilities.provenance, "PHYSICAL_DEVICE_PROVEN");
+  assert.equal(capsData.capabilities.qualification_tier, "QUALIFIED");
+  assert.equal(capsData.capabilities.wasm.conformance_passed, true);
+  assert.equal(capsData.capabilities.accelerators.gpu.validation_status, "UNVERIFIED");
+  assert.equal(capsData.capabilities.accelerators.gpu.evidence_label, "HARDWARE-REQUIRED");
+  assert.equal(capsData.capabilities.accelerators.npu.validation_status, "UNVERIFIED");
+
+  // 4. Test Workload Compatibility Pre-flight Estimator
+  const compatRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/compatibility", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      node_id: phoneId,
+      spec: {
+        name: "Telemetry Compressor",
+        required_capabilities: { min_ram_mb: 256, require_charging: true },
+        limits: { max_fuel: 10000000 }
+      }
+    })
+  }));
+  assert.equal(compatRes.status, 200);
+  const compatData = await compatRes.json();
+  assert.equal(compatData.can_run, true);
+  assert.ok(compatData.estimates.runtime_ms > 0);
+  assert.ok(compatData.estimates.credits_cost >= 10.0);
+  assert.ok(compatData.why_this_device.includes("passed all capability filters"));
+
+  // 4b. Test Incompatible Workload (Unverified GPU)
+  const gpuCompatRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/compatibility", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      node_id: phoneId,
+      spec: {
+        name: "Vulkan Matrix Shader",
+        required_capabilities: { gpu: true }
+      }
+    })
+  }));
+  assert.equal(gpuCompatRes.status, 200);
+  const gpuCompatData = await gpuCompatRes.json();
+  assert.equal(gpuCompatData.can_run, false);
+  assert.ok(gpuCompatData.reasons.some(r => r.includes("GPU acceleration (Unverified / Hardware-Required)")));
+
+  // 5. Test Multi-Worker DAG Sharding Benchmark
+  const shardedRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs/sharded", {
+    method: "POST",
+    headers: { ...ADMIN_HEADERS, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Distributed Deflate Compressor",
+      shard_count: 4,
+      shards: 4
+    })
+  }));
+  assert.equal(shardedRes.status, 200);
+  const shardedData = await shardedRes.json();
+  assert.equal(shardedData.status, "ok");
+  assert.equal(shardedData.shard_count, 4);
+  assert.equal(shardedData.shards.length, 4);
+  assert.ok(shardedData.metrics.single_node_baseline_ms > 0);
+  assert.ok(shardedData.metrics.parallel_wall_time_ms > 0);
+  assert.ok(parseFloat(shardedData.metrics.speedup_factor) > 1.0);
+  assert.ok(shardedData.metrics.total_credits_settled > 0);
+
+  // 6. Test Node Emergency Stop
+  const nodeStopRes = await coordinator.fetch(new Request(`http://localhost/api/v1/nodes/${phoneId}/emergency-stop`, {
+    method: "POST",
+    headers: ADMIN_HEADERS
+  }));
+  assert.equal(nodeStopRes.status, 200);
+  const nodeStopData = await nodeStopRes.json();
+  assert.equal(nodeStopData.status, "ok");
+  assert.equal(nodeStopData.state, "Paused");
+
+  const phoneRow = coordinator.sqlExec(`SELECT state FROM nodes WHERE id = ?`, phoneId)[0];
+  assert.equal(phoneRow.state, "Paused");
+
+  // 7. Test Fabric Emergency Stop
+  const fabricStopRes = await coordinator.fetch(new Request("http://localhost/api/v1/fabric/emergency-stop", {
+    method: "POST",
+    headers: ADMIN_HEADERS
+  }));
+  assert.equal(fabricStopRes.status, 200);
+  const fabricStopData = await fabricStopRes.json();
+  assert.equal(fabricStopData.status, "ok");
+  assert.equal(fabricStopData.fabric_status, "STOPPED");
+
+  const fabricHealthRes = await coordinator.fetch(new Request("http://localhost/api/v1/system/health"));
+  const fabricHealth = await fabricHealthRes.json();
+  assert.equal(fabricHealth.fabric_status, "STOPPED");
+  assert.equal(fabricHealth.paused_nodes, 2);
+});
+
+test("SPaaSCoordinator — Subtest 25: Comprehensive Scheduler Policy Filters & Disqualification Edge Cases", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  // Register nodes with diverse restrictive policies and telemetry
+  // 1. Disqualified by low battery threshold
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, policy, telemetry, last_heartbeat, created_at)
+     VALUES (?, ?, ?, 'Ready', 0, 'pk_low_bat', 'token_1', ?, ?, ?, ?, ?)`,
+    "node-low-bat",
+    "Low Battery Device",
+    "Phone",
+    JSON.stringify({ cpu_cores: 8, total_ram_mb: 4096 }),
+    JSON.stringify({ min_battery_threshold_pct: 50 }),
+    JSON.stringify({ battery_pct: 30, charging_state: "DISCHARGING", network_type: "wifi", thermal_status: "NONE" }),
+    Date.now(),
+    Date.now()
+  );
+
+  // 2. Disqualified by charging only policy
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, policy, telemetry, last_heartbeat, created_at)
+     VALUES (?, ?, ?, 'Ready', 0, 'pk_charge_only', 'token_2', ?, ?, ?, ?, ?)`,
+    "node-charge-only",
+    "Charging Only Device",
+    "Phone",
+    JSON.stringify({ cpu_cores: 8, total_ram_mb: 4096 }),
+    JSON.stringify({ only_while_charging: true }),
+    JSON.stringify({ battery_pct: 90, charging_state: "DISCHARGING", network_type: "wifi", thermal_status: "NONE" }),
+    Date.now(),
+    Date.now()
+  );
+
+  // 3. Disqualified by unmetered network only policy
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, policy, telemetry, last_heartbeat, created_at)
+     VALUES (?, ?, ?, 'Ready', 0, 'pk_unmetered', 'token_3', ?, ?, ?, ?, ?)`,
+    "node-cellular",
+    "Cellular Device",
+    "Phone",
+    JSON.stringify({ cpu_cores: 8, total_ram_mb: 4096 }),
+    JSON.stringify({ only_unmetered_network: true }),
+    JSON.stringify({ battery_pct: 90, charging_state: "CHARGING_AC", network_type: "cellular_lte", thermal_status: "NONE" }),
+    Date.now(),
+    Date.now()
+  );
+
+  // 4. Disqualified by thermal critical
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, policy, telemetry, last_heartbeat, created_at)
+     VALUES (?, ?, ?, 'Ready', 0, 'pk_thermal', 'token_4', ?, ?, ?, ?, ?)`,
+    "node-thermal-crit",
+    "Overheating Device",
+    "Phone",
+    JSON.stringify({ cpu_cores: 8, total_ram_mb: 4096 }),
+    JSON.stringify({}),
+    JSON.stringify({ battery_pct: 90, charging_state: "CHARGING_AC", network_type: "wifi", thermal_status: "CRITICAL", temperature_c: 48 }),
+    Date.now(),
+    Date.now()
+  );
+
+  // 5. Submit heavy workload requiring unmetered network, charging, high RAM, and light thermal
+  const heavyJobId = "job_heavy_policy_test";
+  const heavyWlId = "wl_heavy_policy_test";
+  coordinator.sqlExec(
+    `INSERT INTO workloads (id, spec, submitter_pubkey, created_at) VALUES (?, ?, 'tester', ?)`,
+    heavyWlId,
+    JSON.stringify({
+      name: "High Precision Sensor Analysis",
+      required_capabilities: {
+        min_ram_mb: 16384, // No node has 16GB
+        require_charging: true,
+        require_unmetered_network: true,
+        min_battery_pct: 80,
+        max_thermal_level: "LIGHT"
+      },
+      limits: { max_fuel: 50000000 }
+    }),
+    Date.now()
+  );
+
+  coordinator.sqlExec(
+    `INSERT INTO jobs (id, workload_id, state, created_at) VALUES (?, ?, 'Queued', ?)`,
+    heavyJobId,
+    heavyWlId,
+    Date.now()
+  );
+
+  // Attempt schedule
+  await coordinator.schedulePendingJobs();
+
+  // Verify wait_reason was populated explaining why no node was placed
+  const jobRow = coordinator.sqlExec(`SELECT state, wait_reason FROM jobs WHERE id = ?`, heavyJobId)[0];
+  assert.ok(["Pending", "Queued", "QUEUED"].includes(jobRow.state));
+  assert.ok(jobRow.wait_reason.includes("Waiting for suitable node") || jobRow.wait_reason.includes("RAM"));
+
+  // Test Workload Compatibility endpoint evaluating all reasons
+  const compatAllRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/compatibility", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      node_id: "node-thermal-crit",
+      spec: {
+        name: "Test Heavy",
+        required_capabilities: { min_ram_mb: 8192, require_charging: true }
+      }
+    })
+  }));
+  assert.equal(compatAllRes.status, 200);
+  const compatAllData = await compatAllRes.json();
+  assert.equal(compatAllData.can_run, false);
+  assert.ok(compatAllData.reasons.length >= 1);
+});
+
+
+
 
 
 
