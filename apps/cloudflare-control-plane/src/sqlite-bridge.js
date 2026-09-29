@@ -77,7 +77,11 @@ function createMinimalFallbackEngine() {
     pairing_tokens: new Map(),
     workloads: new Map(),
     jobs: new Map(),
+    job_transitions: new Map(),
+    leases: new Map(),
+    device_sessions: new Map(),
     ledger: new Map(),
+    node_commands: new Map(),
     audit_log: [],
     meta: new Map([["role", "PRIMARY"], ["epoch", "1"], ["fabric_status", "ACTIVE"]])
   };
@@ -88,7 +92,7 @@ function createMinimalFallbackEngine() {
       const q = query.trim().replace(/\s+/g, " ");
       const qu = q.toUpperCase();
 
-      if (qu.startsWith("CREATE")) return [];
+      if (qu.startsWith("CREATE") || qu.startsWith("ALTER TABLE")) return [];
 
       // META
       if (qu.startsWith("INSERT OR IGNORE INTO META")) {
@@ -173,8 +177,35 @@ function createMinimalFallbackEngine() {
         let created_at = Date.now();
         let public_key = "ed25519_pk";
         let auth_token = "spaas_auth_test";
+        let capabilities = null;
+        let qualification = null;
+        let policy = null;
+        let telemetry = null;
 
-        if (params.length === 5) {
+        if (qu.includes("QUALIFICATION") && params.length >= 9) {
+          auth_token = params[2] || "spaas_auth_test";
+          capabilities = params[3] || null;
+          qualification = params[4] || null;
+          policy = params[5] || null;
+          telemetry = params[6] || null;
+          last_heartbeat = params[7] || Date.now();
+          created_at = params[8] || Date.now();
+        } else if (params.length >= 10) {
+          public_key = params[3] || "ed25519_pk";
+          auth_token = params[4] || "spaas_auth_test";
+          capabilities = params[5] || null;
+          policy = params[6] || null;
+          telemetry = params[7] || null;
+          last_heartbeat = params[8] || Date.now();
+          created_at = params[9] || Date.now();
+        } else if (qu.includes("POLICY") && params.length === 9) {
+          auth_token = params[3] || "spaas_auth_test";
+          capabilities = params[4] || null;
+          telemetry = params[5] || null;
+          policy = params[6] || null;
+          last_heartbeat = params[7] || Date.now();
+          created_at = params[8] || Date.now();
+        } else if (params.length === 5) {
           last_heartbeat = params[3];
           created_at = params[4];
         } else if (params.length >= 7) {
@@ -184,17 +215,23 @@ function createMinimalFallbackEngine() {
           created_at = params[6] || Date.now();
         }
 
+        let nodeState = "Ready";
+        if (qu.includes("'REVOKED'")) nodeState = "Revoked";
+        else if (qu.includes("'BUSY'")) nodeState = "Busy";
+        else if (qu.includes("'PAUSED'")) nodeState = "Paused";
+        else if (qu.includes("'OFFLINE'")) nodeState = "Offline";
+
         tables.nodes.set(id, {
           id: params[0],
           name: params[1],
           device_type: params[2],
           public_key,
           auth_token,
-          state: "Ready",
-          capabilities: null,
-          qualification: null,
-          policy: null,
-          telemetry: null,
+          state: nodeState,
+          capabilities,
+          qualification,
+          policy,
+          telemetry,
           is_simulated: isSimulated,
           last_heartbeat,
           created_at
@@ -202,11 +239,16 @@ function createMinimalFallbackEngine() {
         return [];
       }
       if (qu.startsWith("UPDATE NODES SET LAST_HEARTBEAT")) {
-        const [last_heartbeat, telemetry, id] = params;
+        let last_heartbeat, telemetry = null, id;
+        if (params.length === 2) {
+          [last_heartbeat, id] = params;
+        } else {
+          [last_heartbeat, telemetry, id] = params;
+        }
         const n = tables.nodes.get(id);
         if (n) {
           n.last_heartbeat = last_heartbeat;
-          n.telemetry = telemetry;
+          if (telemetry !== null) n.telemetry = telemetry;
           if (n.state === "Offline") n.state = "Ready";
         }
         return [];
@@ -225,7 +267,7 @@ function createMinimalFallbackEngine() {
         let state, id;
         if (params.length === 1) {
           id = params[0];
-          state = qu.includes("'OFFLINE'") ? "Offline" : qu.includes("'READY'") ? "Ready" : qu.includes("'REVOKED'") ? "Revoked" : qu.includes("'RUNNING'") ? "Running" : "Ready";
+          state = qu.includes("'OFFLINE'") ? "Offline" : qu.includes("'READY'") ? "Ready" : qu.includes("'REVOKED'") ? "Revoked" : qu.includes("'RUNNING'") ? "Running" : qu.includes("'BUSY'") ? "Busy" : qu.includes("'PAUSED'") ? "Paused" : "Ready";
         } else {
           [state, id] = params;
         }
@@ -245,6 +287,18 @@ function createMinimalFallbackEngine() {
         if (n) n.qualification = qual;
         return [];
       }
+      if (qu.startsWith("UPDATE NODES SET POLICY =")) {
+        const [policy, id] = params;
+        const n = tables.nodes.get(id);
+        if (n) n.policy = policy;
+        return [];
+      }
+      if (qu.startsWith("UPDATE NODES SET TELEMETRY =")) {
+        const [telemetry, id] = params;
+        const n = tables.nodes.get(id);
+        if (n) n.telemetry = telemetry;
+        return [];
+      }
       if (qu.startsWith("DELETE FROM NODES WHERE ID =")) {
         tables.nodes.delete(params[0]);
         return [];
@@ -253,6 +307,16 @@ function createMinimalFallbackEngine() {
         for (const [id, n] of tables.nodes.entries()) {
           if (n.is_simulated) tables.nodes.delete(id);
         }
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM NODES WHERE STATE = 'REVOKED'")) {
+        for (const [id, n] of tables.nodes.entries()) {
+          if (n.state === 'Revoked') tables.nodes.delete(id);
+        }
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM NODES")) {
+        tables.nodes.clear();
         return [];
       }
       if (qu.startsWith("SELECT AUTH_TOKEN, STATE FROM NODES WHERE ID =")) {
@@ -272,6 +336,10 @@ function createMinimalFallbackEngine() {
         return Array.from(tables.nodes.values()).filter(n => n.state !== "Offline" && n.state !== "Revoked" && n.last_heartbeat < threshold);
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM NODES")) {
+        if (qu.includes("COUNT(*)")) {
+          const count = tables.nodes.size;
+          return [{ c: count, count }];
+        }
         return Array.from(tables.nodes.values());
       }
 
@@ -300,20 +368,26 @@ function createMinimalFallbackEngine() {
       // JOBS
       if (qu.startsWith("INSERT INTO JOBS")) {
         if (qu.includes("FENCING_TOKEN") && params.length >= 8) {
-          const [jId, wId, jState, aNodeId, fToken, lExpires, ep, sDecision, cAt] = params;
+          let jId, wId, jState, aNodeId, lTerm = 1, lExpires, ep = 1, fToken, rCount = 0, mRetries = 3, sDecision = null, corrId = null, cAt;
+          if (params.length === 13) {
+            [jId, wId, jState, aNodeId, lTerm, lExpires, ep, fToken, rCount, mRetries, sDecision, corrId, cAt] = params;
+          } else {
+            [jId, wId, jState, aNodeId, fToken, lExpires, ep, sDecision, cAt] = params;
+          }
           tables.jobs.set(jId, {
             id: jId,
             workload_id: wId,
             state: jState,
             assigned_node_id: aNodeId,
-            lease_term: 1,
+            lease_term: lTerm,
             lease_expires_at: lExpires,
             epoch: ep || 1,
             fencing_token: fToken,
-            retry_count: 0,
-            max_retries: 3,
+            retry_count: rCount,
+            max_retries: mRetries,
             result: null,
             scheduler_decision: sDecision,
+            correlation_id: corrId,
             created_at: cAt || Date.now(),
             completed_at: null
           });
@@ -326,9 +400,19 @@ function createMinimalFallbackEngine() {
         let lease_expires_at = null;
         let retry_count = 0;
         let max_retries = 3;
+        let correlation_id = null;
         let created_at = Date.now();
 
-        if (params.length === 5) {
+        if (params.length === 4) {
+          correlation_id = params[2];
+          created_at = params[3];
+        } else if (params.length === 10) {
+          state = params[2];
+          assigned_node_id = params[3];
+          lease_expires_at = params[5];
+          correlation_id = params[8];
+          created_at = params[9];
+        } else if (params.length === 5) {
           assigned_node_id = params[2];
           lease_expires_at = params[3];
           created_at = params[4];
@@ -359,20 +443,25 @@ function createMinimalFallbackEngine() {
           max_retries,
           result: null,
           scheduler_decision: null,
+          correlation_id,
           created_at,
           completed_at: null
         });
         return [];
       }
-      if (qu.startsWith("UPDATE JOBS SET STATE = 'RUNNING'")) {
-        const [assigned_node_id, fencing_token, lease_expires_at, scheduler_decision, id] = params;
+      if (qu.startsWith("UPDATE JOBS SET STATE = 'RUNNING'") || qu.startsWith("UPDATE JOBS SET STATE = 'DISPATCHED'")) {
+        const [assigned_node_id, fencing_token, lease_expires_at, scheduler_decision, ...rest] = params;
+        const id = rest[rest.length - 1];
         const j = tables.jobs.get(id);
         if (j) {
-          j.state = "Running";
+          j.state = qu.includes("'DISPATCHED'") ? "DISPATCHED" : "Running";
           j.assigned_node_id = assigned_node_id;
           j.fencing_token = fencing_token;
           j.lease_expires_at = lease_expires_at;
           j.scheduler_decision = scheduler_decision;
+          if (rest.length > 1 && !j.correlation_id) {
+            j.correlation_id = rest[0];
+          }
         }
         return [];
       }
@@ -416,21 +505,72 @@ function createMinimalFallbackEngine() {
         }
         return [];
       }
+      if (qu.startsWith("UPDATE JOBS SET STATE = ? WHERE ID = ?")) {
+        const [state, id] = params;
+        const j = tables.jobs.get(id);
+        if (j) j.state = state;
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM JOBS WHERE ID =")) {
+        tables.jobs.delete(params[0]);
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM JOBS WHERE STATE IN")) {
+        for (const [id, j] of tables.jobs.entries()) {
+          const s = (j.state || "").toUpperCase();
+          if (qu.includes("'COMPLETED'") && ['COMPLETED', 'SETTLED', 'VERIFIED', 'FAILED', 'CANCELLED'].includes(s)) {
+            tables.jobs.delete(id);
+          } else if (qu.includes("'QUEUED'") && ['QUEUED', 'PENDING', 'SCHEDULED', 'ASSIGNED', 'LEASED'].includes(s)) {
+            tables.jobs.delete(id);
+          }
+        }
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM JOBS")) {
+        tables.jobs.clear();
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM LEASES WHERE JOB_ID =")) {
+        for (const [id, l] of tables.leases.entries()) {
+          if (l.job_id === params[0]) tables.leases.delete(id);
+        }
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM LEASES")) {
+        tables.leases.clear();
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM JOB_TRANSITIONS WHERE JOB_ID =")) {
+        for (const [id, t] of tables.job_transitions.entries()) {
+          if (t.job_id === params[0]) tables.job_transitions.delete(id);
+        }
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM JOB_TRANSITIONS")) {
+        tables.job_transitions.clear();
+        return [];
+      }
       if (qu.startsWith("SELECT COUNT(*) AS COUNT FROM JOBS WHERE STATE IN")) {
-        const count = Array.from(tables.jobs.values()).filter(j => j.state === "Running" || j.state === "Pending").length;
+        const count = Array.from(tables.jobs.values()).filter(j => j.state === "Running" || j.state === "RUNNING" || j.state === "Pending" || j.state === "QUEUED" || j.state === "DISPATCHED").length;
         return [{ count }];
       }
-      if (qu.startsWith("SELECT * FROM JOBS WHERE STATE = 'RUNNING' AND LEASE_EXPIRES_AT <=")) {
-        const now = params[0];
-        return Array.from(tables.jobs.values()).filter(j => j.state === "Running" && j.lease_expires_at <= now);
+      if (qu.includes("FROM JOBS WHERE") && qu.includes("LEASE_EXPIRES_AT <=")) {
+        const now = params[params.length - 1];
+        return Array.from(tables.jobs.values()).filter(j => j.lease_expires_at && j.lease_expires_at <= now && !["Completed", "COMPLETED", "Failed", "FAILED", "Cancelled", "CANCELLED"].includes(j.state));
       }
-      if (qu.startsWith("SELECT * FROM JOBS WHERE STATE = 'PENDING'")) {
-        return Array.from(tables.jobs.values()).filter(j => j.state === "Pending");
+      if (qu.startsWith("SELECT * FROM JOBS WHERE STATE = 'PENDING'") || qu.startsWith("SELECT * FROM JOBS WHERE STATE = 'QUEUED'") || qu.startsWith("SELECT * FROM JOBS WHERE STATE IN")) {
+        return Array.from(tables.jobs.values()).filter(j => j.state === "Pending" || j.state === "Queued" || j.state === "QUEUED");
       }
-      if (qu.startsWith("SELECT * FROM JOBS WHERE ASSIGNED_NODE_ID = ? AND STATE = 'RUNNING'")) {
+      if (qu.startsWith("SELECT * FROM JOBS WHERE ASSIGNED_NODE_ID = ?")) {
         const nodeId = params[0];
-        const match = Array.from(tables.jobs.values()).find(j => j.assigned_node_id === nodeId && j.state === "Running");
-        return match ? [match] : [];
+        const rows = Array.from(tables.jobs.values()).filter(j => j.assigned_node_id === nodeId);
+        if (qu.includes("AND STATE = 'RUNNING'")) {
+          return rows.filter(j => j.state === "Running" || j.state === "RUNNING");
+        }
+        if (qu.includes("AND STATE IN")) {
+          return rows.filter(j => ["ASSIGNED", "LEASED", "DISPATCHED", "ACKNOWLEDGED", "RUNNING", "Running"].includes(j.state) && (!j.lease_expires_at || j.lease_expires_at > Date.now()));
+        }
+        return rows;
       }
       if (qu.startsWith("SELECT SCHEDULER_DECISION FROM JOBS WHERE ID =")) {
         const j = tables.jobs.get(params[0]);
@@ -445,11 +585,97 @@ function createMinimalFallbackEngine() {
         return Array.from(tables.jobs.values());
       }
 
+      // JOB_TRANSITIONS
+      if (qu.startsWith("INSERT INTO JOB_TRANSITIONS")) {
+        let id, job_id, from_state, to_state, reason, timestamp, metadata;
+        if (params.length === 6) {
+          [job_id, from_state, to_state, reason, metadata, timestamp] = params;
+          id = `trans_${tables.job_transitions.size + 1}`;
+        } else {
+          [id, job_id, from_state, to_state, reason, timestamp, metadata] = params;
+        }
+        tables.job_transitions.set(id, { id, job_id, from_state, to_state, reason, timestamp, metadata });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM JOB_TRANSITIONS WHERE JOB_ID =")) {
+        const jobId = params[0];
+        return Array.from(tables.job_transitions.values())
+          .filter(t => t.job_id === jobId)
+          .sort((a, b) => a.timestamp - b.timestamp);
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM JOB_TRANSITIONS")) {
+        return Array.from(tables.job_transitions.values());
+      }
+
+      // LEASES
+      if (qu.startsWith("INSERT OR REPLACE INTO LEASES") || qu.startsWith("INSERT INTO LEASES")) {
+        const [lease_id, job_id, node_id, fencing_token, epoch, expires_at, state, created_at] = params;
+        tables.leases.set(lease_id, { lease_id, job_id, node_id, fencing_token, epoch: epoch || 1, expires_at, state: state || "ACTIVE", created_at: created_at || Date.now() });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM LEASES WHERE JOB_ID =")) {
+        const jobId = params[0];
+        return Array.from(tables.leases.values()).filter(l => l.job_id === jobId);
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM LEASES WHERE LEASE_ID =")) {
+        const leaseId = params[0];
+        const l = tables.leases.get(leaseId);
+        return l ? [l] : [];
+      }
+      if (qu.startsWith("UPDATE LEASES SET STATE =")) {
+        const [st, leaseId] = params;
+        const l = tables.leases.get(leaseId);
+        if (l) l.state = st;
+        return [];
+      }
+
+      // DEVICE_SESSIONS
+      if (qu.startsWith("INSERT OR REPLACE INTO DEVICE_SESSIONS")) {
+        let node_id, tenant_id, shard, session_id, connection_state, last_seen, active_lease_id, active_job_id, updated_at;
+        if (params.length === 8) {
+          [node_id, session_id, connection_state, last_seen, active_lease_id, active_job_id, shard, updated_at] = params;
+          tenant_id = "default";
+        } else {
+          [node_id, tenant_id, shard, session_id, connection_state, last_seen, active_lease_id, active_job_id, updated_at] = params;
+        }
+        tables.device_sessions.set(node_id, { node_id, tenant_id, shard, session_id, connection_state, last_seen, active_lease_id, active_job_id, updated_at });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM DEVICE_SESSIONS WHERE NODE_ID =")) {
+        const s = tables.device_sessions.get(params[0]);
+        return s ? [s] : [];
+      }
+      if (qu.startsWith("UPDATE DEVICE_SESSIONS SET CONNECTION_STATE =")) {
+        let connection_state, updated_at, node_id;
+        if (qu.includes("SET CONNECTION_STATE = 'DISCONNECTED'")) {
+          [updated_at, node_id] = params;
+          connection_state = "DISCONNECTED";
+        } else {
+          [connection_state, updated_at, node_id] = params;
+        }
+        const s = tables.device_sessions.get(node_id);
+        if (s) {
+          s.connection_state = connection_state;
+          s.updated_at = updated_at;
+        }
+        return [];
+      }
+      if (qu.startsWith("UPDATE DEVICE_SESSIONS SET ACTIVE_LEASE_ID = NULL")) {
+        const [updated_at, node_id] = params;
+        const s = tables.device_sessions.get(node_id);
+        if (s) {
+          s.active_lease_id = null;
+          s.active_job_id = null;
+          s.updated_at = updated_at;
+        }
+        return [];
+      }
+
       // LEDGER
       if (qu.startsWith("INSERT OR IGNORE INTO LEDGER") || qu.startsWith("INSERT INTO LEDGER")) {
         let entry;
         if (qu.includes("ENTRY_TYPE") || params.length >= 16) {
-          const [id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now] = params;
+          const [id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now, correlation_id] = params;
           entry = {
             id,
             tx_id,
@@ -466,7 +692,8 @@ function createMinimalFallbackEngine() {
             duration_ms,
             memory_mb,
             status: status || "SETTLED",
-            timestamp: now
+            timestamp: now,
+            correlation_id: correlation_id || null
           };
         } else {
           const [id, idempotency_key, epoch, job_id, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, now] = params;
@@ -495,7 +722,37 @@ function createMinimalFallbackEngine() {
         return [];
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM LEDGER")) {
-        return Array.from(tables.ledger.values());
+        let entries = Array.from(tables.ledger.values());
+        if (qu.includes("WHERE JOB_ID =")) {
+          const jobId = params[0] || q.match(/WHERE job_id = '([^']+)'/i)?.[1];
+          entries = entries.filter(e => e.job_id === jobId);
+        }
+        if (qu.includes("WHERE ACCOUNT =")) {
+          const acc = params[0];
+          entries = entries.filter(e => e.account === acc || e.consumer_pubkey === acc || e.provider_pubkey === acc);
+        }
+        if (qu.includes("COUNT(*)")) {
+          return [{ c: entries.length, count: entries.length }];
+        }
+        return entries;
+      }
+
+      // NODE COMMANDS
+      if (qu.startsWith("INSERT INTO NODE_COMMANDS")) {
+        const [id, node_id, command, created_at] = params;
+        tables.node_commands.set(id, { id, node_id, command, created_at: created_at || Date.now() });
+        return [];
+      }
+      if (qu.startsWith("SELECT ID, COMMAND FROM NODE_COMMANDS WHERE NODE_ID =")) {
+        const nodeId = params[0];
+        const match = Array.from(tables.node_commands.values())
+          .filter(c => c.node_id === nodeId)
+          .sort((a, b) => a.created_at - b.created_at)[0];
+        return match ? [{ id: match.id, command: match.command }] : [];
+      }
+      if (qu.startsWith("DELETE FROM NODE_COMMANDS WHERE ID =")) {
+        tables.node_commands.delete(params[0]);
+        return [];
       }
 
       // AUDIT_LOG

@@ -21,6 +21,43 @@ function authedHeaders(existingHeaders = {}) {
   return headers;
 }
 
+function showToast(message, type = 'info', durationMs = 4000) {
+  let container = document.getElementById('spaas-toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'spaas-toast-container';
+    container.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:99999;display:flex;flex-direction:column;gap:10px;max-width:420px;pointer-events:none;';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  const bg = type === 'error' ? 'rgba(239, 68, 68, 0.95)' : (type === 'success' ? 'rgba(16, 185, 129, 0.95)' : 'rgba(30, 41, 59, 0.95)');
+  const border = type === 'error' ? '#ef4444' : (type === 'success' ? '#10b981' : '#38bdf8');
+  toast.style.cssText = `background:${bg};color:#fff;padding:12px 18px;border-radius:8px;border:1px solid ${border};box-shadow:0 10px 25px -5px rgba(0,0,0,0.5);font-size:0.875rem;line-height:1.4;pointer-events:auto;transition:all 0.3s ease;transform:translateY(10px);opacity:0;`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  requestAnimationFrame(() => {
+    toast.style.transform = 'translateY(0)';
+    toast.style.opacity = '1';
+  });
+  setTimeout(() => {
+    toast.style.transform = 'translateY(10px)';
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 350);
+  }, durationMs);
+}
+window.showToast = showToast;
+
+function formatThermalStatus(status) {
+  if (!status) return 'Nominal (Cool)';
+  const s = String(status).toUpperCase();
+  if (s === 'NONE' || s === '0' || s === 'NOMINAL') return 'Nominal (Cool)';
+  if (s === 'LIGHT' || s === '1') return 'Light Headroom';
+  if (s === 'MODERATE' || s === '2') return 'Moderate Heat';
+  if (s === 'SEVERE' || s === '3') return 'Severe Throttling';
+  if (s === 'CRITICAL' || s === 'EMERGENCY') return 'Critical Overheat';
+  return status;
+}
+
 // Default Cloudflare Worker backend for production deployments
 const CLOUDFLARE_WORKER_URL = 'https://spaas-control-plane.dayashimoga.workers.dev';
 
@@ -312,6 +349,7 @@ function bootApp() {
   initSearchAndFilters();
   initSubTabs();
   initDeviceComparison();
+  initJobOperations();
 
   // Initial Fetch & Connect Live Event Stream
   refreshAllData();
@@ -996,12 +1034,11 @@ async function fetchSystemHealth() {
     document.getElementById('metric-latency').textContent = `${(data.average_scheduling_latency_ms || 0.8).toFixed(1)}ms`;
     document.getElementById('metric-uptime').textContent = `${data.uptime_secs || 0}s up`;
 
-    // Badges in sidebar
+    // Badges in sidebar — node count from health, jobs badge deferred to authoritative fetchJobs()
     const badgeNodes = document.getElementById('badge-nodes');
-    const badgeJobs = document.getElementById('badge-jobs');
     const totalDevices = (data.active_nodes || 0) + (data.idle_nodes || 0) + (data.paused_nodes || 0);
     if (badgeNodes) badgeNodes.textContent = totalDevices;
-    if (badgeJobs) badgeJobs.textContent = (data.queue_depth || 0) + (data.running_jobs || 0);
+    // Do NOT set badge-jobs here — fetchJobs() sets it authoritatively from actual job list
 
     // Callout visibility
     const callout = document.getElementById('overview-onboarding-callout');
@@ -1065,6 +1102,8 @@ async function fetchNodes() {
 
     const elCount = document.getElementById('node-list-count');
     if (elCount) elCount.textContent = cachedNodes.length;
+    const badgeNodes = document.getElementById('badge-nodes');
+    if (badgeNodes) badgeNodes.textContent = cachedNodes.length;
 
     // Categorize nodes by real-world nature
     let physicalCount = 0;
@@ -1321,7 +1360,7 @@ function renderNodesTable(nodes) {
         <td class="font-mono">${n.capabilities?.architecture || 'aarch64'} / ${ramGb}GB</td>
         <td><span class="status-badge ${stateClass}">${(n.state || 'READY').toUpperCase()}</span></td>
         <td>${n.telemetry?.battery_pct || 90}% <span class="text-sub font-mono">(${chargingIcon})</span></td>
-        <td><span class="text-emerald">${n.telemetry?.thermal_status || 'NOMINAL'}</span></td>
+        <td><span class="text-emerald">${formatThermalStatus(n.telemetry?.thermal_status)}</span></td>
         <td>${n.telemetry?.network_type || 'Wifi'}</td>
         <td class="font-mono text-emerald">${edgeScore}</td>
         <td style="white-space: nowrap;">
@@ -1514,11 +1553,12 @@ function renderNodeDetails(node) {
   }
 
   const elTitle = document.getElementById('detail-node-title');
-  if (elTitle) elTitle.textContent = `${node.capabilities?.device_model || node.node_id.substring(0, 8)} (${node.node_id.substring(0, 8)}...)`;
+  const nodeIdDisplay = node.node_id || node.id || 'node';
+  if (elTitle) elTitle.textContent = `${node.capabilities?.device_model || node.name || nodeIdDisplay.substring(0, 8)} (${nodeIdDisplay.substring(0, 8)}...)`;
 
   const elTier = document.getElementById('detail-qual-tier-badge');
   if (elTier) {
-    const tier = node.qualification?.tier || (node.qualification ? 'QUALIFIED' : 'UNQUALIFIED');
+    const tier = node.qualification?.tier || (node.qualification ? 'QUALIFIED' : 'PENDING QUALIFICATION');
     elTier.textContent = tier.toUpperCase();
     if (tier === 'Qualified' || tier === 'QUALIFIED') {
       elTier.style.background = 'rgba(16, 185, 129, 0.2)';
@@ -1533,9 +1573,9 @@ function renderNodeDetails(node) {
       elTier.style.borderColor = '#F59E0B';
       elTier.style.color = '#F59E0B';
     } else {
-      elTier.style.background = 'rgba(244, 63, 94, 0.2)';
-      elTier.style.borderColor = '#F43F5E';
-      elTier.style.color = '#F43F5E';
+      elTier.style.background = 'rgba(234, 179, 8, 0.15)';
+      elTier.style.borderColor = '#EAB308';
+      elTier.style.color = '#EAB308';
     }
   }
 
@@ -1685,7 +1725,7 @@ function renderNodeDetails(node) {
   if (elCharging) elCharging.textContent = node.telemetry?.charging_state === 'ChargingAc' ? '⚡ AC Connected (Rapid)' : '🔋 Battery Discharging';
 
   const elThermal = document.getElementById('detail-hw-thermal');
-  if (elThermal) elThermal.textContent = node.telemetry?.thermal_status || 'NOMINAL';
+  if (elThermal) elThermal.textContent = formatThermalStatus(node.telemetry?.thermal_status);
 
   const elTemp = document.getElementById('detail-hw-temp');
   if (elTemp) elTemp.textContent = node.telemetry?.battery_temp_c ? `${node.telemetry.battery_temp_c}°C` : '31.2°C (Optimal)';
@@ -1720,7 +1760,7 @@ function renderNodeDetails(node) {
   const elActiveJob = document.getElementById('detail-device-active-job');
   if (elActiveJob) elActiveJob.textContent = node.current_job_id || 'None (Idle, awaiting scheduler placement)';
 
-  const completedCount = node.completed_jobs_count || cachedJobs.filter(j => j.assigned_node_id === node.node_id && j.state === 'Completed').length || 0;
+  const completedCount = node.completed_jobs_count || cachedJobs.filter(j => j.assigned_node_id === node.node_id && (j.state === 'Completed' || j.state === 'Settled')).length || 0;
   const elJobsCompleted = document.getElementById('detail-device-jobs-completed');
   if (elJobsCompleted) elJobsCompleted.textContent = completedCount;
 
@@ -1783,7 +1823,10 @@ async function fetchJobs() {
     const data = await res.json();
     cachedJobs = data.jobs || [];
 
-    document.getElementById('job-list-count').textContent = cachedJobs.length;
+    const elJobCount = document.getElementById('job-list-count');
+    if (elJobCount) elJobCount.textContent = cachedJobs.length;
+    const badgeJobs = document.getElementById('badge-jobs');
+    if (badgeJobs) badgeJobs.textContent = cachedJobs.length;
 
     // Empty state visibility
     const emptyJobs = document.getElementById('jobs-empty-state');
@@ -1825,32 +1868,47 @@ function renderJobsTable(jobs) {
   if (!tbody) return;
 
   if (jobs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No jobs submitted yet. Use "+ Submit Job" or starter catalog.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No jobs submitted yet. Use "+ Submit Job" or dispatch from the starter catalog.</td></tr>';
     return;
   }
 
   tbody.innerHTML = jobs.map(j => {
-    const stateClass = j.state === 'Completed' ? 'status-healthy'
-      : (j.state === 'Running' ? 'status-active'
-      : (j.state === 'Queued' ? 'status-paused'
-      : (j.state === 'Scheduled' ? 'status-active' : 'status-error')));
+    const state = j.state || 'Queued';
+    const stateClass = (state === 'Completed' || state === 'Settled' || state === 'Verified') ? 'status-healthy'
+      : ((state === 'Running' || state === 'Dispatched' || state === 'Acknowledged') ? 'status-active'
+      : ((state === 'Queued' || state === 'Pending' || state === 'Scheduled') ? 'status-paused'
+      : ((state === 'Verifying') ? 'status-active' : 'status-error')));
 
-    const leaseId = j.current_lease ? `${j.current_lease.lease_id.substring(0, 8)}...` : '-';
-    const fuelUsed = j.result ? j.result.fuel_consumed.toLocaleString() : '-';
-    const duration = j.result ? `${j.result.wall_time_ms}ms` : '-';
+    // Safe field access with fallbacks for both old and new API field names
+    const jobId = j.job_id || j.id || 'unknown';
+    const leaseId = j.current_lease?.lease_id
+      ? `${j.current_lease.lease_id.substring(0, 8)}...`
+      : (j.fencing_token ? `${j.fencing_token.substring(0, 8)}...` : '-');
+    const fuelUsed = j.result ? (j.result.fuel_consumed ?? j.result.fuel_used ?? 0).toLocaleString() : '-';
+    const duration = j.result ? `${j.result.wall_time_ms ?? j.result.duration_ms ?? 0}ms` : '-';
+    const workloadName = j.spec?.name || j.workload_id || 'workload';
 
     return `
-      <tr class="${selectedJob && selectedJob.job_id === j.job_id ? 'row-selected' : ''}" onclick="window.spaasSelectJob('${j.job_id}')">
-        <td class="font-mono text-cyan">${j.job_id.substring(0, 8)}...</td>
-        <td><strong>${escapeHtml(j.spec?.name || 'workload')}</strong></td>
-        <td><span class="status-badge ${stateClass}">${j.state.toUpperCase()}</span></td>
+      <tr class="${selectedJob && (selectedJob.job_id || selectedJob.id) === jobId ? 'row-selected' : ''}" onclick="window.spaasSelectJob('${jobId}')">
+        <td class="font-mono text-cyan">${jobId.substring(0, 12)}${jobId.length > 12 ? '...' : ''}</td>
+        <td><strong>${escapeHtml(workloadName)}</strong></td>
+        <td><span class="status-badge ${stateClass}">${state.toUpperCase()}</span></td>
         <td class="font-mono">${j.assigned_node_id ? j.assigned_node_id.substring(0, 8) + '...' : '-'}</td>
         <td class="font-mono">${leaseId}</td>
         <td>${j.retry_count || 0}</td>
         <td class="font-mono">${fuelUsed}</td>
         <td>${duration}</td>
-        <td>
-          <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); window.spaasSelectJob('${j.job_id}')">Details</button>
+        <td style="white-space: nowrap;">
+          <div style="display: flex; gap: 4px; align-items: center;">
+            <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); window.spaasSelectJob('${jobId}')" title="View Telemetry & Logs">Details</button>
+            <button class="btn btn-xs btn-primary" onclick="event.stopPropagation(); window.spaasEditJob('${jobId}')" title="Edit Parameters">Edit</button>
+            ${(state.toUpperCase() === 'QUEUED' || state.toUpperCase() === 'PENDING' || state.toUpperCase() === 'SCHEDULED' || state.toUpperCase() === 'RUNNING' || state.toUpperCase() === 'DISPATCHED' || state.toUpperCase() === 'ACKNOWLEDGED') ? `
+              <button class="btn btn-xs btn-warning" onclick="event.stopPropagation(); window.spaasCancelJob('${jobId}')" title="Cancel Execution">Cancel</button>
+            ` : `
+              <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); window.spaasRetryJob('${jobId}')" title="Re-queue / Retry">Retry</button>
+            `}
+            <button class="btn btn-xs btn-danger" onclick="event.stopPropagation(); window.spaasDeleteJob('${jobId}')" title="Remove Job">Delete</button>
+          </div>
         </td>
       </tr>
     `;
@@ -1862,28 +1920,88 @@ function renderRecentJobs(jobs) {
   if (!tbody) return;
 
   if (jobs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No jobs submitted yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No jobs yet — run device verification or submit a workload.</td></tr>';
     return;
   }
 
   tbody.innerHTML = jobs.slice(0, 5).map(j => {
-    const stateClass = j.state === 'Completed' ? 'status-healthy'
-      : (j.state === 'Running' ? 'status-active'
-      : (j.state === 'Queued' ? 'status-paused' : 'status-error'));
-    const credits = j.result ? '+10 CR' : '-';
-    const duration = j.result ? `${j.result.wall_time_ms}ms` : '-';
+    const state = j.state || 'Queued';
+    const stateClass = (state === 'Completed' || state === 'Settled' || state === 'Verified') ? 'status-healthy'
+      : ((state === 'Running' || state === 'Dispatched') ? 'status-active'
+      : ((state === 'Queued' || state === 'Pending' || state === 'Scheduled') ? 'status-paused' : 'status-error'));
+    const jobId = j.job_id || j.id || 'unknown';
+    const credits = j.result ? `+${(j.result.credits_settled || 10).toFixed(1)} CR` : '-';
+    const duration = j.result ? `${j.result.wall_time_ms ?? j.result.duration_ms ?? 0}ms` : '-';
+    const workloadName = j.spec?.name || j.workload_id || 'workload';
 
     return `
       <tr>
-        <td class="font-mono text-cyan">${j.job_id.substring(0, 8)}...</td>
-        <td>${escapeHtml(j.spec?.name || 'workload')}</td>
-        <td><span class="status-badge ${stateClass}">${j.state.toUpperCase()}</span></td>
+        <td class="font-mono text-cyan">${jobId.substring(0, 12)}${jobId.length > 12 ? '...' : ''}</td>
+        <td>${escapeHtml(workloadName)}</td>
+        <td><span class="status-badge ${stateClass}">${state.toUpperCase()}</span></td>
         <td class="font-mono">${j.assigned_node_id ? j.assigned_node_id.substring(0, 8) + '...' : '-'}</td>
         <td>${duration}</td>
         <td class="font-mono text-emerald">${credits}</td>
       </tr>
     `;
   }).join('');
+}
+
+let activeTraceInterval = null;
+
+function startJobTraceWatcher(jobId) {
+  if (activeTraceInterval) clearInterval(activeTraceInterval);
+  let pollAttempts = 0;
+  activeTraceInterval = setInterval(async () => {
+    pollAttempts++;
+    if (pollAttempts > 60) {
+      clearInterval(activeTraceInterval);
+      activeTraceInterval = null;
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/jobs/${jobId}/trace`);
+      if (!res.ok) return;
+      const trace = await res.json();
+      if (!trace || trace.error) return;
+
+      const existing = cachedJobs.find(j => j.job_id === jobId);
+      if (existing) {
+        existing.state = trace.job_state;
+        if (trace.completed_at) existing.completed_at = trace.completed_at;
+        if (trace.settlements && trace.settlements.length > 0) {
+          existing.settlement = trace.settlements[0];
+          existing.credits_settled = trace.settlements[0].amount_credits;
+          existing.tx_id = trace.settlements[0].tx_id;
+        }
+      }
+
+      if (pollAttempts % 3 === 0) {
+        await fetchJobs();
+      }
+
+      if (selectedJob && selectedJob.job_id === jobId) {
+        selectedJob.state = trace.job_state;
+        if (trace.completed_at) selectedJob.completed_at = trace.completed_at;
+        if (trace.settlements && trace.settlements.length > 0) {
+          selectedJob.settlement = trace.settlements[0];
+          selectedJob.credits_settled = trace.settlements[0].amount_credits;
+          selectedJob.tx_id = trace.settlements[0].tx_id;
+        }
+        renderJobDetails(selectedJob);
+      }
+
+      const st = (trace.job_state || '').toUpperCase();
+      if (['COMPLETED', 'SETTLED', 'FAILED', 'CANCELLED', 'UNVERIFIED'].includes(st)) {
+        clearInterval(activeTraceInterval);
+        activeTraceInterval = null;
+        await fetchJobs();
+        await fetchNodes();
+      }
+    } catch (e) {
+      console.warn('[Trace Watcher Error]', e);
+    }
+  }, 1000);
 }
 
 window.spaasSelectJob = function(jobId) {
@@ -1893,6 +2011,11 @@ window.spaasSelectJob = function(jobId) {
   renderJobDetails(job);
   renderJobsTable(cachedJobs);
 
+  const st = (job.state || '').toUpperCase();
+  if (!['COMPLETED', 'SETTLED', 'FAILED', 'CANCELLED'].includes(st)) {
+    startJobTraceWatcher(jobId);
+  }
+
   // Auto-scroll to details panel if in jobs tab
   const detailsPanel = document.getElementById('job-details-panel');
   if (detailsPanel && currentTab === 'jobs') {
@@ -1900,22 +2023,144 @@ window.spaasSelectJob = function(jobId) {
   }
 };
 
+window.spaasEditJob = function(jobId) {
+  const job = cachedJobs.find(j => (j.job_id || j.id) === jobId);
+  if (!job) return showToast('Job not found.', 'error');
+  
+  const modal = document.getElementById('modal-edit-job');
+  if (!modal) return;
+
+  const idInput = document.getElementById('edit-job-id');
+  const idDisplay = document.getElementById('edit-job-id-display');
+  const nameInput = document.getElementById('edit-job-name');
+  const stateSelect = document.getElementById('edit-job-state');
+  const nodeSelect = document.getElementById('edit-job-node');
+  const fuelInput = document.getElementById('edit-job-fuel');
+  const timeoutInput = document.getElementById('edit-job-timeout');
+  const argsInput = document.getElementById('edit-job-args');
+
+  if (idInput) idInput.value = jobId;
+  if (idDisplay) idDisplay.value = jobId;
+  if (nameInput) nameInput.value = job.spec?.name || job.workload_id || 'workload';
+  if (stateSelect) stateSelect.value = job.state || 'Queued';
+  if (fuelInput) fuelInput.value = job.spec?.limits?.max_fuel || 50000000;
+  if (timeoutInput) timeoutInput.value = job.spec?.limits?.timeout_ms || 30000;
+  if (argsInput) argsInput.value = Array.isArray(job.spec?.args) ? job.spec.args.join(', ') : (job.spec?.args || '');
+
+  // Populate node dropdown with current nodes
+  if (nodeSelect) {
+    nodeSelect.innerHTML = '<option value="">Auto-Assign (Any Ready Node)</option>' +
+      cachedNodes.map(n => {
+        const nid = n.node_id || n.id;
+        const nname = n.name || n.capabilities?.device_model || nid.substring(0, 8);
+        const sel = job.assigned_node_id === nid ? 'selected' : '';
+        return `<option value="${nid}" ${sel}>${nname} (${nid.substring(0, 8)}... - ${n.state})</option>`;
+      }).join('');
+  }
+
+  modal.classList.remove('hidden');
+};
+
+window.spaasDeleteJob = async function(jobId) {
+  if (!confirm(`Are you sure you want to permanently delete job ${jobId.substring(0, 12)}?`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/jobs/${encodeURIComponent(jobId)}`, {
+      method: 'DELETE',
+      headers: authedHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${res.status}`);
+    }
+    showToast(`Job ${jobId.substring(0, 8)} successfully deleted.`, 'success');
+    if (selectedJob && (selectedJob.job_id || selectedJob.id) === jobId) {
+      selectedJob = null;
+    }
+    await fetchJobs();
+  } catch (err) {
+    console.error('Delete job error:', err);
+    showToast(`Failed to delete job: ${err.message}`, 'error');
+  }
+};
+
+window.spaasCancelJob = async function(jobId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: 'POST',
+      headers: authedHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${res.status}`);
+    }
+    showToast(`Job ${jobId.substring(0, 8)} cancelled.`, 'info');
+    await fetchJobs();
+  } catch (err) {
+    console.error('Cancel job error:', err);
+    showToast(`Failed to cancel job: ${err.message}`, 'error');
+  }
+};
+
+window.spaasRetryJob = async function(jobId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/jobs/${encodeURIComponent(jobId)}/retry`, {
+      method: 'POST',
+      headers: authedHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${res.status}`);
+    }
+    showToast(`Job ${jobId.substring(0, 8)} re-queued for execution!`, 'success');
+    await fetchJobs();
+    window.spaasSelectJob(jobId);
+  } catch (err) {
+    console.error('Retry job error:', err);
+    showToast(`Failed to retry job: ${err.message}`, 'error');
+  }
+};
+
+window.spaasClearJobs = async function(filter = 'all') {
+  const label = filter === 'completed' ? 'completed and failed jobs' : 'ALL jobs from the cluster queue';
+  if (!confirm(`Are you sure you want to clear ${label}? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/jobs?filter=${encodeURIComponent(filter)}`, {
+      method: 'DELETE',
+      headers: authedHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    showToast(`Successfully cleared ${data.cleared_count || 0} jobs.`, 'success');
+    selectedJob = null;
+    await fetchJobs();
+    await fetchNodes();
+  } catch (err) {
+    console.error('Clear jobs error:', err);
+    showToast(`Failed to clear jobs: ${err.message}`, 'error');
+  }
+};
+
 function renderJobDetails(job) {
   if (!job) return;
 
+  const jobId = job.job_id || job.id || 'unknown';
   const titleEl = document.getElementById('detail-job-title');
-  if (titleEl) titleEl.textContent = `${job.job_id.substring(0, 8)}...`;
+  if (titleEl) titleEl.textContent = `${jobId.substring(0, 8)}...`;
 
+  const state = job.state || 'Queued';
   const badge = document.getElementById('detail-job-state-badge');
   if (badge) {
-    badge.textContent = (job.state || 'QUEUED').toUpperCase();
-    badge.className = `badge ${job.state === 'Completed' ? 'badge-proven' : (job.state === 'Running' ? 'badge-desktop' : 'badge-simulated')}`;
+    badge.textContent = state.toUpperCase();
+    badge.className = `badge ${(state === 'Completed' || state === 'Settled' || state === 'Verified') ? 'badge-proven' : (state === 'Running' || state === 'Dispatched' ? 'badge-desktop' : 'badge-simulated')}`;
   }
 
   // Evidence badge calculation
   const evBadge = document.getElementById('detail-job-evidence-badge');
   if (evBadge) {
-    const assignedNode = cachedNodes.find(n => n.node_id === job.assigned_node_id);
+    const assignedNode = cachedNodes.find(n => (n.node_id || n.id) === job.assigned_node_id);
     let evType = 'SIMULATION-PROVEN';
     let evClass = 'badge-simulated';
     if (assignedNode) {
@@ -1929,7 +2174,7 @@ function renderJobDetails(job) {
         || (assignedNode.capabilities?.device_model || '').toLowerCase().includes('sdk_gphone')
         || (assignedNode.capabilities?.device_model || '').toLowerCase().includes('goldfish')
         || (assignedNode.capabilities?.device_model || '').toLowerCase().includes('generic')
-        || (assignedNode.node_id || '').includes('avd')) {
+        || ((assignedNode.node_id || assignedNode.id) || '').includes('avd')) {
         evType = 'EMULATOR-PROVEN';
         evClass = 'badge-emulator';
       } else {
@@ -1943,40 +2188,47 @@ function renderJobDetails(job) {
 
   // Sub-tab 1: Overview
   const elJobId = document.getElementById('detail-job-id');
-  if (elJobId) elJobId.textContent = job.job_id;
+  if (elJobId) elJobId.textContent = jobId;
 
   const elJobName = document.getElementById('detail-job-name');
-  if (elJobName) elJobName.textContent = job.spec?.name || 'workload';
+  if (elJobName) elJobName.textContent = job.spec?.name || job.workload_id || 'workload';
 
   const elJobNode = document.getElementById('detail-job-node');
   if (elJobNode) elJobNode.textContent = job.assigned_node_id || 'Pending Placement';
 
-  const assignedNode = cachedNodes.find(n => n.node_id === job.assigned_node_id);
+  const assignedNode = cachedNodes.find(n => (n.node_id || n.id) === job.assigned_node_id);
   const elJobEnv = document.getElementById('detail-job-env');
   if (elJobEnv) {
     elJobEnv.textContent = assignedNode
-      ? `${assignedNode.capabilities?.device_model || 'Node'} (${assignedNode.capabilities?.architecture || 'aarch64'})`
+      ? `${assignedNode.capabilities?.device_model || assignedNode.name || 'Node'} (${assignedNode.capabilities?.architecture || 'aarch64'})`
       : 'Voluntary Edge Compute Pool';
   }
 
+  const currentLeaseId = job.current_lease?.lease_id
+    ? job.current_lease.lease_id
+    : (job.fencing_token ? job.fencing_token : (state === 'Completed' || state === 'Settled' ? `lease-${jobId.substring(0, 8)}-settled` : '-'));
+
   const elJobLease = document.getElementById('detail-job-lease');
   if (elJobLease) {
-    elJobLease.textContent = job.current_lease ? job.current_lease.lease_id : (job.state === 'Completed' ? `lease-${job.job_id.substring(0, 8)}-settled` : '-');
+    elJobLease.textContent = currentLeaseId;
   }
 
   const elLeaseExp = document.getElementById('detail-job-lease-expiry');
   if (elLeaseExp) {
-    elLeaseExp.textContent = job.current_lease ? `${job.current_lease.expires_at_ms} ms` : (job.state === 'Completed' ? 'Released on Completion' : '-');
+    elLeaseExp.textContent = job.current_lease?.expires_at || job.current_lease?.expires_at_ms ? `${job.current_lease.expires_at || job.current_lease.expires_at_ms} ms` : (state === 'Completed' || state === 'Settled' ? 'Released on Completion' : '-');
   }
+
+  const fuel = job.result ? (job.result.fuel_consumed ?? job.result.fuel_used ?? 0) : 0;
+  const wallTimeMs = job.result ? (job.result.wall_time_ms ?? job.result.duration_ms ?? 0) : 0;
 
   const elJobExit = document.getElementById('detail-job-exit');
   if (elJobExit) {
-    elJobExit.textContent = job.result ? `${job.result.exit_code} (SUCCESS)` : (job.state === 'Running' ? 'In Execution' : '-');
+    elJobExit.textContent = job.result ? `${job.result.exit_code ?? 0} (SUCCESS)` : (state === 'Running' || state === 'Dispatched' ? 'In Execution' : '-');
   }
 
   const elJobFuel = document.getElementById('detail-job-fuel');
   if (elJobFuel) {
-    elJobFuel.textContent = job.result ? (job.result.fuel_consumed || 0).toLocaleString() : '-';
+    elJobFuel.textContent = job.result ? fuel.toLocaleString() : '-';
   }
 
   // Calculate actual fuel-based compute time vs wall-clock time (GB-03) and Estimated Energy
@@ -2003,20 +2255,43 @@ function renderJobDetails(job) {
 
   // Sub-tab 2: Lifecycle Timeline (10 visible steps)
   const steps = ['tl-step-1', 'tl-step-2', 'tl-step-3', 'tl-step-4', 'tl-step-5', 'tl-step-6', 'tl-step-7', 'tl-step-8', 'tl-step-9', 'tl-step-10'];
+  const stateUpper = (job.state || '').toUpperCase();
   let completedCount = 1;
   let activeStep = null;
-  if (job.state === 'Completed') {
+  if (['COMPLETED', 'SETTLED'].includes(stateUpper)) {
     completedCount = 10;
-  } else if (job.state === 'Running') {
+  } else if (stateUpper === 'VERIFIED') {
+    completedCount = 9;
+    activeStep = 10;
+  } else if (stateUpper === 'VERIFYING') {
+    completedCount = 8;
+    activeStep = 9;
+  } else if (stateUpper === 'RESULT_SUBMITTED') {
+    completedCount = 7;
+    activeStep = 8;
+  } else if (stateUpper === 'RUNNING') {
+    completedCount = 6;
+    activeStep = 7;
+  } else if (stateUpper === 'ACKNOWLEDGED') {
     completedCount = 5;
     activeStep = 6;
-  } else if (job.state === 'Scheduled') {
+  } else if (stateUpper === 'DISPATCHED' || stateUpper === 'LEASED') {
+    completedCount = 4;
+    activeStep = 5;
+  } else if (stateUpper === 'ASSIGNED' || stateUpper === 'SCHEDULED') {
     completedCount = 3;
     activeStep = 4;
-  } else if (job.state === 'Queued') {
+  } else if (stateUpper === 'QUEUED' || stateUpper === 'PENDING') {
+    completedCount = 2;
+    activeStep = 3;
+  } else if (stateUpper === 'CREATED') {
     completedCount = 1;
     activeStep = 2;
+  } else if (['FAILED', 'UNVERIFIED', 'CANCELLED', 'REJECTED'].includes(stateUpper)) {
+    completedCount = 5;
+    activeStep = null;
   }
+
   steps.forEach((sId, idx) => {
     const el = document.getElementById(sId);
     if (!el) return;
@@ -2031,10 +2306,18 @@ function renderJobDetails(job) {
 
   const elPhaseDesc = document.getElementById('timeline-phase-desc');
   if (elPhaseDesc) {
-    elPhaseDesc.textContent = job.state === 'Completed'
-      ? 'Execution Complete & Settled (Dual-entry accounting complete)'
-      : (job.state === 'Running' ? 'Executing Sandboxed WASI inside Worker Node'
-      : (job.state === 'Scheduled' ? 'Dispatched with Active Lease' : 'In Scheduler Queue'));
+    elPhaseDesc.textContent = (stateUpper === 'COMPLETED' || stateUpper === 'SETTLED')
+      ? 'Execution Complete & Verified (Double-Entry Ledger Settled)'
+      : (stateUpper === 'VERIFIED' ? 'Cryptographic Output & Receipt Verified'
+      : (stateUpper === 'VERIFYING' ? 'Control Plane Verifying Challenge Nonce Digest'
+      : (stateUpper === 'RESULT_SUBMITTED' ? 'Result Receipt Submitted by Physical Device'
+      : (stateUpper === 'RUNNING' ? 'Executing Pure Sandboxed WASM on Android'
+      : (stateUpper === 'ACKNOWLEDGED' ? 'Device Acknowledged & Verified Artifact SHA-256'
+      : (stateUpper === 'DISPATCHED' || stateUpper === 'LEASED' ? 'Dispatched to Device Delivery Queue'
+      : (stateUpper === 'ASSIGNED' || stateUpper === 'SCHEDULED' ? 'Scheduled & Assigned to Device'
+      : (stateUpper === 'QUEUED' || stateUpper === 'PENDING' ? 'Queued in Scheduler Engine'
+      : (stateUpper === 'FAILED' ? 'Execution / Verification Failed (Zero Credits Awarded)'
+      : 'Workload Initialized')))))))));
   }
 
   const elTimeSub = document.getElementById('timeline-time-submitted');
@@ -2082,7 +2365,7 @@ function renderJobDetails(job) {
   // Sub-tab 5: Verification & Proof
   const elVerStatus = document.getElementById('detail-job-verification-status');
   if (elVerStatus) {
-    elVerStatus.textContent = job.state === 'Completed' ? 'VERIFIED_VALID (Ed25519 & Digest Confirmed)' : (job.state === 'Running' ? 'Executing in Isolation' : 'Pending Verification');
+    elVerStatus.textContent = (job.state === 'Completed' || job.state === 'Settled') ? 'VERIFIED_VALID (Ed25519 & Digest Confirmed)' : (job.state === 'Running' ? 'Executing in Isolation' : 'Pending Verification');
   }
 
   const elSig = document.getElementById('detail-job-sig');
@@ -2097,16 +2380,16 @@ function renderJobDetails(job) {
   if (elPolicy) elPolicy.textContent = job.spec?.verification_policy || 'SingleNode Deterministic Attestation';
 
   // Sub-tab 6: Metering & Economics (Deterministic Test Credits Formula)
-  const fuelUsed = job.result?.fuel_consumed || 1000000;
-  const wallTimeMs = job.result?.wall_time_ms || 1000;
+  const fuelUsed = job.result ? (job.result.fuel_consumed ?? job.result.fuel_used ?? 1000000) : 1000000;
+  const wallTimeMsVal = job.result ? (job.result.wall_time_ms ?? job.result.duration_ms ?? 1000) : 1000;
   const memBytes = job.result?.peak_memory_bytes || 65536;
   const fuelCredits = Math.floor(fuelUsed / 100000);
-  const memCredits = Math.floor((memBytes / (1024 * 1024)) * (wallTimeMs / 1000));
+  const memCredits = Math.floor((memBytes / (1024 * 1024)) * (wallTimeMsVal / 1000));
   const baseCredits = 1;
   const totalCredits = Math.max(1, baseCredits + fuelCredits + memCredits);
   const providerEarned = Math.max(1, Math.floor(totalCredits * 0.95));
   const platformFee = totalCredits - providerEarned;
-  const idemKey = `tx-spaas-${job.job_id.substring(0, 8)}-${job.result?.result_digest?.substring(0, 8) || 'settled'}`;
+  const idemKey = `tx-spaas-${jobId.substring(0, 8)}-${job.result?.result_digest?.substring(0, 8) || 'settled'}`;
 
   const elCredits = document.getElementById('detail-job-credits');
   if (elCredits) elCredits.textContent = `${totalCredits} TEST CREDITS`;
@@ -2124,7 +2407,7 @@ function renderJobDetails(job) {
   if (elIdem) elIdem.textContent = idemKey;
 
   // Sub-tab 7: Scheduler Decision & "Why this device?"
-  fetchSchedulerDecision(job.job_id);
+  fetchSchedulerDecision(jobId);
 }
 
 async function fetchSchedulerDecision(jobId) {
@@ -2647,10 +2930,13 @@ async function submitCurrentWorkload() {
   };
 
   try {
+    const correlationId = 'corr_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8);
     const res = await fetch(`${API_BASE}/api/v1/jobs`, {
       method: 'POST',
-      headers: authedHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(payload)
+      headers: authedHeaders({
+        'Content-Type': 'application/json'
+      }),
+      body: JSON.stringify({ ...payload, correlation_id: correlationId })
     });
 
     if (!res.ok) {
@@ -2669,7 +2955,8 @@ async function submitCurrentWorkload() {
     switchTab('jobs');
     window.spaasSelectJob(data.job_id);
   } catch (err) {
-    alert(`Submission error: ${err.message}\nMake sure at least one compute device is connected.`);
+    console.error('[SPaaS] Workload submission error:', err);
+    showToast(`Submission failed: ${err.message}. Ensure a compute device is connected and the control plane is reachable.`, 'error');
   }
 }
 
@@ -3326,25 +3613,37 @@ function initDeviceControls() {
   const btnRunChallenge = document.getElementById('btn-device-run-challenge');
   if (btnRunChallenge) {
     btnRunChallenge.addEventListener('click', async () => {
-      if (!selectedNode) return alert('No device selected.');
+      if (!selectedNode) return showToast('No device selected.', 'error');
+      const nodeId = selectedNode.node_id || selectedNode.id;
+      if (!nodeId) return showToast('Selected device has no valid ID.', 'error');
       const oldText = btnRunChallenge.textContent;
-      btnRunChallenge.textContent = '🎯 Dispatching Challenge...';
       btnRunChallenge.disabled = true;
+      btnRunChallenge.textContent = '⏳ Creating Job…';
       try {
-        const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/dispatch-challenge`, {
+        const correlationId = 'corr_ch_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+        btnRunChallenge.textContent = '⚡ Queued in scheduler…';
+        const res = await fetch(`${API_BASE}/api/v1/nodes/${nodeId}/dispatch-challenge`, {
           method: 'POST',
           headers: authedHeaders()
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || `HTTP ${res.status}`);
+        }
         const data = await res.json();
+        const nodeName = selectedNode.name || selectedNode.capabilities?.device_model || 'Device';
+        btnRunChallenge.textContent = `🚀 Assigned to ${nodeName}…`;
+        showToast(`Verification job dispatched to ${nodeName}! Awaiting device execution...`, 'success');
         await fetchJobs();
         await fetchNodes();
         switchTab('jobs');
         if (data.job_id) {
           window.spaasSelectJob(data.job_id);
+          startJobTraceWatcher(data.job_id);
         }
       } catch (err) {
-        alert(`Failed to dispatch challenge: ${err.message}`);
+        console.error('[SPaaS] Challenge dispatch error:', err);
+        showToast(`Failed to dispatch challenge: ${err.message}`, 'error');
       } finally {
         btnRunChallenge.textContent = oldText;
         btnRunChallenge.disabled = false;
@@ -3354,25 +3653,28 @@ function initDeviceControls() {
 
   if (btnRevoke) {
     btnRevoke.addEventListener('click', () => {
-      if (!selectedNode) return alert('No device selected.');
-      window.spaasRevokeNode(selectedNode.node_id);
+      if (!selectedNode) return showToast('No device selected.', 'error');
+      const nodeId = selectedNode.node_id || selectedNode.id;
+      window.spaasRevokeNode(nodeId);
     });
   }
 
   if (btnRemove) {
     btnRemove.addEventListener('click', async () => {
-      if (!selectedNode) return alert('No device selected.');
-      if (!confirm(`Permanently remove device ${selectedNode.node_id.substring(0, 8)} from the cluster fabric?`)) return;
+      if (!selectedNode) return showToast('No device selected.', 'error');
+      const nodeId = selectedNode.node_id || selectedNode.id;
+      if (!confirm(`Permanently remove device ${nodeId.substring(0, 8)} from the cluster fabric?`)) return;
       try {
-        const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}`, {
+        const res = await fetch(`${API_BASE}/api/v1/nodes/${nodeId}`, {
           method: 'DELETE',
           headers: authedHeaders()
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        showToast(`Device ${nodeId.substring(0, 8)} removed successfully.`, 'success');
         selectedNode = null;
         await fetchNodes();
       } catch (err) {
-        alert(`Remove failed: ${err.message}`);
+        showToast(`Remove failed: ${err.message}`, 'error');
       }
     });
   }
@@ -3835,6 +4137,124 @@ function initDeviceComparison() {
         </tbody>
       </table>
     `;
+  }
+}
+
+function initJobOperations() {
+  // Clear Queue button
+  const btnClearJobs = document.getElementById('btn-clear-jobs');
+  if (btnClearJobs) {
+    btnClearJobs.addEventListener('click', () => {
+      window.spaasClearJobs('all');
+    });
+  }
+
+  // Purge Completed button
+  const btnPurgeCompleted = document.getElementById('btn-purge-completed-jobs');
+  if (btnPurgeCompleted) {
+    btnPurgeCompleted.addEventListener('click', () => {
+      window.spaasClearJobs('completed');
+    });
+  }
+
+  // Job Details Action Bar buttons
+  const btnDetailEdit = document.getElementById('btn-detail-edit');
+  if (btnDetailEdit) {
+    btnDetailEdit.addEventListener('click', () => {
+      if (!selectedJob) return showToast('Please select a job first.', 'error');
+      window.spaasEditJob(selectedJob.job_id || selectedJob.id);
+    });
+  }
+
+  const btnDetailRetry = document.getElementById('btn-detail-retry');
+  if (btnDetailRetry) {
+    btnDetailRetry.addEventListener('click', () => {
+      if (!selectedJob) return showToast('Please select a job first.', 'error');
+      window.spaasRetryJob(selectedJob.job_id || selectedJob.id);
+    });
+  }
+
+  const btnDetailCancel = document.getElementById('btn-detail-cancel');
+  if (btnDetailCancel) {
+    btnDetailCancel.addEventListener('click', () => {
+      if (!selectedJob) return showToast('Please select a job first.', 'error');
+      window.spaasCancelJob(selectedJob.job_id || selectedJob.id);
+    });
+  }
+
+  const btnDetailDelete = document.getElementById('btn-detail-delete');
+  if (btnDetailDelete) {
+    btnDetailDelete.addEventListener('click', () => {
+      if (!selectedJob) return showToast('Please select a job first.', 'error');
+      window.spaasDeleteJob(selectedJob.job_id || selectedJob.id);
+    });
+  }
+
+  // Edit Job Modal bindings
+  const modalEdit = document.getElementById('modal-edit-job');
+  const btnModalEditClose = document.getElementById('modal-edit-job-close');
+  const btnModalEditCancel = document.getElementById('btn-modal-edit-close');
+  const btnModalEditDelete = document.getElementById('btn-modal-edit-delete');
+  const btnModalEditSave = document.getElementById('btn-modal-edit-save');
+
+  const closeEditModal = () => {
+    if (modalEdit) modalEdit.classList.add('hidden');
+  };
+
+  if (btnModalEditClose) btnModalEditClose.addEventListener('click', closeEditModal);
+  if (btnModalEditCancel) btnModalEditCancel.addEventListener('click', closeEditModal);
+
+  if (btnModalEditDelete) {
+    btnModalEditDelete.addEventListener('click', async () => {
+      const jobId = document.getElementById('edit-job-id')?.value;
+      if (!jobId) return;
+      closeEditModal();
+      await window.spaasDeleteJob(jobId);
+    });
+  }
+
+  if (btnModalEditSave) {
+    btnModalEditSave.addEventListener('click', async () => {
+      const jobId = document.getElementById('edit-job-id')?.value;
+      if (!jobId) return;
+      const name = document.getElementById('edit-job-name')?.value;
+      const state = document.getElementById('edit-job-state')?.value;
+      const assigned_node_id = document.getElementById('edit-job-node')?.value;
+      const max_fuel = parseInt(document.getElementById('edit-job-fuel')?.value, 10) || 50000000;
+      const timeout_ms = parseInt(document.getElementById('edit-job-timeout')?.value, 10) || 30000;
+      const argsRaw = document.getElementById('edit-job-args')?.value || '';
+      const args = argsRaw.split(',').map(s => s.trim()).filter(Boolean);
+
+      try {
+        btnModalEditSave.disabled = true;
+        btnModalEditSave.textContent = 'Saving...';
+        const res = await fetch(`${API_BASE}/api/v1/jobs/${encodeURIComponent(jobId)}`, {
+          method: 'PUT',
+          headers: authedHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            name,
+            state,
+            assigned_node_id: assigned_node_id || null,
+            limits: { max_fuel, timeout_ms },
+            args
+          })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || `HTTP ${res.status}`);
+        }
+        showToast(`Job ${jobId.substring(0, 8)} updated successfully!`, 'success');
+        closeEditModal();
+        await fetchJobs();
+        window.spaasSelectJob(jobId);
+      } catch (err) {
+        console.error('Update job error:', err);
+        showToast(`Failed to update job: ${err.message}`, 'error');
+      } finally {
+        btnModalEditSave.disabled = false;
+        btnModalEditSave.textContent = 'Save Changes';
+      }
+    });
   }
 }
 

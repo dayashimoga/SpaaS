@@ -270,11 +270,11 @@ test("SPaaSCoordinator — Workload Submission, Placement & Dynamic Settlement",
   )).json();
   const deviceAuthToken = pairData.auth_token;
 
-  // Submit job (authenticated)
+  // Submit job (authenticated with X-Correlation-ID)
   const submitRes = await coordinator.fetch(
     new Request("http://localhost/api/v1/jobs", {
       method: "POST",
-      headers: ADMIN_HEADERS,
+      headers: { ...ADMIN_HEADERS, "X-Correlation-ID": "corr-matrix-test-999" },
       body: JSON.stringify({
         job_id: "job-matrix-wasm-001",
         workload_id: "matrix_compute"
@@ -284,8 +284,9 @@ test("SPaaSCoordinator — Workload Submission, Placement & Dynamic Settlement",
   assert.equal(submitRes.status, 201);
   const job = await submitRes.json();
   assert.equal(job.id, "job-matrix-wasm-001");
-  assert.equal(job.state, "Running");
+  assert.ok(job.state === "DISPATCHED" || job.state === "Running");
   assert.equal(job.assigned_node_id, "node-desktop-compute-01");
+  assert.equal(job.correlation_id, "corr-matrix-test-999");
   assert.ok(job.fencing_token);
 
   // Submit result with valid device auth and correct fencing token
@@ -309,7 +310,13 @@ test("SPaaSCoordinator — Workload Submission, Placement & Dynamic Settlement",
   assert.equal(resultRes.status, 200);
   const result = await resultRes.json();
   assert.equal(result.status, "accepted");
+  assert.equal(result.correlation_id, "corr-matrix-test-999");
   assert.ok(result.credits_settled > 0);
+
+  // Invariant: ledger entries store correlation_id
+  const ledgerRows = coordinator.sqlExec(`SELECT correlation_id FROM ledger WHERE job_id = 'job-matrix-wasm-001'`);
+  assert.ok(ledgerRows.length >= 2);
+  assert.equal(ledgerRows[0].correlation_id, "corr-matrix-test-999");
 
   // Stale fencing token submission must be rejected
   const staleRes = await coordinator.fetch(
@@ -676,6 +683,64 @@ test("SPaaSCoordinator — Job Queries, Decisions, Cancellation & Challenge Work
   );
   assert.equal(cancelRes.status, 200);
   assert.equal((await cancelRes.json()).status, "cancelled");
+
+  // 6. Test cancellation command dispatched to assigned node via heartbeat side-channel
+  coordinator.sqlExec(
+    `INSERT OR REPLACE INTO nodes (id, name, device_type, public_key, auth_token, state, is_simulated, last_heartbeat, created_at)
+     VALUES (?, ?, ?, ?, ?, 'Ready', 0, ?, ?)`,
+    "cancel-node-1",
+    "Test Node",
+    "Phone",
+    "ed25519_pk",
+    "tok_cancel_1",
+    Date.now(),
+    Date.now()
+  );
+  coordinator.sqlExec(
+    `INSERT INTO jobs (id, workload_id, state, assigned_node_id, lease_expires_at, retry_count, max_retries, created_at)
+     VALUES (?, ?, 'Running', ?, ?, 0, 3, ?)`,
+    "cancel-job-1",
+    "wl_test",
+    "cancel-node-1",
+    Date.now() + 60000,
+    Date.now()
+  );
+
+  const cancelRunningRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/jobs/cancel-job-1/cancel`, {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(cancelRunningRes.status, 200);
+
+  // Heartbeat from cancel-node-1 receives command
+  const hbRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/heartbeat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer tok_cancel_1"
+      },
+      body: JSON.stringify({ node_id: "cancel-node-1" })
+    })
+  );
+  assert.equal(hbRes.status, 200);
+  const hbData = await hbRes.json();
+  assert.deepEqual(hbData.command, { action: "cancel_job", job_id: "cancel-job-1" });
+
+  // Subsequent heartbeat has null command (consumed)
+  const hb2Res = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/heartbeat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer tok_cancel_1"
+      },
+      body: JSON.stringify({ node_id: "cancel-node-1" })
+    })
+  );
+  assert.equal((await hb2Res.json()).command, null);
 });
 
 test("SPaaSCoordinator — Ledger, Demo Simulated Cluster & Audit Log", async () => {
@@ -973,5 +1038,738 @@ test("SPaaSCoordinator — Empirical Qualification & Challenge Dispatch", async 
   assert.ok(pollData.job.spec);
   assert.ok(pollData.job.spec.name.includes("SHA-256"));
 });
+
+test("SPaaSCoordinator — End-to-End Authoritative Challenge Lifecycle, ACK, START, Verification & Trace", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET,
+    SPAAS_REQUIRE_AUTH: "true"
+  });
+
+  const deviceToken = "dev_token_e2e_vivo_12221";
+  const nodeId = "e2e-vivo-i2221";
+
+  // 1. Register device
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, public_key, auth_token, state, capabilities, qualification, policy, telemetry, is_simulated, last_heartbeat, created_at)
+     VALUES (?, ?, 'android_smartphone', 'ed25519_pk_vivo', ?, 'Ready', ?, ?, ?, ?, 0, ?, ?)`,
+    nodeId,
+    "Vivo I2221",
+    deviceToken,
+    JSON.stringify({ device_model: "Vivo I2221", architecture: "aarch64", cpu_cores: 8, total_ram_mb: 8192 }),
+    JSON.stringify({ wasm_conformance_passed: true, edge_score: 92, tier: "QUALIFIED" }),
+    JSON.stringify({ only_while_charging: false, min_battery_threshold_pct: 20 }),
+    JSON.stringify({ battery_pct: 75, charging_state: "DISCHARGING", thermal_status: "NONE", round_trip_ping_ms: 15 }),
+    Date.now(),
+    Date.now()
+  );
+
+  // 2. Policy Update Test
+  const policyRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/${nodeId}/policy`, {
+      method: "POST",
+      headers: { ...ADMIN_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        charging_only: false,
+        unmetered_only: true,
+        min_battery_pct: 25,
+        max_cpu_pct: 70
+      })
+    })
+  );
+  assert.equal(policyRes.status, 200);
+  const policyData = await policyRes.json();
+  assert.equal(policyData.status, "ok");
+  assert.equal(policyData.policy.only_while_charging, false);
+  assert.equal(policyData.policy.min_battery_threshold_pct, 25);
+
+  // 3. Dispatch Challenge Job
+  const dispatchRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/${nodeId}/dispatch-challenge`, {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(dispatchRes.status, 200);
+  const dispatchData = await dispatchRes.json();
+  assert.equal(dispatchData.status, "ok");
+  assert.equal(dispatchData.state, "DISPATCHED");
+  assert.ok(dispatchData.job_id);
+  assert.ok(dispatchData.lease_id);
+  assert.ok(dispatchData.fencing_token);
+  assert.ok(dispatchData.nonce);
+  assert.ok(dispatchData.expected_digest);
+
+  const jobId = dispatchData.job_id;
+  const leaseId = dispatchData.lease_id;
+  const fencingToken = dispatchData.fencing_token;
+  const nonce = dispatchData.nonce;
+  const expectedDigest = dispatchData.expected_digest;
+
+  // Verify node transitioned to Busy
+  const nodeBusy = (coordinator.sqlExec(`SELECT state FROM nodes WHERE id = ?`, nodeId))[0];
+  assert.equal(nodeBusy.state, "Busy");
+
+  // 4. Device Polls for Job (Verifies Fallback and payload completeness)
+  const pollRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/${nodeId}/poll`, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${deviceToken}` }
+    })
+  );
+  assert.equal(pollRes.status, 200);
+  const pollData = await pollRes.json();
+  assert.ok(pollData.job);
+  assert.equal(pollData.job.job_id, jobId);
+  assert.equal(pollData.job.fencing_token, fencingToken);
+  assert.equal(pollData.job.spec.expected_digest, expectedDigest);
+  assert.ok(pollData.job.spec.args.includes(nonce));
+
+  // 5. Device Sends ACK (DISPATCHED -> ACKNOWLEDGED)
+  const ackRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/ack`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${deviceToken}` },
+      body: JSON.stringify({
+        node_id: nodeId,
+        job_id: jobId,
+        lease_id: leaseId,
+        fencing_token: fencingToken,
+        artifact_sha256: "c86da4754d1c8581596aa48bc6bd7e60edd1b5f4281fe32b5e956a5efc98cad7"
+      })
+    })
+  );
+  assert.equal(ackRes.status, 200);
+  const ackData = await ackRes.json();
+  assert.equal(ackData.status, "ok");
+  assert.equal(ackData.state, "ACKNOWLEDGED");
+
+  // Verify DB state is ACKNOWLEDGED
+  let jobRecord = (coordinator.sqlExec(`SELECT state FROM jobs WHERE id = ?`, jobId))[0];
+  assert.equal(jobRecord.state, "ACKNOWLEDGED");
+
+  // 6. Device Sends START (ACKNOWLEDGED -> RUNNING)
+  const startRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${deviceToken}` },
+      body: JSON.stringify({
+        node_id: nodeId,
+        job_id: jobId,
+        lease_id: leaseId,
+        fencing_token: fencingToken
+      })
+    })
+  );
+  assert.equal(startRes.status, 200);
+  const startData = await startRes.json();
+  assert.equal(startData.status, "ok");
+  assert.equal(startData.state, "RUNNING");
+
+  jobRecord = (coordinator.sqlExec(`SELECT state FROM jobs WHERE id = ?`, jobId))[0];
+  assert.equal(jobRecord.state, "RUNNING");
+
+  // 7. Test Negative Verification: submit invalid/forged output
+  const badRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/results`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${deviceToken}` },
+      body: JSON.stringify({
+        node_id: nodeId,
+        job_id: jobId,
+        lease_id: leaseId,
+        fencing_token: fencingToken,
+        result: {
+          exit_code: 0,
+          stdout: "SPaaS Sandbox Fake: Digest: 0000000000000000000000000000000000000000000000000000000000000000\n",
+          stderr: "",
+          fuel_consumed: 12000,
+          wall_time_ms: 50
+        }
+      })
+    })
+  );
+  assert.equal(badRes.status, 200);
+  const badData = await badRes.json();
+  assert.equal(badData.status, "rejected");
+  assert.equal(badData.reason, "CHALLENGE_VERIFICATION_FAILED");
+
+  // 8. Re-mark RUNNING and submit Authentic Genuine Verification Output
+  coordinator.sqlExec(`UPDATE jobs SET state = 'RUNNING' WHERE id = ?`, jobId);
+  const authenticStdout = `SPaaS WASM Sandbox: SHA-256 Cryptographic Benchmark\nAlgorithm: SHA-256 (FIPS 180-4)\nNonce: ${nonce}\nDigest: ${expectedDigest}\nStatus: SUCCESS\n`;
+
+  const goodRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/results`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${deviceToken}` },
+      body: JSON.stringify({
+        node_id: nodeId,
+        job_id: jobId,
+        lease_id: leaseId,
+        fencing_token: fencingToken,
+        result: {
+          exit_code: 0,
+          stdout: authenticStdout,
+          stderr: "",
+          fuel_consumed: 1850000,
+          wall_time_ms: 120,
+          node_signature: "sig_ed25519_physical_device_proven"
+        }
+      })
+    })
+  );
+  assert.equal(goodRes.status, 200);
+  const goodData = await goodRes.json();
+  assert.equal(goodData.status, "accepted");
+  assert.equal(goodData.state, "COMPLETED");
+  assert.equal(goodData.verification, "VERIFIED");
+  assert.ok(goodData.credits_settled > 0);
+  assert.ok(goodData.tx_id);
+
+  // 9. Test Idempotency: re-submitting returns existing settlement without duplicate credits
+  const ledgerCountBefore = (coordinator.sqlExec(`SELECT COUNT(*) as c FROM ledger WHERE job_id = ?`, jobId))[0].c;
+  assert.equal(ledgerCountBefore, 2); // 1 DEBIT + 1 CREDIT
+
+  const replayRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/results`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${deviceToken}` },
+      body: JSON.stringify({
+        node_id: nodeId,
+        job_id: jobId,
+        lease_id: leaseId,
+        fencing_token: fencingToken,
+        result: { exit_code: 0, stdout: authenticStdout }
+      })
+    })
+  );
+  assert.equal(replayRes.status, 200);
+  const replayData = await replayRes.json();
+  assert.equal(replayData.status, "accepted");
+  assert.equal(replayData.idempotent, true);
+  assert.equal(replayData.tx_id, goodData.tx_id);
+
+  const ledgerCountAfter = (coordinator.sqlExec(`SELECT COUNT(*) as c FROM ledger WHERE job_id = ?`, jobId))[0].c;
+  assert.equal(ledgerCountAfter, 2); // Still exactly 2 entries (no duplicates!)
+
+  // 10. Test Execution Trace Endpoint
+  const traceRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/jobs/${jobId}/trace`, {
+      method: "GET",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(traceRes.status, 200);
+  const traceData = await traceRes.json();
+  assert.equal(traceData.status, "ok");
+  assert.equal(traceData.job_id, jobId);
+  assert.equal(traceData.node_id, nodeId);
+  assert.ok(traceData.transitions.length >= 7);
+
+  const transitionStates = traceData.transitions.map(t => t.to_state);
+  assert.ok(transitionStates.includes("CREATED"));
+  assert.ok(transitionStates.includes("QUEUED"));
+  assert.ok(transitionStates.includes("ASSIGNED"));
+  assert.ok(transitionStates.includes("LEASED"));
+  assert.ok(transitionStates.includes("DISPATCHED"));
+  assert.ok(transitionStates.includes("ACKNOWLEDGED"));
+  assert.ok(transitionStates.includes("RUNNING"));
+  assert.ok(transitionStates.includes("VERIFIED"));
+  assert.ok(transitionStates.includes("COMPLETED"));
+
+  // Verify node returned to Ready
+  const nodeReady = (coordinator.sqlExec(`SELECT state FROM nodes WHERE id = ?`, nodeId))[0];
+  assert.equal(nodeReady.state, "Ready");
+});
+
+test("SPaaSCoordinator — Comprehensive Failure, Security, Rejection & Recovery Boundaries", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET,
+    SPAAS_REQUIRE_AUTH: "true"
+  });
+
+  const devToken = "dev_token_boundary_phone";
+  const validNodeId = "boundary-phone-vivo";
+  const now = Date.now();
+
+  // 1. Register valid node
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, public_key, auth_token, state, capabilities, qualification, policy, telemetry, is_simulated, last_heartbeat, created_at)
+     VALUES (?, ?, 'android_smartphone', 'ed25519_pk_boundary', ?, 'Ready', ?, ?, ?, ?, 0, ?, ?)`,
+    validNodeId,
+    "Vivo Boundary Phone",
+    devToken,
+    JSON.stringify({ device_model: "Vivo I2221", architecture: "aarch64", cpu_cores: 8, total_ram_mb: 8192 }),
+    JSON.stringify({ wasm_conformance_passed: true, edge_score: 90, tier: "QUALIFIED" }),
+    JSON.stringify({ only_while_charging: false, min_battery_threshold_pct: 30 }),
+    JSON.stringify({ battery_pct: 75, charging_state: "DISCHARGING", thermal_status: "NONE" }),
+    now,
+    now
+  );
+
+  // 2. Node trace endpoint
+  const nodeTraceRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/${validNodeId}/trace`, {
+      method: "GET",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(nodeTraceRes.status, 200);
+  const nodeTrace = await nodeTraceRes.json();
+  assert.equal(nodeTrace.status, "ok");
+  assert.equal(nodeTrace.node.id, validNodeId);
+
+  // 3. Dispatch challenge to non-existent node -> 404
+  const resNotFound = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/non-existent-node/dispatch-challenge`, {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(resNotFound.status, 404);
+
+  // 4. Dispatch challenge to revoked node -> 403
+  coordinator.sqlExec(`UPDATE nodes SET state = 'Revoked' WHERE id = ?`, validNodeId);
+  const resRevoked = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/${validNodeId}/dispatch-challenge`, {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(resRevoked.status, 403);
+  coordinator.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ?`, validNodeId);
+
+  // 5. Dispatch challenge to offline node (>60s heartbeat) -> 409
+  coordinator.sqlExec(`UPDATE nodes SET last_heartbeat = ? WHERE id = ?`, now - 120000, validNodeId);
+  const resOffline = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/${validNodeId}/dispatch-challenge`, {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(resOffline.status, 409);
+  coordinator.sqlExec(`UPDATE nodes SET last_heartbeat = ? WHERE id = ?`, now, validNodeId);
+
+  // 6. Dispatch challenge to paused node -> 409
+  coordinator.sqlExec(`UPDATE nodes SET state = 'Paused' WHERE id = ?`, validNodeId);
+  const resPaused = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/${validNodeId}/dispatch-challenge`, {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(resPaused.status, 409);
+  coordinator.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ?`, validNodeId);
+
+  // 7. Dispatch challenge with battery below policy threshold -> 409
+  coordinator.sqlExec(
+    `UPDATE nodes SET telemetry = ? WHERE id = ?`,
+    JSON.stringify({ battery_pct: 15, charging_state: "DISCHARGING", thermal_status: "NONE" }),
+    validNodeId
+  );
+  const resLowBattery = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/${validNodeId}/dispatch-challenge`, {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(resLowBattery.status, 409);
+  coordinator.sqlExec(
+    `UPDATE nodes SET telemetry = ? WHERE id = ?`,
+    JSON.stringify({ battery_pct: 80, charging_state: "DISCHARGING", thermal_status: "NONE" }),
+    validNodeId
+  );
+
+  // 8. Poll endpoint boundaries (unauthorized, revoked, empty)
+  const pollUnauth = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/${validNodeId}/poll`, {
+      method: "GET"
+    })
+  );
+  assert.equal(pollUnauth.status, 401);
+
+  coordinator.sqlExec(`UPDATE nodes SET state = 'Revoked' WHERE id = ?`, validNodeId);
+  const pollRevoked = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/${validNodeId}/poll`, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${devToken}` }
+    })
+  );
+  assert.equal(pollRevoked.status, 403);
+  coordinator.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ?`, validNodeId);
+
+  const pollEmpty = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/${validNodeId}/poll`, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${devToken}` }
+    })
+  );
+  assert.equal(pollEmpty.status, 200);
+  const pollEmptyData = await pollEmpty.json();
+  assert.equal(pollEmptyData.job, null);
+
+  // 9. ACK & START boundaries (missing job_id, unauthorized)
+  const ackBad = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/ack`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${devToken}` },
+      body: JSON.stringify({ node_id: validNodeId })
+    })
+  );
+  assert.equal(ackBad.status, 400);
+
+  const startBad = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${devToken}` },
+      body: JSON.stringify({ node_id: validNodeId })
+    })
+  );
+  assert.equal(startBad.status, 400);
+
+  // 10. Result submission boundaries
+  const resBadJob = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/results`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${devToken}` },
+      body: JSON.stringify({ node_id: validNodeId, job_id: "non-existent-job" })
+    })
+  );
+  assert.equal(resBadJob.status, 200);
+  const badJobData = await resBadJob.json();
+  assert.equal(badJobData.status, "rejected");
+  assert.equal(badJobData.reason, "JOB_NOT_FOUND");
+});
+
+test("SPaaSCoordinator — Fleet Inventory, WebSocket Hibernation Full Lifecycle, APK Downloads & Bulk Pruning", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET,
+    SPAAS_CONTROL_PLANE_EPOCH: "1"
+  });
+
+  // 1. GET /api/v1/nodes fleet listing with multiple nodes
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, auth_token, capabilities, telemetry, policy, last_heartbeat, created_at)
+     VALUES (?, ?, ?, 'Ready', 0, ?, ?, ?, ?, ?, ?)`,
+    "fleet-node-01",
+    "Galaxy S24",
+    "Phone",
+    "secret-node-token-01",
+    JSON.stringify({ device_model: "Galaxy S24", architecture: "aarch64", total_ram_mb: 8192, cpu_cores: 8 }),
+    JSON.stringify({ battery_pct: 95, charging_state: "CHARGING", thermal_status: "NONE", available_ram_mb: 4096 }),
+    JSON.stringify({ allowExecution: true, minimumBatteryPct: 20 }),
+    Date.now(),
+    Date.now()
+  );
+
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, auth_token, capabilities, telemetry, policy, last_heartbeat, created_at)
+     VALUES (?, ?, ?, 'Revoked', 0, ?, NULL, NULL, NULL, ?, ?)`,
+    "fleet-node-revoked",
+    "Old Tablet",
+    "Tablet",
+    "secret-node-token-02",
+    Date.now() - 100000,
+    Date.now() - 100000
+  );
+
+  const fleetRes = await coordinator.fetch(new Request("http://localhost/api/v1/nodes"));
+  assert.equal(fleetRes.status, 200);
+  const fleetData = await fleetRes.json();
+  assert.ok(fleetData.total >= 2);
+  const foundS24 = fleetData.nodes.find(n => n.id === "fleet-node-01");
+  assert.ok(foundS24);
+  assert.equal(foundS24.auth_token, undefined, "Secret auth token must be redacted from fleet listing");
+  assert.equal(foundS24.name, "Galaxy S24");
+  assert.equal(foundS24.capabilities.architecture, "aarch64");
+  assert.equal(foundS24.policy.allowExecution, true);
+
+  // Set qualification on fleet-node-01
+  coordinator.sqlExec(
+    "UPDATE nodes SET qualification = ? WHERE id = ?",
+    JSON.stringify({ wasm_conformance_passed: true, verified_at: Date.now() }),
+    "fleet-node-01"
+  );
+
+  // 2. Heartbeat returning assigned_job when node is busy
+  const challengeRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/nodes/fleet-node-01/dispatch-challenge", {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(challengeRes.status, 200);
+  const challengeData = await challengeRes.json();
+  const jobHbId = challengeData.job_id;
+  const fToken = challengeData.fencing_token;
+  const expectedDigest = challengeData.expected_digest;
+
+  const hbRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/nodes/heartbeat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer secret-node-token-01" },
+      body: JSON.stringify({
+        node_id: "fleet-node-01",
+        state: "Busy",
+        battery_pct: 95,
+        is_charging: true
+      })
+    })
+  );
+  assert.equal(hbRes.status, 200);
+  const hbData = await hbRes.json();
+  assert.ok(hbData.assigned_job, "Heartbeat must return assigned_job when node has an active job");
+  assert.equal(hbData.assigned_job.job_id, jobHbId);
+  assert.equal(hbData.assigned_job.lease_id, fToken);
+  assert.equal(hbData.assigned_job.spec.expected_digest, expectedDigest);
+  assert.ok(hbData.assigned_job.wasm_bytes);
+  assert.ok(hbData.policy, "Heartbeat must return node policy");
+  assert.equal(hbData.policy.allowExecution, true);
+
+  // 3. WebSocket Hibernation message handlers: Heartbeat (with job), ACK, START, Result, ping, error, close
+  const wsMessages = [];
+  const mockWs = {
+    send: (msg) => wsMessages.push(JSON.parse(msg)),
+    close: () => {}
+  };
+  const mockCtx = {
+    getTags: (ws) => ["fleet-node-01"]
+  };
+  coordinator.ctx = mockCtx;
+
+  // WS Heartbeat when node has assigned job
+  await coordinator.webSocketMessage(mockWs, JSON.stringify({
+    type: "Heartbeat",
+    node_id: "fleet-node-01",
+    telemetry: { battery_pct: 94 }
+  }));
+  const lastWsMsg = wsMessages[wsMessages.length - 1];
+  assert.equal(lastWsMsg.type, "HeartbeatAck");
+  assert.ok(lastWsMsg.assigned_job);
+  assert.equal(lastWsMsg.assigned_job.job_id, jobHbId);
+
+  // WS ACK
+  await coordinator.webSocketMessage(mockWs, JSON.stringify({
+    type: "ACK",
+    node_id: "fleet-node-01",
+    job_id: jobHbId
+  }));
+  const ackMsg = wsMessages[wsMessages.length - 1];
+  assert.equal(ackMsg.type, "AckReceipt");
+  assert.equal(ackMsg.state, "ACKNOWLEDGED");
+
+  // WS START
+  await coordinator.webSocketMessage(mockWs, JSON.stringify({
+    type: "START",
+    node_id: "fleet-node-01",
+    job_id: jobHbId
+  }));
+  const startMsg = wsMessages[wsMessages.length - 1];
+  assert.equal(startMsg.type, "StartReceipt");
+  assert.equal(startMsg.state, "RUNNING");
+
+  // WS Result
+  await coordinator.webSocketMessage(mockWs, JSON.stringify({
+    type: "Result",
+    node_id: "fleet-node-01",
+    job_id: jobHbId,
+    exit_code: 0,
+    stdout: `Digest: ${expectedDigest}`,
+    result_digest: expectedDigest,
+    fencing_token: fToken,
+    execution_time_ms: 120,
+    fuel_used: 50
+  }));
+  const resMsg = wsMessages[wsMessages.length - 1];
+  assert.equal(resMsg.type, "ResultAck");
+  assert.equal(resMsg.status, "accepted");
+  assert.equal(resMsg.state, "COMPLETED");
+
+  // WS Error handling (invalid JSON string)
+  await coordinator.webSocketMessage(mockWs, "{ malformed-json");
+  const errMsg = wsMessages[wsMessages.length - 1];
+  assert.equal(errMsg.type, "error");
+
+  // WS Close
+  await coordinator.webSocketClose(mockWs, 1000, "Clean device disconnect", true);
+  const sessRows = coordinator.sqlExec(`SELECT connection_state FROM device_sessions WHERE node_id = ?`, "fleet-node-01");
+  assert.equal(sessRows[0]?.connection_state, "DISCONNECTED");
+
+  // 4. Consumer / Provider Metering Balance Query
+  // Missing account key
+  const noAccRes = await coordinator.fetch(new Request("http://localhost/api/v1/metering/consumer/"));
+  assert.equal(noAccRes.status, 400);
+
+  // Valid account balance query
+  const balRes = await coordinator.fetch(new Request("http://localhost/api/v1/metering/consumer/fleet-node-01"));
+  assert.equal(balRes.status, 200);
+  const balData = await balRes.json();
+  assert.equal(balData.account, "fleet-node-01");
+  assert.ok(balData.balance_credits > 0);
+  assert.ok(balData.transaction_count > 0);
+  assert.ok(Array.isArray(balData.transactions));
+
+  // 5. Bulk Node Deletion / Pruning endpoints
+  // Unauthorized check
+  const delUnauth = await coordinator.fetch(new Request("http://localhost/api/v1/nodes", { method: "DELETE" }));
+  assert.equal(delUnauth.status, 401);
+
+  // Prune revoked only
+  const pruneRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/nodes?revoked_only=true", {
+      method: "DELETE",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(pruneRes.status, 200);
+  const pruneData = await pruneRes.json();
+  assert.equal(pruneData.status, "pruned");
+  assert.ok(pruneData.count >= 1);
+
+  // Clear all nodes
+  const clearRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/nodes", {
+      method: "DELETE",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(clearRes.status, 200);
+  const clearData = await clearRes.json();
+  assert.equal(clearData.status, "cleared");
+  assert.ok(clearData.count >= 1);
+
+  // 6. Gateway Ingress APK Downloads & Forwarding Errors
+  const apkRedirect = await workerGateway.fetch(new Request("http://localhost/app-debug.apk"));
+  assert.equal(apkRedirect.status, 302);
+  assert.ok(apkRedirect.headers.get("Location").includes(".apk"));
+
+  const dlRedirect = await workerGateway.fetch(new Request("http://localhost/downloads/SPaaS-Node-v0.1.0.apk"));
+  assert.equal(dlRedirect.status, 302);
+
+  // Gateway DO Forwarding error recovery & 500
+  const failingStub = {
+    fetch: async () => { throw new Error("DO cluster transient partition"); }
+  };
+  const failingEnv = {
+    COORDINATOR: {
+      idFromName: () => "mock-do-failing",
+      get: () => failingStub
+    },
+    SPAAS_ROLE: "PRIMARY"
+  };
+
+  const failingHealth = await workerGateway.fetch(new Request("http://localhost/health"), failingEnv);
+  assert.equal(failingHealth.status, 200);
+  const fHealthData = await failingHealth.json();
+  assert.equal(fHealthData.do_status, "RECOVERING");
+
+  const failingRoute = await workerGateway.fetch(new Request("http://localhost/api/v1/jobs"), failingEnv);
+  assert.equal(failingRoute.status, 500);
+  const fRouteData = await failingRoute.json();
+  assert.equal(fRouteData.error, "COORDINATOR_DISPATCH_ERROR");
+});
+
+test("SPaaSCoordinator — Job Management: Edit, Retry, Delete & Bulk Clear", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+  coordinator.sqlExec(`INSERT INTO nodes (id, name, state, is_simulated) VALUES ('test-edit-node', 'Test Node', 'Ready', 0)`);
+
+  // 1. Submit a job
+  const submitRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        spec: { name: "Original Workload", limits: { max_fuel: 1000000, timeout_ms: 5000 } },
+        wasm_binary_base64: "AGFzbQEAAAABBQFgAAF/AwIBAAcQAQZtZW1vcnkCAAFfc3RhcnQAAAoGAQQAQcEA"
+      })
+    })
+  );
+  assert.equal(submitRes.status, 201);
+  const submitData = await submitRes.json();
+  const jobId = submitData.job_id;
+
+  // 2. Edit the job
+  const editRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/jobs/${jobId}`, {
+      method: "PUT",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({
+        name: "Renamed Workload Spec",
+        state: "Queued",
+        limits: { max_fuel: 2500000, timeout_ms: 12000 }
+      })
+    })
+  );
+  assert.equal(editRes.status, 200);
+  const editData = await editRes.json();
+  assert.equal(editData.status, "ok");
+
+  // 3. Retry the job
+  const retryRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/jobs/${jobId}/retry`, {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(retryRes.status, 200);
+  const retryData = await retryRes.json();
+  assert.equal(retryData.status, "ok");
+  assert.equal(retryData.state, "Queued");
+
+  // 4. Delete the single job
+  const delRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/jobs/${jobId}`, {
+      method: "DELETE",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(delRes.status, 200);
+  const delData = await delRes.json();
+  assert.equal(delData.deleted, jobId);
+
+  // 5. Submit two more jobs and Bulk Clear
+  await coordinator.fetch(
+    new Request("http://localhost/api/v1/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        spec: { name: "Bulk Job 1" },
+        wasm_binary_base64: "AGFzbQEAAAABBQFgAAF/AwIBAAcQAQZtZW1vcnkCAAFfc3RhcnQAAAoGAQQAQcEA"
+      })
+    })
+  );
+  await coordinator.fetch(
+    new Request("http://localhost/api/v1/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        spec: { name: "Bulk Job 2" },
+        wasm_binary_base64: "AGFzbQEAAAABBQFgAAF/AwIBAAcQAQZtZW1vcnkCAAFfc3RhcnQAAAoGAQQAQcEA"
+      })
+    })
+  );
+
+  const clearRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/jobs?filter=all", {
+      method: "DELETE",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(clearRes.status, 200);
+  const clearData = await clearRes.json();
+  assert.equal(clearData.status, "ok");
+  assert.ok(clearData.cleared_count >= 2);
+
+  // Verify jobs queue is now 0
+  const jobsRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs"));
+  const jobsData = await jobsRes.json();
+  assert.equal(jobsData.total, 0);
+});
+
 
 

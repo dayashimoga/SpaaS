@@ -17,7 +17,7 @@ export default {
         headers: {
           "Access-Control-Allow-Origin": allowedOrigin,
           "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Device-Auth, X-SPaaS-Key, Baggage, Sentry-Trace",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Device-Auth, X-SPaaS-Key, X-Correlation-ID, Baggage, Sentry-Trace, *",
           "Access-Control-Expose-Headers": "X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After",
           "Access-Control-Max-Age": "86400",
           "Vary": "Origin"
@@ -165,11 +165,14 @@ function resolveAllowedOrigin(request, env) {
 }
 
 function addSecurityAndCorsHeaders(res, env, request) {
+  if (res.status === 101 || res.webSocket) {
+    return res;
+  }
   const allowedOrigin = resolveAllowedOrigin(request, env);
   const newHeaders = new Headers(res.headers);
   newHeaders.set("Access-Control-Allow-Origin", allowedOrigin);
   newHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  newHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Device-Auth, X-SPaaS-Key");
+  newHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Device-Auth, X-SPaaS-Key, X-Correlation-ID, Baggage, Sentry-Trace, *");
   newHeaders.set("Access-Control-Expose-Headers", "X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After");
   newHeaders.set("Vary", "Origin");
 
