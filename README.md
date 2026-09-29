@@ -13,55 +13,43 @@ Designed from the ground up so smartphones, laptops, desktops, servers, NAS, and
 ## Architecture Overview
 
 ```
-                      +-----------------------------+
-                      |    Developer / CLI / UI     |
-                      +--------------+--------------+
-                                     |
-                                     v
-                      +-----------------------------+
-                      |   Ingress Gateway (8000)    |
-                      +--------------+--------------+
-                                     |
-                                     v
-                      +-----------------------------+
-                      |    Control Plane (8080)     |
-                      +--------------+--------------+
-                                     |
-              +----------------------+----------------------+
-              |                                             |
-              v                                             v
-  +-----------------------+                     +-----------------------+
-  |  Intelligent Edge     |                     |  Autonomous Recovery  |
-  |  Scheduler Core       |                     |  Reconciler Loop      |
-  +-----------+-----------+                     +-----------+-----------+
-              |                                             |
-              +----------------------+----------------------+
-                                     |
-                                     v
-               +-------------------------------------------+
-               |  Heterogeneous Edge Nodes (Voluntary)     |
-               |  - Real Android Node App (Foreground Svc) |
-               |  - Desktop / Server / NAS Agents          |
-               |  - Simulation Lab (1 to 1000+ Nodes)      |
-               +---------------------+---------------------+
-                                     |
-                                     v
-               +-------------------------------------------+
-               |  Sandboxed WebAssembly/WASI Runtime       |
-               |  - Fuel/Gas Metering (Deterministic)      |
-               |  - Linear Memory Ceiling (64MB)           |
-               |  - Watchdog Hard Timeout                  |
-               |  - Stdout/Stderr Buffer Quotas            |
-               +---------------------+---------------------+
-                                     |
-                                     v
-               +-------------------------------------------+
-               |  Verification & Metering Engine           |
-               |  - Ed25519 Result Signature Check         |
-               |  - Byzantine Quorum Consensus             |
-               |  - Idempotent Double-Entry Credit Ledger  |
-               +-------------------------------------------+
+                       SPaaS EDGE COMPUTE FABRIC
+
+       Consumer / Developer                  Device Provider
+                │                                  │
+                ▼                                  ▼
+        ┌───────────────┐                  ┌───────────────┐
+        │ Submit Task   │                  │ Android / PC  │
+        │ API / Web UI  │                  │ iOS / etc.    │
+        └───────┬───────┘                  └───────┬───────┘
+                │                                  │
+                ▼                                  ▼
+     ┌─────────────────────────────────────────────────────┐
+     │          Cloudflare Global Control Plane            │
+     │                                                     │
+     │ Enrollment │ Identity │ Fleet │ Job Queue │ Ledger │
+     │ Capabilities │ Policies │ Scheduler │ Verification │
+     └──────────────────────┬──────────────────────────────┘
+                            │
+                capability/policy matching
+                            │
+                ┌───────────┴───────────┐
+                ▼                       ▼
+         CPU/WASM Worker          Accelerated Worker
+         phone / laptop          GPU / NPU / media
+                │                       │
+                └───────────┬───────────┘
+                            ▼
+                Signed/verifiable result
+                            │
+                            ▼
+                  Metering / Test Credits
+
+           Cloud Run / Rust DR control plane
+                       standby
 ```
+
+For full subsystem specifications, interactive Mermaid graphs, and 12-state DAG protocol sequencing, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 

@@ -727,3 +727,56 @@ npm run build (apps/web-console)
 | **Provider Modes (`AUTO_ACCEPT`, `ASK_ME`, `PAUSED`)** | `PROVEN` | Subtest 23 verifies `OFFERED` state, `/offer/accept` lease grant, and `/offer/decline` rejection flow. Mobile UI implemented in Android app. |
 | **Strict Fleet Isolation (Physical vs Simulated)** | `PROVEN` | Subtest 23 proves `/api/v1/nodes?filter=physical` strictly excludes synthetic cluster nodes. |
 | **Hardware GPU/NPU Compute Acceleration** | `HARDWARE-REQUIRED` | Hardware presence flags (`has_gpu_vulkan`, `has_npu`) detected on physical Android device; full hardware compute shader execution requires physical device execution harness. |
+
+---
+
+## 5. System Architecture: SPaaS Edge Compute Fabric
+
+The global architectural model has been codified into [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`README.md`](README.md):
+
+```
+                       SPaaS EDGE COMPUTE FABRIC
+
+       Consumer / Developer                  Device Provider
+                │                                  │
+                ▼                                  ▼
+        ┌───────────────┐                  ┌───────────────┐
+        │ Submit Task   │                  │ Android / PC  │
+        │ API / Web UI  │                  │ iOS / etc.    │
+        └───────┬───────┘                  └───────┬───────┘
+                │                                  │
+                ▼                                  ▼
+     ┌─────────────────────────────────────────────────────┐
+     │          Cloudflare Global Control Plane            │
+     │                                                     │
+     │ Enrollment │ Identity │ Fleet │ Job Queue │ Ledger │
+     │ Capabilities │ Policies │ Scheduler │ Verification │
+     └──────────────────────┬──────────────────────────────┘
+                            │
+                capability/policy matching
+                            │
+                ┌───────────┴───────────┐
+                ▼                       ▼
+         CPU/WASM Worker          Accelerated Worker
+         phone / laptop          GPU / NPU / media
+                │                       │
+                └───────────┬───────────┘
+                            ▼
+                Signed/verifiable result
+                            │
+                            ▼
+                  Metering / Test Credits
+
+           Cloud Run / Rust DR control plane
+                       standby
+```
+
+This model unifies:
+1. **Consumer & Developer Ingress**: Workload submission via REST API, CLI, or Web Console.
+2. **Device Providers**: Heterogeneous enrollment of smartphones (Android/iOS), laptops, and edge hardware.
+3. **Cloudflare Global Control Plane**: Primary DO + SQLite orchestrator executing the 12-state DAG, Pareto scheduling, provider safety policies, and double-entry accounting.
+4. **Capability/Policy Matching**: Hard constraint validation + Pareto attribute scoring.
+5. **Tiered Workers**: Deterministic CPU/WASM sandboxes alongside GPU/NPU accelerated workers.
+6. **Settlement**: Cryptographically signed execution receipts driving idempotent test credits.
+7. **Disaster Recovery**: Dormant Google Cloud Run standby (`minScale: 0`) synchronized via epoch fencing tokens.
+

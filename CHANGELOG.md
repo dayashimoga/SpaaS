@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.3] - 2026-09-29
+
+### Added & Documented — SPaaS Edge Compute Fabric Architecture
+- **Unified Architecture Model (`docs/ARCHITECTURE.md`, `README.md`):** Integrated the authoritative SPaaS Edge Compute Fabric architectural diagram, Mermaid topology, and subsystem definitions:
+  - Consumer / Developer API & Web UI ingress vs. Device Provider (Android, PC, iOS) edge participation.
+  - Cloudflare Global Control Plane coordinating enrollment, identity, fleet telemetry, 12-state job queue DAG, double-entry ledger, dynamic capabilities, provider safety policies, Pareto multi-objective scheduler, and cryptographic verification.
+  - Multi-tiered compute workers: CPU/WASM sandboxes (smartphones/laptops) and accelerated workers (GPU/NPU/media).
+  - Cryptographically signed execution receipts driving idempotent test credits.
+  - Google Cloud Run / Rust disaster recovery control plane standby (`minScale: 0`) synchronized via monotonic epoch fencing tokens.
+
+---
+
 ## [0.3.2] - 2026-09-29
 
 ### Fixed & Implemented — 12-State Distributed Machine, Pareto Explainability & UX Overhaul
