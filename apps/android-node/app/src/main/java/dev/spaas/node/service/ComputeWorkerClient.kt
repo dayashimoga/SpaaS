@@ -4,7 +4,9 @@ import dev.spaas.node.history.LocalJobHistoryEntry
 import dev.spaas.node.history.LocalJobHistoryRepository
 import dev.spaas.node.monitor.DeviceTelemetryData
 import dev.spaas.node.policy.ProviderSafetyPolicy
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -492,11 +494,11 @@ object ComputeWorkerClient {
                             val offerWorkloadName = cmdObj.optString("workload_name", "Edge Compute Workload")
                             val estCredits = cmdObj.optDouble("estimated_credits", 10.0)
                             onJobOffered?.invoke(offerJobId, offerWorkloadName, estCredits, {
-                                kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                                CoroutineScope(Dispatchers.IO).launch {
                                     sendOfferAccept(nodeId, offerJobId)
                                 }
                             }, {
-                                kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                                CoroutineScope(Dispatchers.IO).launch {
                                     sendOfferDecline(nodeId, offerJobId)
                                 }
                             })
