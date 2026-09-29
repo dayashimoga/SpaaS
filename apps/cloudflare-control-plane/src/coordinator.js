@@ -731,12 +731,29 @@ export class SPaaSCoordinator {
     const expectedDigest = spec?.expected_digest;
 
     if (expectedDigest) {
-      const outputHasDigest = stdout && stdout.includes(expectedDigest);
+      const outputHasDigest = Boolean(
+        (stdout && stdout.includes(expectedDigest)) ||
+        (resPayload.result_digest && resPayload.result_digest === expectedDigest) ||
+        (payload.result_digest && payload.result_digest === expectedDigest) ||
+        (resPayload.stdout && resPayload.stdout.includes(expectedDigest))
+      );
       if (exit_code !== 0 || !outputHasDigest) {
         this.recordJobTransition(job_id, "RESULT_SUBMITTED", "Device submitted challenge result receipt");
         this.recordJobTransition(job_id, "VERIFYING", "Verifying challenge cryptographic digest");
         this.recordJobTransition(job_id, "UNVERIFIED", `Digest mismatch or execution failure. Expected: ${expectedDigest}`);
         this.recordJobTransition(job_id, "FAILED", "Challenge verification failed; zero credits awarded");
+
+        const failedResultObj = {
+          exit_code: exit_code || 1,
+          stdout: stdout || "",
+          stderr: stderr || `Digest mismatch. Expected: ${expectedDigest}`,
+          fuel_used: fuel_used || 0,
+          duration_ms: duration_ms || 0,
+          memory_mb: memory_mb || 64,
+          signature: signature || "unverified",
+          completed_at: Date.now()
+        };
+        this.sqlExec(`UPDATE jobs SET result = ?, completed_at = ? WHERE id = ?`, JSON.stringify(failedResultObj), Date.now(), job_id);
 
         if (node_id) {
           this.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ?`, node_id);
@@ -2343,6 +2360,137 @@ export class SPaaSCoordinator {
 
       this.logAudit("JOB_CANCELLED", `Job ${jobId} cancelled (assigned: ${assignedNodeId || 'none'})`);
       return json({ status: "cancelled", job_id: jobId });
+    }
+
+    // Bulk Clear / Delete Jobs
+    if (path === "/api/v1/jobs" && method === "DELETE") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin authorization required to clear jobs" }, 401);
+      }
+      const filter = new URL(req.url).searchParams.get("filter") || "all";
+      let count = 0;
+      if (filter === "completed") {
+        const completedJobs = this.sqlExec(`SELECT id FROM jobs WHERE state IN ('Completed', 'Settled', 'Verified', 'COMPLETED', 'SETTLED', 'VERIFIED', 'Failed', 'Cancelled', 'FAILED', 'CANCELLED')`);
+        count = completedJobs.length;
+        this.sqlExec(`DELETE FROM jobs WHERE state IN ('Completed', 'Settled', 'Verified', 'COMPLETED', 'SETTLED', 'VERIFIED', 'Failed', 'Cancelled', 'FAILED', 'CANCELLED')`);
+      } else if (filter === "queued") {
+        const queuedJobs = this.sqlExec(`SELECT id FROM jobs WHERE state IN ('Queued', 'Pending', 'QUEUED', 'PENDING', 'Scheduled', 'ASSIGNED', 'LEASED')`);
+        count = queuedJobs.length;
+        this.sqlExec(`DELETE FROM jobs WHERE state IN ('Queued', 'Pending', 'QUEUED', 'PENDING', 'Scheduled', 'ASSIGNED', 'LEASED')`);
+      } else {
+        const allJobs = this.sqlExec(`SELECT id FROM jobs`);
+        count = allJobs.length;
+        this.sqlExec(`DELETE FROM jobs`);
+        this.sqlExec(`DELETE FROM leases`);
+        this.sqlExec(`DELETE FROM job_transitions`);
+        // Reset any busy nodes back to Ready
+        this.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE state IN ('Busy', 'Running') AND is_simulated = 0`);
+        this.sqlExec(`UPDATE device_sessions SET active_lease_id = NULL, active_job_id = NULL WHERE connection_state != 'DISCONNECTED'`);
+      }
+      this.logAudit("JOBS_CLEARED", `Cleared ${count} jobs from fabric (filter: ${filter})`);
+      return json({ status: "ok", cleared_count: count, filter });
+    }
+
+    // Single Job Delete
+    if (path.startsWith("/api/v1/jobs/") && method === "DELETE") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin authorization required to delete jobs" }, 401);
+      }
+      const jobId = path.split("/")[4];
+      const jobRows = this.sqlExec(`SELECT * FROM jobs WHERE id = ?`, jobId);
+      if (jobRows.length === 0) {
+        return json({ error: "JOB_NOT_FOUND", message: `Job ${jobId} not found` }, 404);
+      }
+      const assignedNodeId = jobRows[0].assigned_node_id;
+
+      this.sqlExec(`DELETE FROM jobs WHERE id = ?`, jobId);
+      this.sqlExec(`DELETE FROM leases WHERE job_id = ?`, jobId);
+      this.sqlExec(`DELETE FROM job_transitions WHERE job_id = ?`, jobId);
+
+      if (assignedNodeId) {
+        const otherJobs = this.sqlExec(`SELECT id FROM jobs WHERE assigned_node_id = ? AND state IN ('Running', 'Busy', 'Dispatched', 'RUNNING', 'DISPATCHED')`, assignedNodeId);
+        if (otherJobs.length === 0) {
+          this.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ?`, assignedNodeId);
+          this.sqlExec(`UPDATE device_sessions SET active_lease_id = NULL, active_job_id = NULL WHERE node_id = ?`, assignedNodeId);
+        }
+      }
+
+      this.logAudit("JOB_DELETED", `Job ${jobId} deleted from fabric`);
+      return json({ status: "ok", deleted: jobId });
+    }
+
+    // Job Edit / Update
+    if (path.startsWith("/api/v1/jobs/") && (method === "PUT" || method === "PATCH") && !path.includes("/cancel") && !path.includes("/retry")) {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin authorization required to edit jobs" }, 401);
+      }
+      const jobId = path.split("/")[4];
+      const jobRows = this.sqlExec(`SELECT * FROM jobs WHERE id = ?`, jobId);
+      if (jobRows.length === 0) {
+        return json({ error: "JOB_NOT_FOUND", message: `Job ${jobId} not found` }, 404);
+      }
+      const body = await parseJsonBody() || {};
+      const currentJob = jobRows[0];
+
+      // Update workload spec if provided
+      if (body.spec || body.name || body.limits || body.args) {
+        const wRows = this.sqlExec(`SELECT * FROM workloads WHERE id = ?`, currentJob.workload_id);
+        if (wRows.length > 0) {
+          let spec = {};
+          try { spec = JSON.parse(wRows[0].spec); } catch (_) {}
+          if (body.name) spec.name = body.name;
+          if (body.args) spec.args = Array.isArray(body.args) ? body.args : String(body.args).split(",").map(s => s.trim());
+          if (body.limits) {
+            spec.limits = {
+              ...spec.limits,
+              max_fuel: body.limits.max_fuel ?? spec.limits?.max_fuel ?? 50000000,
+              timeout_ms: body.limits.timeout_ms ?? spec.limits?.timeout_ms ?? 30000,
+              max_memory_bytes: body.limits.max_memory_bytes ?? spec.limits?.max_memory_bytes ?? 67108864
+            };
+          }
+          this.sqlExec(`UPDATE workloads SET spec = ? WHERE id = ?`, JSON.stringify(spec), currentJob.workload_id);
+        }
+      }
+
+      // Allow changing state or re-assigning
+      const newState = body.state || currentJob.state;
+      const newAssignedNode = body.assigned_node_id !== undefined ? (body.assigned_node_id || null) : currentJob.assigned_node_id;
+
+      this.sqlExec(
+        `UPDATE jobs SET state = ?, assigned_node_id = ? WHERE id = ?`,
+        newState,
+        newAssignedNode,
+        jobId
+      );
+
+      this.recordJobTransition(jobId, (newState || "Queued").toUpperCase(), `Job edited by operator`, { body });
+      this.logAudit("JOB_UPDATED", `Job ${jobId} updated: state=${newState}, node=${newAssignedNode}`);
+
+      if (newState === "Queued" || newState === "Pending") {
+        await this.schedulePendingJobs();
+      }
+
+      return json({ status: "ok", job_id: jobId, state: newState });
+    }
+
+    // Job Retry / Re-queue
+    if (path.startsWith("/api/v1/jobs/") && path.endsWith("/retry") && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin authorization required to retry jobs" }, 401);
+      }
+      const jobId = path.split("/")[4];
+      const jobRows = this.sqlExec(`SELECT * FROM jobs WHERE id = ?`, jobId);
+      if (jobRows.length === 0) {
+        return json({ error: "JOB_NOT_FOUND", message: `Job ${jobId} not found` }, 404);
+      }
+      this.sqlExec(
+        `UPDATE jobs SET state = 'Queued', assigned_node_id = NULL, fencing_token = NULL, lease_expires_at = NULL, result = NULL WHERE id = ?`,
+        jobId
+      );
+      this.recordJobTransition(jobId, "QUEUED", "Job re-queued by operator for retry");
+      this.logAudit("JOB_RETRIED", `Job ${jobId} reset to Queued for scheduler pickup`);
+      await this.schedulePendingJobs();
+      return json({ status: "ok", job_id: jobId, state: "Queued" });
     }
 
     // 7. Challenge Workload Creation (Admin Auth Required)

@@ -349,6 +349,7 @@ function bootApp() {
   initSearchAndFilters();
   initSubTabs();
   initDeviceComparison();
+  initJobOperations();
 
   // Initial Fetch & Connect Live Event Stream
   refreshAllData();
@@ -1897,8 +1898,17 @@ function renderJobsTable(jobs) {
         <td>${j.retry_count || 0}</td>
         <td class="font-mono">${fuelUsed}</td>
         <td>${duration}</td>
-        <td>
-          <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); window.spaasSelectJob('${jobId}')">Details</button>
+        <td style="white-space: nowrap;">
+          <div style="display: flex; gap: 4px; align-items: center;">
+            <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); window.spaasSelectJob('${jobId}')" title="View Telemetry & Logs">Details</button>
+            <button class="btn btn-xs btn-primary" onclick="event.stopPropagation(); window.spaasEditJob('${jobId}')" title="Edit Parameters">Edit</button>
+            ${(state.toUpperCase() === 'QUEUED' || state.toUpperCase() === 'PENDING' || state.toUpperCase() === 'SCHEDULED' || state.toUpperCase() === 'RUNNING' || state.toUpperCase() === 'DISPATCHED' || state.toUpperCase() === 'ACKNOWLEDGED') ? `
+              <button class="btn btn-xs btn-warning" onclick="event.stopPropagation(); window.spaasCancelJob('${jobId}')" title="Cancel Execution">Cancel</button>
+            ` : `
+              <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); window.spaasRetryJob('${jobId}')" title="Re-queue / Retry">Retry</button>
+            `}
+            <button class="btn btn-xs btn-danger" onclick="event.stopPropagation(); window.spaasDeleteJob('${jobId}')" title="Remove Job">Delete</button>
+          </div>
         </td>
       </tr>
     `;
@@ -2010,6 +2020,126 @@ window.spaasSelectJob = function(jobId) {
   const detailsPanel = document.getElementById('job-details-panel');
   if (detailsPanel && currentTab === 'jobs') {
     detailsPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+};
+
+window.spaasEditJob = function(jobId) {
+  const job = cachedJobs.find(j => (j.job_id || j.id) === jobId);
+  if (!job) return showToast('Job not found.', 'error');
+  
+  const modal = document.getElementById('modal-edit-job');
+  if (!modal) return;
+
+  const idInput = document.getElementById('edit-job-id');
+  const idDisplay = document.getElementById('edit-job-id-display');
+  const nameInput = document.getElementById('edit-job-name');
+  const stateSelect = document.getElementById('edit-job-state');
+  const nodeSelect = document.getElementById('edit-job-node');
+  const fuelInput = document.getElementById('edit-job-fuel');
+  const timeoutInput = document.getElementById('edit-job-timeout');
+  const argsInput = document.getElementById('edit-job-args');
+
+  if (idInput) idInput.value = jobId;
+  if (idDisplay) idDisplay.value = jobId;
+  if (nameInput) nameInput.value = job.spec?.name || job.workload_id || 'workload';
+  if (stateSelect) stateSelect.value = job.state || 'Queued';
+  if (fuelInput) fuelInput.value = job.spec?.limits?.max_fuel || 50000000;
+  if (timeoutInput) timeoutInput.value = job.spec?.limits?.timeout_ms || 30000;
+  if (argsInput) argsInput.value = Array.isArray(job.spec?.args) ? job.spec.args.join(', ') : (job.spec?.args || '');
+
+  // Populate node dropdown with current nodes
+  if (nodeSelect) {
+    nodeSelect.innerHTML = '<option value="">Auto-Assign (Any Ready Node)</option>' +
+      cachedNodes.map(n => {
+        const nid = n.node_id || n.id;
+        const nname = n.name || n.capabilities?.device_model || nid.substring(0, 8);
+        const sel = job.assigned_node_id === nid ? 'selected' : '';
+        return `<option value="${nid}" ${sel}>${nname} (${nid.substring(0, 8)}... - ${n.state})</option>`;
+      }).join('');
+  }
+
+  modal.classList.remove('hidden');
+};
+
+window.spaasDeleteJob = async function(jobId) {
+  if (!confirm(`Are you sure you want to permanently delete job ${jobId.substring(0, 12)}?`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/jobs/${encodeURIComponent(jobId)}`, {
+      method: 'DELETE',
+      headers: authedHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${res.status}`);
+    }
+    showToast(`Job ${jobId.substring(0, 8)} successfully deleted.`, 'success');
+    if (selectedJob && (selectedJob.job_id || selectedJob.id) === jobId) {
+      selectedJob = null;
+    }
+    await fetchJobs();
+  } catch (err) {
+    console.error('Delete job error:', err);
+    showToast(`Failed to delete job: ${err.message}`, 'error');
+  }
+};
+
+window.spaasCancelJob = async function(jobId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: 'POST',
+      headers: authedHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${res.status}`);
+    }
+    showToast(`Job ${jobId.substring(0, 8)} cancelled.`, 'info');
+    await fetchJobs();
+  } catch (err) {
+    console.error('Cancel job error:', err);
+    showToast(`Failed to cancel job: ${err.message}`, 'error');
+  }
+};
+
+window.spaasRetryJob = async function(jobId) {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/jobs/${encodeURIComponent(jobId)}/retry`, {
+      method: 'POST',
+      headers: authedHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${res.status}`);
+    }
+    showToast(`Job ${jobId.substring(0, 8)} re-queued for execution!`, 'success');
+    await fetchJobs();
+    window.spaasSelectJob(jobId);
+  } catch (err) {
+    console.error('Retry job error:', err);
+    showToast(`Failed to retry job: ${err.message}`, 'error');
+  }
+};
+
+window.spaasClearJobs = async function(filter = 'all') {
+  const label = filter === 'completed' ? 'completed and failed jobs' : 'ALL jobs from the cluster queue';
+  if (!confirm(`Are you sure you want to clear ${label}? This cannot be undone.`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/jobs?filter=${encodeURIComponent(filter)}`, {
+      method: 'DELETE',
+      headers: authedHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    showToast(`Successfully cleared ${data.cleared_count || 0} jobs.`, 'success');
+    selectedJob = null;
+    await fetchJobs();
+    await fetchNodes();
+  } catch (err) {
+    console.error('Clear jobs error:', err);
+    showToast(`Failed to clear jobs: ${err.message}`, 'error');
   }
 };
 
@@ -2804,8 +2934,7 @@ async function submitCurrentWorkload() {
     const res = await fetch(`${API_BASE}/api/v1/jobs`, {
       method: 'POST',
       headers: authedHeaders({
-        'Content-Type': 'application/json',
-        'X-Correlation-ID': correlationId
+        'Content-Type': 'application/json'
       }),
       body: JSON.stringify({ ...payload, correlation_id: correlationId })
     });
@@ -3495,7 +3624,7 @@ function initDeviceControls() {
         btnRunChallenge.textContent = '⚡ Queued in scheduler…';
         const res = await fetch(`${API_BASE}/api/v1/nodes/${nodeId}/dispatch-challenge`, {
           method: 'POST',
-          headers: authedHeaders({ 'X-Correlation-ID': correlationId })
+          headers: authedHeaders()
         });
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -4008,6 +4137,124 @@ function initDeviceComparison() {
         </tbody>
       </table>
     `;
+  }
+}
+
+function initJobOperations() {
+  // Clear Queue button
+  const btnClearJobs = document.getElementById('btn-clear-jobs');
+  if (btnClearJobs) {
+    btnClearJobs.addEventListener('click', () => {
+      window.spaasClearJobs('all');
+    });
+  }
+
+  // Purge Completed button
+  const btnPurgeCompleted = document.getElementById('btn-purge-completed-jobs');
+  if (btnPurgeCompleted) {
+    btnPurgeCompleted.addEventListener('click', () => {
+      window.spaasClearJobs('completed');
+    });
+  }
+
+  // Job Details Action Bar buttons
+  const btnDetailEdit = document.getElementById('btn-detail-edit');
+  if (btnDetailEdit) {
+    btnDetailEdit.addEventListener('click', () => {
+      if (!selectedJob) return showToast('Please select a job first.', 'error');
+      window.spaasEditJob(selectedJob.job_id || selectedJob.id);
+    });
+  }
+
+  const btnDetailRetry = document.getElementById('btn-detail-retry');
+  if (btnDetailRetry) {
+    btnDetailRetry.addEventListener('click', () => {
+      if (!selectedJob) return showToast('Please select a job first.', 'error');
+      window.spaasRetryJob(selectedJob.job_id || selectedJob.id);
+    });
+  }
+
+  const btnDetailCancel = document.getElementById('btn-detail-cancel');
+  if (btnDetailCancel) {
+    btnDetailCancel.addEventListener('click', () => {
+      if (!selectedJob) return showToast('Please select a job first.', 'error');
+      window.spaasCancelJob(selectedJob.job_id || selectedJob.id);
+    });
+  }
+
+  const btnDetailDelete = document.getElementById('btn-detail-delete');
+  if (btnDetailDelete) {
+    btnDetailDelete.addEventListener('click', () => {
+      if (!selectedJob) return showToast('Please select a job first.', 'error');
+      window.spaasDeleteJob(selectedJob.job_id || selectedJob.id);
+    });
+  }
+
+  // Edit Job Modal bindings
+  const modalEdit = document.getElementById('modal-edit-job');
+  const btnModalEditClose = document.getElementById('modal-edit-job-close');
+  const btnModalEditCancel = document.getElementById('btn-modal-edit-close');
+  const btnModalEditDelete = document.getElementById('btn-modal-edit-delete');
+  const btnModalEditSave = document.getElementById('btn-modal-edit-save');
+
+  const closeEditModal = () => {
+    if (modalEdit) modalEdit.classList.add('hidden');
+  };
+
+  if (btnModalEditClose) btnModalEditClose.addEventListener('click', closeEditModal);
+  if (btnModalEditCancel) btnModalEditCancel.addEventListener('click', closeEditModal);
+
+  if (btnModalEditDelete) {
+    btnModalEditDelete.addEventListener('click', async () => {
+      const jobId = document.getElementById('edit-job-id')?.value;
+      if (!jobId) return;
+      closeEditModal();
+      await window.spaasDeleteJob(jobId);
+    });
+  }
+
+  if (btnModalEditSave) {
+    btnModalEditSave.addEventListener('click', async () => {
+      const jobId = document.getElementById('edit-job-id')?.value;
+      if (!jobId) return;
+      const name = document.getElementById('edit-job-name')?.value;
+      const state = document.getElementById('edit-job-state')?.value;
+      const assigned_node_id = document.getElementById('edit-job-node')?.value;
+      const max_fuel = parseInt(document.getElementById('edit-job-fuel')?.value, 10) || 50000000;
+      const timeout_ms = parseInt(document.getElementById('edit-job-timeout')?.value, 10) || 30000;
+      const argsRaw = document.getElementById('edit-job-args')?.value || '';
+      const args = argsRaw.split(',').map(s => s.trim()).filter(Boolean);
+
+      try {
+        btnModalEditSave.disabled = true;
+        btnModalEditSave.textContent = 'Saving...';
+        const res = await fetch(`${API_BASE}/api/v1/jobs/${encodeURIComponent(jobId)}`, {
+          method: 'PUT',
+          headers: authedHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            name,
+            state,
+            assigned_node_id: assigned_node_id || null,
+            limits: { max_fuel, timeout_ms },
+            args
+          })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || `HTTP ${res.status}`);
+        }
+        showToast(`Job ${jobId.substring(0, 8)} updated successfully!`, 'success');
+        closeEditModal();
+        await fetchJobs();
+        window.spaasSelectJob(jobId);
+      } catch (err) {
+        console.error('Update job error:', err);
+        showToast(`Failed to update job: ${err.message}`, 'error');
+      } finally {
+        btnModalEditSave.disabled = false;
+        btnModalEditSave.textContent = 'Save Changes';
+      }
+    });
   }
 }
 

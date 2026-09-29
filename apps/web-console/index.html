@@ -698,6 +698,8 @@
                   <option value="CANCELLED">Cancelled</option>
                 </select>
                 <button id="btn-quick-submit" class="btn btn-sm btn-primary">+ Submit Job</button>
+                <button id="btn-purge-completed-jobs" class="btn btn-sm btn-outline-cyan" title="Remove completed and failed jobs from queue">🧹 Purge Completed</button>
+                <button id="btn-clear-jobs" class="btn btn-sm btn-danger" style="background: rgba(239, 68, 68, 0.2); border-color: #ef4444; color: #fca5a5;" title="Clear all jobs and reset execution queue">🗑️ Clear Queue</button>
               </div>
             </div>
 
@@ -735,12 +737,20 @@
 
           <!-- Unified Job Details & Execution Logs Panel (6 Sub-tabs) -->
           <div class="card mt-4" id="job-details-panel">
-            <div class="card-header">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
               <div>
                 <h3>Job Details &amp; Execution Telemetry (<span id="detail-job-title">None Selected</span>)</h3>
                 <span id="detail-job-state-badge" class="badge badge-proven">SELECT JOB</span>
                 <span id="detail-job-evidence-badge" class="badge badge-simulated">SIMULATED</span>
               </div>
+              <div id="job-detail-action-bar" style="display: flex; gap: 6px; align-items: center;">
+                <button id="btn-detail-edit" class="btn btn-xs btn-primary">✏️ Edit Job</button>
+                <button id="btn-detail-retry" class="btn btn-xs btn-secondary">🔄 Re-queue</button>
+                <button id="btn-detail-cancel" class="btn btn-xs btn-warning">⏹️ Cancel</button>
+                <button id="btn-detail-delete" class="btn btn-xs btn-danger">🗑️ Delete</button>
+              </div>
+            </div>
+            <div class="card-header" style="padding-top: 0; border-top: none;">
               <div class="job-detail-subtabs">
                 <button class="subtab-btn active" data-jobtab="overview">Overview</button>
                 <button class="subtab-btn" data-jobtab="timeline">Lifecycle Timeline</button>
@@ -1647,8 +1657,68 @@
             <!-- Dynamic comparison content rendered by JS -->
           </div>
         </div>
-        <div class="modal-actions" style="border-top: 1px solid var(--border-color, #1e293b); padding: 0.875rem 1.25rem;">
-          <button type="button" id="btn-modal-compare-close" class="btn btn-secondary">Close</button>
+    <!-- Modal: Edit Job -->
+    <div id="modal-edit-job" class="modal-overlay hidden">
+      <div class="modal-card" style="max-width: 600px; width: 95%;">
+        <div class="modal-header">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span style="font-size: 1.5rem;">✏️</span>
+            <div>
+              <h2 style="margin: 0; font-size: 1.25rem;">Edit Execution Job</h2>
+              <span class="text-sub" style="font-size: 0.8rem;">Update workload parameters, gas fuel limits, timeout, and execution queue state</span>
+            </div>
+          </div>
+          <button id="modal-edit-job-close" class="modal-close-btn" title="Close">&times;</button>
+        </div>
+        <div class="modal-scroll-body" style="padding: 1.25rem;">
+          <form id="form-edit-job" onsubmit="event.preventDefault();">
+            <input type="hidden" id="edit-job-id" />
+            <div style="margin-bottom: 1rem;">
+              <label class="form-label" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Job ID:</label>
+              <input type="text" id="edit-job-id-display" class="input-control font-mono" readonly style="opacity: 0.7; cursor: not-allowed;" />
+            </div>
+            <div style="margin-bottom: 1rem;">
+              <label class="form-label" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Workload Name:</label>
+              <input type="text" id="edit-job-name" class="input-control font-bold text-cyan" placeholder="e.g. Cryptographic SHA-256 Benchmark" required />
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+              <div>
+                <label class="form-label" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Execution State:</label>
+                <select id="edit-job-state" class="input-control">
+                  <option value="Queued">Queued (Ready for Dispatch)</option>
+                  <option value="Pending">Pending (Needs Evaluation)</option>
+                  <option value="Cancelled">Cancelled (Halt Execution)</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Assigned Device:</label>
+                <select id="edit-job-node" class="input-control font-mono">
+                  <option value="">Auto-Assign (Any Ready Node)</option>
+                </select>
+              </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+              <div>
+                <label class="form-label" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Max Fuel (Gas Units):</label>
+                <input type="number" id="edit-job-fuel" class="input-control font-mono" min="100000" step="100000" value="50000000" />
+              </div>
+              <div>
+                <label class="form-label" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Timeout (ms):</label>
+                <input type="number" id="edit-job-timeout" class="input-control font-mono" min="1000" step="1000" value="30000" />
+              </div>
+            </div>
+            <div style="margin-bottom: 1rem;">
+              <label class="form-label" style="display: block; margin-bottom: 0.25rem; font-weight: 600;">Arguments (comma-separated):</label>
+              <input type="text" id="edit-job-args" class="input-control font-mono" placeholder="arg1, arg2, ..." />
+            </div>
+          </form>
+        </div>
+        <div class="modal-actions" style="border-top: 1px solid var(--border-color, #1e293b); padding: 0.875rem 1.25rem; display: flex; justify-content: space-between; align-items: center;">
+          <button type="button" id="btn-modal-edit-delete" class="btn btn-danger">🗑️ Delete Job</button>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" id="btn-modal-edit-close" class="btn btn-secondary">Cancel</button>
+            <button type="button" id="btn-modal-edit-save" class="btn btn-primary">Save Changes</button>
+          </div>
         </div>
       </div>
     </div>

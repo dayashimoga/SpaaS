@@ -511,6 +511,45 @@ function createMinimalFallbackEngine() {
         if (j) j.state = state;
         return [];
       }
+      if (qu.startsWith("DELETE FROM JOBS WHERE ID =")) {
+        tables.jobs.delete(params[0]);
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM JOBS WHERE STATE IN")) {
+        for (const [id, j] of tables.jobs.entries()) {
+          const s = (j.state || "").toUpperCase();
+          if (qu.includes("'COMPLETED'") && ['COMPLETED', 'SETTLED', 'VERIFIED', 'FAILED', 'CANCELLED'].includes(s)) {
+            tables.jobs.delete(id);
+          } else if (qu.includes("'QUEUED'") && ['QUEUED', 'PENDING', 'SCHEDULED', 'ASSIGNED', 'LEASED'].includes(s)) {
+            tables.jobs.delete(id);
+          }
+        }
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM JOBS")) {
+        tables.jobs.clear();
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM LEASES WHERE JOB_ID =")) {
+        for (const [id, l] of tables.leases.entries()) {
+          if (l.job_id === params[0]) tables.leases.delete(id);
+        }
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM LEASES")) {
+        tables.leases.clear();
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM JOB_TRANSITIONS WHERE JOB_ID =")) {
+        for (const [id, t] of tables.job_transitions.entries()) {
+          if (t.job_id === params[0]) tables.job_transitions.delete(id);
+        }
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM JOB_TRANSITIONS")) {
+        tables.job_transitions.clear();
+        return [];
+      }
       if (qu.startsWith("SELECT COUNT(*) AS COUNT FROM JOBS WHERE STATE IN")) {
         const count = Array.from(tables.jobs.values()).filter(j => j.state === "Running" || j.state === "RUNNING" || j.state === "Pending" || j.state === "QUEUED" || j.state === "DISPATCHED").length;
         return [{ count }];

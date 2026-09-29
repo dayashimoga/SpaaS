@@ -1671,5 +1671,105 @@ test("SPaaSCoordinator — Fleet Inventory, WebSocket Hibernation Full Lifecycle
   assert.equal(fRouteData.error, "COORDINATOR_DISPATCH_ERROR");
 });
 
+test("SPaaSCoordinator — Job Management: Edit, Retry, Delete & Bulk Clear", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+  coordinator.sqlExec(`INSERT INTO nodes (id, name, state, is_simulated) VALUES ('test-edit-node', 'Test Node', 'Ready', 0)`);
+
+  // 1. Submit a job
+  const submitRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        spec: { name: "Original Workload", limits: { max_fuel: 1000000, timeout_ms: 5000 } },
+        wasm_binary_base64: "AGFzbQEAAAABBQFgAAF/AwIBAAcQAQZtZW1vcnkCAAFfc3RhcnQAAAoGAQQAQcEA"
+      })
+    })
+  );
+  assert.equal(submitRes.status, 201);
+  const submitData = await submitRes.json();
+  const jobId = submitData.job_id;
+
+  // 2. Edit the job
+  const editRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/jobs/${jobId}`, {
+      method: "PUT",
+      headers: ADMIN_HEADERS,
+      body: JSON.stringify({
+        name: "Renamed Workload Spec",
+        state: "Queued",
+        limits: { max_fuel: 2500000, timeout_ms: 12000 }
+      })
+    })
+  );
+  assert.equal(editRes.status, 200);
+  const editData = await editRes.json();
+  assert.equal(editData.status, "ok");
+
+  // 3. Retry the job
+  const retryRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/jobs/${jobId}/retry`, {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(retryRes.status, 200);
+  const retryData = await retryRes.json();
+  assert.equal(retryData.status, "ok");
+  assert.equal(retryData.state, "Queued");
+
+  // 4. Delete the single job
+  const delRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/jobs/${jobId}`, {
+      method: "DELETE",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(delRes.status, 200);
+  const delData = await delRes.json();
+  assert.equal(delData.deleted, jobId);
+
+  // 5. Submit two more jobs and Bulk Clear
+  await coordinator.fetch(
+    new Request("http://localhost/api/v1/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        spec: { name: "Bulk Job 1" },
+        wasm_binary_base64: "AGFzbQEAAAABBQFgAAF/AwIBAAcQAQZtZW1vcnkCAAFfc3RhcnQAAAoGAQQAQcEA"
+      })
+    })
+  );
+  await coordinator.fetch(
+    new Request("http://localhost/api/v1/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        spec: { name: "Bulk Job 2" },
+        wasm_binary_base64: "AGFzbQEAAAABBQFgAAF/AwIBAAcQAQZtZW1vcnkCAAFfc3RhcnQAAAoGAQQAQcEA"
+      })
+    })
+  );
+
+  const clearRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/jobs?filter=all", {
+      method: "DELETE",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(clearRes.status, 200);
+  const clearData = await clearRes.json();
+  assert.equal(clearData.status, "ok");
+  assert.ok(clearData.cleared_count >= 2);
+
+  // Verify jobs queue is now 0
+  const jobsRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs"));
+  const jobsData = await jobsRes.json();
+  assert.equal(jobsData.total, 0);
+});
+
 
 
