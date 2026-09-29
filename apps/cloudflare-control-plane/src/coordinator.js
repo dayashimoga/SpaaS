@@ -194,11 +194,17 @@ export class SPaaSCoordinator {
         from_state TEXT,
         to_state TEXT NOT NULL,
         reason TEXT,
+        next_action TEXT,
         metadata TEXT,
         timestamp INTEGER NOT NULL
       );
     `);
     try { this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_job_transitions_job ON job_transitions(job_id);`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE job_transitions ADD COLUMN next_action TEXT;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE jobs ADD COLUMN wait_reason TEXT;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE jobs ADD COLUMN next_action TEXT;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE jobs ADD COLUMN progress_pct INTEGER DEFAULT 0;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE jobs ADD COLUMN stage_details TEXT;`); } catch (_) {}
 
     this.sqlExec(`
       CREATE TABLE IF NOT EXISTS leases (
@@ -287,7 +293,7 @@ export class SPaaSCoordinator {
         this.logAudit("JOB_RESCHEDULED", `Job ${job.id} lease expired; requeued for retry ${job.retry_count + 1}`);
       } else {
         this.sqlExec(
-          `UPDATE jobs SET completed_at = ? WHERE id = ?`,
+          `UPDATE jobs SET state = 'Failed', completed_at = ? WHERE id = ?`,
           now,
           job.id
         );
@@ -449,39 +455,70 @@ export class SPaaSCoordinator {
 
   /**
    * Authoritative Job Lifecycle State Machine Transitions
-   * CREATED -> QUEUED -> ASSIGNED -> LEASED -> DISPATCHED -> ACKNOWLEDGED -> RUNNING -> RESULT_SUBMITTED -> VERIFYING -> VERIFIED -> SETTLED -> COMPLETED
-   * Failure states: REJECTED / FAILED / CANCELLED / TIMED_OUT / LEASE_EXPIRED / DISCONNECTED / UNVERIFIED
+   * SUBMITTED -> QUEUED -> MATCHING -> OFFERED -> ASSIGNED -> LEASED -> DOWNLOADING -> EXECUTING -> UPLOADING -> VERIFYING -> SETTLED -> COMPLETED
+   * Failure/terminal states: REJECTED / FAILED / CANCELLED / TIMED_OUT / LEASE_EXPIRED / DISCONNECTED / UNVERIFIED / RETRYING
    */
-  recordJobTransition(jobId, toState, reason = "", metadata = {}) {
+  recordJobTransition(jobId, toState, reason = "", nextAction = "", metadata = {}) {
+    if (typeof nextAction === "object" && nextAction !== null && Object.keys(metadata).length === 0) {
+      metadata = nextAction;
+      nextAction = "";
+    }
+    const defaultNextAction = {
+      SUBMITTED: "Queuing in fabric scheduler",
+      QUEUED: "Matching candidate nodes against workload requirements",
+      MATCHING: "Evaluating candidate capability scores and policies",
+      OFFERED: "Awaiting provider acceptance on mobile node",
+      ASSIGNED: "Minting cryptographic lease and fencing token",
+      LEASED: "Dispatching payload via WebSocket or authenticated poll",
+      DISPATCHED: "Awaiting device artifact download and checksum validation",
+      DOWNLOADING: "Verifying artifact SHA-256 integrity",
+      ACKNOWLEDGED: "Initializing WebAssembly runtime sandbox",
+      RUNNING: "Executing sandboxed WASM instructions under fuel metering",
+      EXECUTING: "Executing sandboxed WASM instructions under fuel metering",
+      UPLOADING: "Submitting signed execution receipt and output digest",
+      RESULT_SUBMITTED: "Validating receipt signatures and output digest",
+      VERIFYING: "Validating receipt signatures and output digest",
+      VERIFIED: "Minting double-entry credit settlement transaction",
+      SETTLED: "Finalizing job completion",
+      COMPLETED: "Job execution finished successfully",
+      FAILED: "None (Execution failed)",
+      CANCELLED: "None (Job cancelled by operator)",
+      LEASE_EXPIRED: "Requeuing for retry or marking failed",
+      REJECTED: "Candidate excluded; requeuing job",
+      RETRYING: "Re-evaluating scheduler candidates for retry attempt"
+    }[toState] || "Processing next lifecycle step";
+
+    const effectiveNextAction = nextAction || defaultNextAction;
     const jobs = this.sqlExec(`SELECT state FROM jobs WHERE id = ?`, jobId);
     const fromState = jobs.length > 0 ? jobs[0].state : null;
     const now = Date.now();
 
     this.sqlExec(
-      `INSERT INTO job_transitions (job_id, from_state, to_state, reason, metadata, timestamp) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO job_transitions (job_id, from_state, to_state, reason, next_action, metadata, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       jobId,
       fromState,
       toState,
       reason,
+      effectiveNextAction,
       typeof metadata === "string" ? metadata : JSON.stringify(metadata),
       now
     );
 
-    this.sqlExec(`UPDATE jobs SET state = ? WHERE id = ?`, toState, jobId);
+    this.sqlExec(`UPDATE jobs SET state = ?, next_action = ? WHERE id = ?`, toState, effectiveNextAction, jobId);
     this.logAudit("JOB_TRANSITION", `Job ${jobId} transitioned: ${fromState || "NONE"} -> ${toState} (${reason})`);
   }
 
   /**
    * Multi-attribute scheduling algorithm: evaluates node hardware capabilities, thermals, and battery
+   * Enforces workload requirement filters, provider safety policies, Pareto scoring, and explainability.
    */
   async schedulePendingJobs() {
     if (this.fabricStatus === "PAUSED" || this.fabricStatus === "STOPPED") return;
 
-    const pendingJobs = this.sqlExec(`SELECT * FROM jobs WHERE state IN ('Pending', 'Queued') ORDER BY created_at ASC`);
+    const pendingJobs = this.sqlExec(`SELECT * FROM jobs WHERE state IN ('Pending', 'Queued', 'QUEUED', 'SUBMITTED') ORDER BY created_at ASC`);
     if (pendingJobs.length === 0) return;
 
     let readyNodes = this.sqlExec(`SELECT * FROM nodes WHERE state = 'Ready' AND is_simulated = 0`);
-    if (readyNodes.length === 0) return;
 
     const weights = {
       charging: 0.25,
@@ -494,59 +531,126 @@ export class SPaaSCoordinator {
     };
 
     for (const job of pendingJobs) {
-      if (readyNodes.length === 0) break;
+      // 1. Fetch workload spec to evaluate requirements
+      const wRows = this.sqlExec(`SELECT * FROM workloads WHERE id = ?`, job.workload_id);
+      let spec = null;
+      let rawWasm = null;
+      if (wRows.length > 0) {
+        try { spec = JSON.parse(wRows[0].spec); } catch (_) {}
+        rawWasm = wRows[0].wasm_bytes || null;
+      }
+      if (!spec) {
+        spec = {
+          name: job.workload_id || "SPaaS Edge Compute Workload",
+          artifact_uri: "",
+          limits: { max_fuel: 50000000, max_memory_bytes: 67108864, timeout_ms: 30000 },
+          args: []
+        };
+      }
+      if (rawWasm && (!spec.artifact_uri || spec.artifact_uri === "" || spec.artifact_uri.startsWith("inline:"))) {
+        spec.artifact_uri = `data:application/wasm;base64,${rawWasm}`;
+      }
 
-      // Score each ready candidate node per scheduler-core algorithm
-      const scoredCandidates = readyNodes.map(node => {
+      const reqCaps = spec.required_capabilities || {};
+      const minRamMb = reqCaps.min_ram_mb || 128;
+      const requireCharging = Boolean(reqCaps.require_charging);
+      const requireUnmetered = Boolean(reqCaps.require_unmetered_network);
+      const maxThermalLevel = (reqCaps.max_thermal_level || "MODERATE").toUpperCase();
+
+      // If no nodes are currently Ready in the cluster
+      if (readyNodes.length === 0) {
+        const totalEnrolled = this.sqlExec(`SELECT COUNT(*) as c FROM nodes WHERE is_simulated = 0`)[0]?.c || 0;
+        const busyCount = this.sqlExec(`SELECT COUNT(*) as c FROM nodes WHERE state IN ('Busy', 'Running') AND is_simulated = 0`)[0]?.c || 0;
+        const waitReason = totalEnrolled === 0
+          ? "No compute nodes currently enrolled in fabric"
+          : (busyCount > 0 ? `All enrolled compute nodes (${busyCount}) are currently busy executing workloads` : "Awaiting available Ready compute nodes");
+        this.sqlExec(`UPDATE jobs SET wait_reason = ? WHERE id = ?`, waitReason, job.id);
+        continue;
+      }
+
+      // 2. Filter candidates against workload requirements and node owner policies
+      const qualifyingCandidates = [];
+      const excludedCandidates = [];
+
+      for (const node of readyNodes) {
         let telemetry = {};
         try {
           telemetry = typeof node.telemetry === "string" ? JSON.parse(node.telemetry || "{}") : (node.telemetry || {});
         } catch (_) {}
 
-        // 1. Charging state
-        let chargingScore = 20.0;
+        let policy = {};
+        try {
+          policy = typeof node.policy === "string" ? JSON.parse(node.policy || "{}") : (node.policy || {});
+        } catch (_) {}
+
+        let caps = {};
+        try {
+          caps = typeof node.capabilities === "string" ? JSON.parse(node.capabilities || "{}") : (node.capabilities || {});
+        } catch (_) {}
+
         const cs = String(telemetry.charging_state || telemetry.charging || "").toLowerCase();
-        if (cs.includes("ac") || cs.includes("wireless") || cs === "full" || cs === "charging") {
-          chargingScore = 100.0;
-        } else if (cs.includes("usb")) {
-          chargingScore = 75.0;
+        const isCharging = cs.includes("ac") || cs.includes("wireless") || cs === "full" || cs === "charging" || cs.includes("usb");
+        const batteryPct = Number(telemetry.battery_pct ?? telemetry.battery_level ?? 100);
+        const nt = String(telemetry.network_type || "").toLowerCase();
+        const isUnmetered = nt === "ethernet" || nt.includes("wifi") || nt === "wifi_unmetered" || nt === "vpn";
+        const ts = String(telemetry.thermal_status || "NONE").toUpperCase();
+        const nodeRam = Number(caps.total_ram_mb || telemetry.available_ram_mb || 2048);
+
+        // Disqualification checks
+        let exclusionReason = null;
+        if (policy.is_user_paused || node.state === "Paused") {
+          exclusionReason = "Node is currently paused by device owner";
+        } else if (policy.only_while_charging && !isCharging) {
+          exclusionReason = "Owner policy requires charging connection; device is on battery";
+        } else if (requireCharging && !isCharging) {
+          exclusionReason = "Workload manifest requires charging connection; device is on battery";
+        } else if (policy.only_unmetered_network && !isUnmetered) {
+          exclusionReason = "Owner policy requires unmetered Wi-Fi/Ethernet; network is cellular";
+        } else if (requireUnmetered && !isUnmetered) {
+          exclusionReason = "Workload manifest requires unmetered network connection";
+        } else if (policy.min_battery_threshold_pct && batteryPct < policy.min_battery_threshold_pct) {
+          exclusionReason = `Battery (${batteryPct}%) below owner safety threshold (${policy.min_battery_threshold_pct}%)`;
+        } else if (reqCaps.min_battery_pct && batteryPct < reqCaps.min_battery_pct) {
+          exclusionReason = `Battery (${batteryPct}%) below workload required minimum (${reqCaps.min_battery_pct}%)`;
+        } else if (nodeRam < minRamMb) {
+          exclusionReason = `RAM (${nodeRam}MB) below workload requirement (${minRamMb}MB)`;
+        } else if (ts === "CRITICAL" || ts === "EMERGENCY") {
+          exclusionReason = `Device thermal state (${ts}) is critical; throttled for hardware safety`;
+        } else if (maxThermalLevel === "LIGHT" && (ts === "MODERATE" || ts === "SEVERE")) {
+          exclusionReason = `Thermal state (${ts}) exceeds workload ceiling (${maxThermalLevel})`;
         }
 
-        // 2. Battery percentage
-        const batteryPct = Number(telemetry.battery_pct ?? telemetry.battery_level ?? 100);
-        const batteryScore = Math.max(0, Math.min(100, batteryPct));
+        if (exclusionReason) {
+          excludedCandidates.push({
+            node_id: node.id,
+            node_name: node.name,
+            reason: exclusionReason
+          });
+          continue;
+        }
 
-        // 3. Thermal headroom
+        // Candidate qualifies — compute Pareto score
+        let chargingScore = isCharging ? (cs.includes("ac") || cs.includes("wireless") ? 100.0 : 75.0) : 25.0;
+        let batteryScore = Math.max(0, Math.min(100, batteryPct));
         let thermalScore = 100.0;
-        const ts = String(telemetry.thermal_status || "").toLowerCase();
-        if (ts === "light") thermalScore = 80.0;
-        else if (ts === "moderate") thermalScore = 40.0;
-        else if (ts === "severe") thermalScore = 10.0;
-        else if (ts === "critical" || ts === "emergency") thermalScore = 0.0;
+        if (ts === "LIGHT") thermalScore = 80.0;
+        else if (ts === "MODERATE") thermalScore = 50.0;
+        else if (ts === "SEVERE") thermalScore = 15.0;
         else if (telemetry.temperature_c !== undefined) {
           if (telemetry.temperature_c > 45) thermalScore = 10.0;
-          else if (telemetry.temperature_c > 38) thermalScore = 40.0;
-          else if (telemetry.temperature_c > 32) thermalScore = 80.0;
+          else if (telemetry.temperature_c > 38) thermalScore = 50.0;
+          else if (telemetry.temperature_c > 32) thermalScore = 85.0;
         }
 
-        // 4. Network quality
-        let networkScore = 10.0;
-        const nt = String(telemetry.network_type || "").toLowerCase();
+        let networkScore = 70.0;
         if (nt === "ethernet") networkScore = 100.0;
         else if (nt.includes("wifi")) networkScore = 90.0;
-        else if (nt === "vpn") networkScore = 50.0;
-        else if (nt.includes("cellular")) networkScore = 30.0;
-        else networkScore = 70.0;
+        else if (nt.includes("cellular")) networkScore = 40.0;
 
-        // 5. Reliability score
         const relRaw = Number(telemetry.reliability_score ?? 1.0);
         const relScore = Math.max(0, Math.min(100, relRaw <= 1.0 ? relRaw * 100 : relRaw));
-
-        // 6. Latency score
-        const ping = Number(telemetry.round_trip_ping_ms ?? 50);
+        const ping = Number(telemetry.round_trip_ping_ms ?? 35);
         const latencyScore = Math.max(0, Math.min(100, 100 - ping));
-
-        // 7. Load penalty
         const loadPenalty = Math.max(0, Math.min(100, Number(telemetry.cpu_usage_pct ?? 0)));
 
         const compositeScore = (chargingScore * weights.charging)
@@ -557,8 +661,9 @@ export class SPaaSCoordinator {
           + (latencyScore * weights.latency)
           - (loadPenalty * weights.load);
 
-        return {
+        qualifyingCandidates.push({
           node,
+          policy,
           score: Math.max(0, compositeScore),
           breakdown: {
             charging: chargingScore,
@@ -568,14 +673,24 @@ export class SPaaSCoordinator {
             reliability: relScore,
             ping
           }
-        };
-      });
+        });
+      }
 
-      scoredCandidates.sort((a, b) => b.score - a.score);
-      const best = scoredCandidates[0];
+      // If no candidates qualified for this specific workload
+      if (qualifyingCandidates.length === 0) {
+        const topExclusion = excludedCandidates[0]?.reason || "No available node passed capability and policy checks";
+        const waitReason = `Waiting for suitable node: ${topExclusion}`;
+        this.sqlExec(`UPDATE jobs SET wait_reason = ? WHERE id = ?`, waitReason, job.id);
+        continue;
+      }
+
+      // 3. Select best qualifying candidate
+      qualifyingCandidates.sort((a, b) => b.score - a.score);
+      const best = qualifyingCandidates[0];
       const selectedNode = best.node;
+      const selectedPolicy = best.policy;
 
-      // Remove selected node from candidates for subsequent jobs
+      // Remove selected node from available pool for subsequent jobs in this tick
       readyNodes = readyNodes.filter(n => n.id !== selectedNode.id);
 
       const now = Date.now();
@@ -589,12 +704,59 @@ export class SPaaSCoordinator {
         selected_node_name: selectedNode.name,
         score: Math.round(best.score * 100) / 100,
         score_breakdown: best.breakdown,
-        rationale: `Selected ${selectedNode.name} (composite score: ${best.score.toFixed(2)}) based on capability score, thermal headroom, and low network latency.`,
-        candidates_evaluated: scoredCandidates.length,
+        rationale: `Selected ${selectedNode.name} (composite score: ${best.score.toFixed(2)}) based on capability profile, thermal headroom, and low network latency.`,
+        candidates_evaluated: qualifyingCandidates.length + excludedCandidates.length,
+        qualifying_count: qualifyingCandidates.length,
+        excluded_candidates: excludedCandidates,
         epoch: this.epoch
       };
 
-      // Authoritative lifecycle: Pending/Queued → ASSIGNED → LEASED → DISPATCHED
+      const providerMode = (selectedPolicy.provider_mode || selectedPolicy.mode || "AUTO_ACCEPT").toUpperCase();
+
+      this.recordJobTransition(job.id, "MATCHING", `Matched node ${selectedNode.name} (${selectedNode.id}) with score ${best.score.toFixed(1)}`, {
+        nodeId: selectedNode.id,
+        score: best.score,
+        rationale: decision.rationale
+      });
+
+      // Clear wait_reason upon successful match
+      this.sqlExec(`UPDATE jobs SET wait_reason = NULL WHERE id = ?`, job.id);
+
+      // Handle ASK_ME provider control mode
+      if (providerMode === "ASK_ME") {
+        this.sqlExec(
+          `UPDATE jobs SET state = 'OFFERED', assigned_node_id = ?, fencing_token = ?, lease_expires_at = ?, scheduler_decision = ?, correlation_id = COALESCE(correlation_id, ?) WHERE id = ?`,
+          selectedNode.id,
+          fencingToken,
+          leaseExpiresAt,
+          JSON.stringify(decision),
+          correlationId,
+          job.id
+        );
+        this.recordJobTransition(job.id, "OFFERED", `Workload offered to provider on node ${selectedNode.id} awaiting acceptance`, {
+          nodeId: selectedNode.id,
+          leaseId,
+          fencingToken
+        });
+        this.sqlExec(
+          `INSERT INTO node_commands (id, node_id, command, created_at) VALUES (?, ?, ?, ?)`,
+          crypto.randomUUID(),
+          selectedNode.id,
+          JSON.stringify({
+            action: "offer_job",
+            job_id: job.id,
+            workload_id: job.workload_id,
+            workload_name: spec?.name || "Edge Compute Workload",
+            limits: spec?.limits || {},
+            estimated_credits: 10.0
+          }),
+          now
+        );
+        this.logAudit("JOB_OFFERED", `Job ${job.id} offered to node ${selectedNode.id} in ASK_ME mode`);
+        continue;
+      }
+
+      // Default AUTO_ACCEPT mode: ASSIGNED -> LEASED -> DISPATCHED
       this.recordJobTransition(job.id, "ASSIGNED", `Scheduler assigned to node ${selectedNode.id}`, { nodeId: selectedNode.id, score: best.score });
 
       this.sqlExec(
@@ -644,11 +806,6 @@ export class SPaaSCoordinator {
         try {
           const sockets = this.ctx.getWebSockets(selectedNode.id);
           if (sockets && sockets.length > 0) {
-            const wRows = this.sqlExec(`SELECT * FROM workloads WHERE id = ?`, job.workload_id);
-            let spec = null;
-            if (wRows.length > 0) {
-              try { spec = JSON.parse(wRows[0].spec); } catch (_) {}
-            }
             sockets[0].send(JSON.stringify({
               type: "JobDispatch",
               job_id: job.id,
@@ -659,7 +816,7 @@ export class SPaaSCoordinator {
               epoch: this.epoch,
               lease_expires_at: leaseExpiresAt,
               spec,
-              wasm_bytes: wRows[0]?.wasm_bytes || null
+              wasm_bytes: rawWasm
             }));
           }
         } catch (_) {}
@@ -760,7 +917,7 @@ export class SPaaSCoordinator {
           actual_digest: digestFromResultField,
           completed_at: Date.now()
         };
-        this.sqlExec(`UPDATE jobs SET result = ?, completed_at = ? WHERE id = ?`, JSON.stringify(failedResultObj), Date.now(), job_id);
+        this.sqlExec(`UPDATE jobs SET state = 'Failed', result = ?, completed_at = ? WHERE id = ?`, JSON.stringify(failedResultObj), Date.now(), job_id);
 
         if (node_id) {
           this.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ?`, node_id);
@@ -790,10 +947,32 @@ export class SPaaSCoordinator {
       completed_at: now
     };
 
+    // Check for execution trap or unhandled panic in generic compute workloads
+    if (!expectedDigest && exit_code !== 0 && stderr && (stderr.toLowerCase().includes("trap") || stderr.toLowerCase().includes("panic") || stderr.toLowerCase().includes("exception"))) {
+      this.recordJobTransition(job_id, "RESULT_SUBMITTED", "Device submitted execution receipt with trapped status", "Inspect error code and log");
+      this.recordJobTransition(job_id, "VERIFYING", "Validating execution exit code and stderr", "Inspect error details");
+      this.recordJobTransition(job_id, "FAILED", `Execution trapped with exit code ${exit_code}: ${stderr.substring(0, 100)}`, "None");
+
+      resultObj.verification_status = "EXECUTION_ERROR";
+      this.sqlExec(`UPDATE jobs SET state = 'Failed', result = ?, completed_at = ? WHERE id = ?`, JSON.stringify(resultObj), now, job_id);
+
+      if (node_id) {
+        this.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ?`, node_id);
+        this.sqlExec(`UPDATE device_sessions SET active_lease_id = NULL, active_job_id = NULL, updated_at = ? WHERE node_id = ?`, now, node_id);
+      }
+      return {
+        status: "rejected",
+        reason: "EXECUTION_ERROR",
+        job_id,
+        exit_code,
+        stderr
+      };
+    }
+
     // Authoritative state transitions: RUNNING -> RESULT_SUBMITTED -> VERIFYING -> VERIFIED -> SETTLED -> COMPLETED
-    this.recordJobTransition(job_id, "RESULT_SUBMITTED", "Device submitted execution receipt");
-    this.recordJobTransition(job_id, "VERIFYING", "Validating receipt signatures and output digest");
-    this.recordJobTransition(job_id, "VERIFIED", "Execution receipt and output cryptographically verified");
+    this.recordJobTransition(job_id, "RESULT_SUBMITTED", "Device submitted execution receipt", "Validating receipt signatures and output digest");
+    this.recordJobTransition(job_id, "VERIFYING", "Validating receipt signatures and output digest", "Execute double-entry ledger settlement");
+    this.recordJobTransition(job_id, "VERIFIED", "Execution receipt and output cryptographically verified", "Execute double-entry ledger settlement");
 
     // Dynamic credit calculation (base + fuel fee) with paired double-entry ledger
     const amountCredits = Number((10.0 + (actualFuel / 25000)).toFixed(4));
@@ -859,7 +1038,7 @@ export class SPaaSCoordinator {
     // Terminal transition: COMPLETED
     this.recordJobTransition(job_id, "COMPLETED", "Job lifecycle successfully terminated");
     this.sqlExec(
-      `UPDATE jobs SET result = ?, completed_at = ? WHERE id = ?`,
+      `UPDATE jobs SET state = 'COMPLETED', result = ?, completed_at = ? WHERE id = ?`,
       JSON.stringify(resultObj),
       now,
       job_id
@@ -1456,8 +1635,9 @@ export class SPaaSCoordinator {
 
     // 5. Node Management & Operational Controls
     if (path === "/api/v1/nodes" && method === "GET") {
+      const filterParam = url.searchParams.get("filter")?.toLowerCase();
       const nodes = this.sqlExec(`SELECT * FROM nodes ORDER BY created_at DESC`);
-      const parsed = nodes.map(n => {
+      let parsed = nodes.map(n => {
         let caps = null;
         try { caps = n.capabilities ? JSON.parse(n.capabilities) : null; } catch (_) {}
         let tel = null;
@@ -1484,6 +1664,13 @@ export class SPaaSCoordinator {
           policy: n.policy ? JSON.parse(n.policy) : null
         };
       });
+      if (filterParam === "physical") {
+        parsed = parsed.filter(n => !n.is_simulated);
+      } else if (filterParam === "simulated") {
+        parsed = parsed.filter(n => n.is_simulated);
+      } else if (filterParam === "ready") {
+        parsed = parsed.filter(n => n.state === 'Ready');
+      }
       return json({ nodes: parsed, total: parsed.length });
     }
 
@@ -1668,21 +1855,18 @@ export class SPaaSCoordinator {
 
       const wRows = this.sqlExec(`SELECT * FROM workloads WHERE id = ?`, j.workload_id);
       let spec = null;
+      let rawWasm = null;
       let wasmBytes = null;
       if (wRows.length > 0) {
         try { spec = JSON.parse(wRows[0].spec); } catch (_) {}
-        if (wRows[0].wasm_bytes) {
-          const rawWasm = wRows[0].wasm_bytes;
+        rawWasm = wRows[0].wasm_bytes;
+        if (rawWasm) {
           try {
             const parsed = JSON.parse(rawWasm);
             if (Array.isArray(parsed)) {
               wasmBytes = parsed;
             }
-          } catch (_) {
-            if (spec && (!spec.artifact_uri || spec.artifact_uri === "")) {
-              spec.artifact_uri = `data:application/wasm;base64,${rawWasm}`;
-            }
-          }
+          } catch (_) {}
         }
       }
       if (!spec) {
@@ -1697,14 +1881,19 @@ export class SPaaSCoordinator {
           args: []
         };
       }
+      if (rawWasm && (!spec.artifact_uri || spec.artifact_uri === "" || spec.artifact_uri.startsWith("inline:"))) {
+        spec.artifact_uri = `data:application/wasm;base64,${rawWasm}`;
+      }
+      const leaseRows = this.sqlExec(`SELECT lease_id FROM leases WHERE job_id = ? ORDER BY created_at DESC LIMIT 1`, j.id);
+      const leaseId = leaseRows.length > 0 ? leaseRows[0].lease_id : (j.fencing_token || `lease_${j.id}`);
       const jobPayload = {
         ...j,
         job_id: j.id,
         correlation_id: j.correlation_id || `corr_${j.id}`,
-        lease_id: j.fencing_token || `lease_${j.id}`,
+        lease_id: leaseId,
         fencing_token: j.fencing_token,
         spec,
-        wasm_bytes: wasmBytes
+        wasm_bytes: wasmBytes || rawWasm || null
       };
       return json({ job: jobPayload });
     }
@@ -1750,6 +1939,165 @@ export class SPaaSCoordinator {
       }
 
       return json({ status: "ok", job_id: jobId, state: "RUNNING" });
+    }
+
+    // Explicit Device Rejection Endpoint (Handles artifact mismatch, memory/fuel limits, or owner policy violations)
+    if ((path === "/api/v1/nodes/reject" || (path.startsWith("/api/v1/nodes/") && path.endsWith("/reject")) || (path.startsWith("/api/v1/jobs/") && path.endsWith("/reject"))) && method === "POST") {
+      const body = await parseJsonBody();
+      const pathNodeId = path.startsWith("/api/v1/nodes/") ? path.split("/")[4] : null;
+      const nodeId = body?.node_id || pathNodeId;
+      const jobId = body?.job_id || (path.startsWith("/api/v1/jobs/") ? path.split("/")[4] : null);
+      const reason = body?.reason || "Execution rejected by device";
+
+      if (!body || !jobId) return json({ error: "BAD_REQUEST", message: "job_id is required" }, 400);
+
+      const authResult = this.verifyDeviceAuth(req, body, nodeId);
+      if (authResult === "REVOKED") return json({ error: "DEVICE_REVOKED" }, 403);
+      if (!authResult) return json({ error: "DEVICE_UNAUTHORIZED" }, 401);
+
+      this.recordJobTransition(jobId, "REJECTED", reason, { nodeId, reason });
+      this.sqlExec(`UPDATE leases SET state = 'REJECTED' WHERE job_id = ? AND state = 'ACTIVE'`, jobId);
+
+      // Cleanly reset assigned node state to Ready if it was Busy
+      if (nodeId) {
+        this.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ?`, nodeId);
+        this.sqlExec(`UPDATE device_sessions SET active_lease_id = NULL, active_job_id = NULL, updated_at = ? WHERE node_id = ?`, Date.now(), nodeId);
+      }
+
+      const jRows = this.sqlExec(`SELECT retry_count, max_retries FROM jobs WHERE id = ?`, jobId);
+      if (jRows.length > 0 && jRows[0].retry_count < jRows[0].max_retries) {
+        this.sqlExec(`UPDATE jobs SET state = 'QUEUED', assigned_node_id = NULL, lease_expires_at = NULL, retry_count = retry_count + 1 WHERE id = ?`, jobId);
+        this.recordJobTransition(jobId, "RETRYING", `Requeued for retry (${jRows[0].retry_count + 1}/${jRows[0].max_retries})`);
+      } else {
+        this.sqlExec(`UPDATE jobs SET state = 'FAILED', completed_at = ? WHERE id = ?`, Date.now(), jobId);
+        this.recordJobTransition(jobId, "FAILED", `Exhausted retries following device rejection: ${reason}`);
+      }
+
+      this.logAudit("JOB_REJECTED", `Job ${jobId} rejected by node ${nodeId}: ${reason}`);
+      return json({ status: "ok", job_id: jobId, state: "REJECTED", reason });
+    }
+
+    // Device Progress Endpoint (DOWNLOADING -> EXECUTING -> UPLOADING)
+    if ((path === "/api/v1/nodes/progress" || (path.startsWith("/api/v1/nodes/") && path.endsWith("/progress")) || (path.startsWith("/api/v1/jobs/") && path.endsWith("/progress"))) && method === "POST") {
+      const body = await parseJsonBody();
+      const pathNodeId = path.startsWith("/api/v1/nodes/") ? path.split("/")[4] : null;
+      const nodeId = body?.node_id || pathNodeId;
+      const jobId = body?.job_id || (path.startsWith("/api/v1/jobs/") ? path.split("/")[4] : null);
+      const progressPct = Math.max(0, Math.min(100, Number(body?.progress_pct || 0)));
+      const stage = (body?.stage || "EXECUTING").toUpperCase();
+      const details = body?.details || `Progress ${progressPct}%`;
+
+      if (!body || !jobId) return json({ error: "BAD_REQUEST", message: "job_id is required" }, 400);
+
+      const authResult = this.verifyDeviceAuth(req, body, nodeId);
+      if (authResult === "REVOKED") return json({ error: "DEVICE_REVOKED" }, 403);
+      if (!authResult) return json({ error: "DEVICE_UNAUTHORIZED" }, 401);
+
+      this.sqlExec(`UPDATE jobs SET progress_pct = ?, stage_details = ? WHERE id = ?`, progressPct, details, jobId);
+      if (["DOWNLOADING", "EXECUTING", "UPLOADING"].includes(stage)) {
+        this.recordJobTransition(jobId, stage, details, { progressPct, nodeId });
+      }
+
+      return json({ status: "ok", job_id: jobId, progress_pct: progressPct, stage });
+    }
+
+    // Device Offer Accept Endpoint (OFFERED -> ASSIGNED -> LEASED -> DISPATCHED)
+    if ((path === "/api/v1/nodes/offer/accept" || (path.startsWith("/api/v1/nodes/") && path.endsWith("/offer/accept"))) && method === "POST") {
+      const body = await parseJsonBody();
+      const pathNodeId = path.startsWith("/api/v1/nodes/") ? path.split("/")[4] : null;
+      const nodeId = body?.node_id || pathNodeId;
+      const jobId = body?.job_id;
+
+      if (!body || !jobId) return json({ error: "BAD_REQUEST", message: "job_id is required" }, 400);
+
+      const authResult = this.verifyDeviceAuth(req, body, nodeId);
+      if (authResult === "REVOKED") return json({ error: "DEVICE_REVOKED" }, 403);
+      if (!authResult) return json({ error: "DEVICE_UNAUTHORIZED" }, 401);
+
+      const now = Date.now();
+      const leaseId = "lease_" + crypto.randomUUID().replace(/-/g, "").substring(0, 12);
+      const fencingToken = crypto.randomUUID();
+      const leaseExpiresAt = now + 60000;
+
+      this.sqlExec(
+        `INSERT INTO leases (lease_id, job_id, node_id, fencing_token, epoch, expires_at, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        leaseId, jobId, nodeId, fencingToken, this.epoch, leaseExpiresAt, "ACTIVE", now
+      );
+      this.sqlExec(
+        `UPDATE jobs SET state = 'DISPATCHED', assigned_node_id = ?, fencing_token = ?, lease_expires_at = ? WHERE id = ?`,
+        nodeId, fencingToken, leaseExpiresAt, jobId
+      );
+      this.sqlExec(`UPDATE nodes SET state = 'Busy' WHERE id = ?`, nodeId);
+
+      this.recordJobTransition(jobId, "ASSIGNED", `Offer accepted by provider on node ${nodeId}`, { nodeId });
+      this.recordJobTransition(jobId, "LEASED", `Lease granted: ${leaseId}`, { leaseId, fencingToken, leaseExpiresAt });
+      this.recordJobTransition(jobId, "DISPATCHED", "Job dispatched following offer acceptance", { leaseId, fencingToken });
+
+      return json({ status: "ok", job_id: jobId, state: "DISPATCHED", lease_id: leaseId, fencing_token: fencingToken });
+    }
+
+    // Device Offer Decline Endpoint (OFFERED -> REJECTED -> QUEUED)
+    if ((path === "/api/v1/nodes/offer/decline" || (path.startsWith("/api/v1/nodes/") && path.endsWith("/offer/decline"))) && method === "POST") {
+      const body = await parseJsonBody();
+      const pathNodeId = path.startsWith("/api/v1/nodes/") ? path.split("/")[4] : null;
+      const nodeId = body?.node_id || pathNodeId;
+      const jobId = body?.job_id;
+      const reason = body?.reason || "Provider declined workload offer";
+
+      if (!body || !jobId) return json({ error: "BAD_REQUEST", message: "job_id is required" }, 400);
+
+      const authResult = this.verifyDeviceAuth(req, body, nodeId);
+      if (authResult === "REVOKED") return json({ error: "DEVICE_REVOKED" }, 403);
+      if (!authResult) return json({ error: "DEVICE_UNAUTHORIZED" }, 401);
+
+      this.recordJobTransition(jobId, "REJECTED", reason, { nodeId });
+      this.sqlExec(`UPDATE jobs SET state = 'QUEUED', assigned_node_id = NULL, lease_expires_at = NULL, wait_reason = ? WHERE id = ?`,
+        `Declined by ${nodeId}: ${reason}`, jobId);
+      if (nodeId) {
+        this.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ?`, nodeId);
+      }
+
+      this.logAudit("OFFER_DECLINED", `Job ${jobId} offer declined by node ${nodeId}: ${reason}`);
+      return json({ status: "ok", job_id: jobId, state: "QUEUED", reason });
+    }
+
+    // Bulk Fleet Management Operations (Admin Auth Required)
+    if (path === "/api/v1/nodes/bulk-action" && method === "POST") {
+      if (!this.verifyAdminAuth(req)) {
+        return json({ error: "UNAUTHORIZED", message: "Admin authorization required" }, 401);
+      }
+      const body = await parseJsonBody();
+      if (!body || !body.action || !Array.isArray(body.node_ids)) {
+        return json({ error: "BAD_REQUEST", message: "action and node_ids array required" }, 400);
+      }
+      const { action, node_ids, params } = body;
+      let count = 0;
+      for (const nid of node_ids) {
+        if (action === "pause") {
+          this.sqlExec(`UPDATE nodes SET state = 'Paused' WHERE id = ?`, nid);
+          count++;
+        } else if (action === "resume") {
+          this.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ? AND state != 'Revoked'`, nid);
+          count++;
+        } else if (action === "rebenchmark" || action === "qualify") {
+          count++;
+        } else if (action === "set-policy") {
+          if (params?.policy) {
+            this.sqlExec(`UPDATE nodes SET policy = ? WHERE id = ?`, JSON.stringify(params.policy), nid);
+            count++;
+          }
+        } else if (action === "revoke") {
+          this.sqlExec(`UPDATE nodes SET state = 'Revoked' WHERE id = ?`, nid);
+          this.sqlExec(`UPDATE jobs SET state = 'QUEUED', assigned_node_id = NULL WHERE assigned_node_id = ? AND state IN ('Running', 'Busy', 'DISPATCHED')`, nid);
+          count++;
+        } else if (action === "delete") {
+          this.sqlExec(`DELETE FROM nodes WHERE id = ?`, nid);
+          this.sqlExec(`UPDATE jobs SET state = 'QUEUED', assigned_node_id = NULL WHERE assigned_node_id = ? AND state IN ('Running', 'Busy', 'DISPATCHED')`, nid);
+          count++;
+        }
+      }
+      this.logAudit("BULK_ACTION", `Bulk ${action} executed on ${count} node(s)`);
+      return json({ status: "ok", action, affected_count: count });
     }
 
     // Node Safety Policy Configuration
@@ -1798,7 +2146,7 @@ export class SPaaSCoordinator {
         correlation_id: job.correlation_id,
         node_id: job.assigned_node_id,
         node,
-        job_state: job.state,
+        job_state: (job.state === "Completed" || job.state === "COMPLETED") ? "COMPLETED" : job.state,
         fencing_token: job.fencing_token,
         lease_expires_at: job.lease_expires_at,
         created_at: job.created_at,
@@ -2031,13 +2379,13 @@ export class SPaaSCoordinator {
         epoch: this.epoch
       };
 
-      // Transactional Job Creation with initial QUEUED state
+      // Transactional Job Creation with initial DISPATCHED state
       this.sqlExec(
         `INSERT INTO jobs (id, workload_id, state, assigned_node_id, lease_term, lease_expires_at, epoch, fencing_token, retry_count, max_retries, scheduler_decision, correlation_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         jobId,
         workloadId,
-        "Queued",
+        "Dispatched",
         nodeId,
         1,
         leaseExpiresAt,
@@ -2261,18 +2609,20 @@ export class SPaaSCoordinator {
       const correlationId = req.headers.get("X-Correlation-ID") || body.correlation_id || `corr_${crypto.randomUUID().substring(0, 12)}`;
 
       this.sqlExec(
-        `INSERT INTO jobs (id, workload_id, state, correlation_id, created_at) VALUES (?, ?, 'Pending', ?, ?)`,
+        `INSERT INTO jobs (id, workload_id, state, correlation_id, created_at) VALUES (?, ?, 'QUEUED', ?, ?)`,
         jobId,
         workloadId,
         correlationId,
         Date.now()
       );
+      this.recordJobTransition(jobId, "SUBMITTED", "Workload manifest submitted to fabric", "Admit to scheduler queue", { correlationId, workloadId });
+      this.recordJobTransition(jobId, "QUEUED", "Workload queued awaiting candidate match", "Evaluate candidate nodes against capability requirements", { correlationId });
       this.logAudit("JOB_SUBMITTED", `Job ${jobId} submitted (corr: ${correlationId})`);
 
       // Attempt immediate scheduling
       await this.schedulePendingJobs();
       const created = this.sqlExec(`SELECT * FROM jobs WHERE id = ?`, jobId);
-      return json(created[0] ? { ...created[0], job_id: created[0].id, correlation_id: correlationId } : { id: jobId, job_id: jobId, correlation_id: correlationId, state: "Pending" }, 201);
+      return json(created[0] ? { ...created[0], job_id: created[0].id, correlation_id: correlationId } : { id: jobId, job_id: jobId, correlation_id: correlationId, state: "QUEUED" }, 201);
     }
 
     if (path === "/api/v1/jobs" && method === "GET") {
@@ -2301,9 +2651,11 @@ export class SPaaSCoordinator {
         // Normalize state to uppercase for frontend consistency
         const normalizedState = (j.state || 'Pending').toUpperCase();
         const displayState = {
-          'PENDING': 'Queued', 'QUEUED': 'Queued', 'CREATED': 'Queued',
+          'PENDING': 'Queued', 'QUEUED': 'Queued', 'CREATED': 'Queued', 'SUBMITTED': 'Queued',
+          'MATCHING': 'Matching', 'OFFERED': 'Offered',
           'ASSIGNED': 'Scheduled', 'LEASED': 'Scheduled', 'DISPATCHED': 'Dispatched',
           'ACKNOWLEDGED': 'Running', 'RUNNING': 'Running', 'BUSY': 'Running',
+          'DOWNLOADING': 'Downloading', 'EXECUTING': 'Executing', 'UPLOADING': 'Uploading',
           'RESULT_SUBMITTED': 'Verifying', 'VERIFYING': 'Verifying',
           'VERIFIED': 'Completed', 'SETTLED': 'Completed', 'COMPLETED': 'Completed',
           'FAILED': 'Failed', 'CANCELLED': 'Cancelled', 'TIMED_OUT': 'Failed',
@@ -2314,6 +2666,11 @@ export class SPaaSCoordinator {
           job_id: j.id,
           state: displayState,
           raw_state: j.state,
+          authoritative_state: normalizedState,
+          wait_reason: j.wait_reason || null,
+          progress_pct: j.progress_pct !== null && j.progress_pct !== undefined ? Number(j.progress_pct) : 0,
+          next_action: j.next_action || null,
+          stage_details: j.stage_details || null,
           spec,
           current_lease: currentLease,
           result,
@@ -2323,7 +2680,7 @@ export class SPaaSCoordinator {
       return json({ jobs: parsed, total: parsed.length });
     }
 
-    if (path.startsWith("/api/v1/jobs/") && method === "GET" && !path.includes("/scheduler-decision")) {
+    if (path.startsWith("/api/v1/jobs/") && method === "GET" && !path.includes("/scheduler-decision") && !path.includes("/decision")) {
       const jobId = path.split("/")[4];
       const jobs = this.sqlExec(`SELECT * FROM jobs WHERE id = ?`, jobId);
       if (jobs.length === 0) return json({ error: "NOT_FOUND" }, 404);
@@ -2335,13 +2692,14 @@ export class SPaaSCoordinator {
       });
     }
 
-    if (path.endsWith("/scheduler-decision") && method === "GET") {
+    if ((path.endsWith("/scheduler-decision") || path.endsWith("/decision")) && method === "GET") {
       const jobId = path.split("/")[4];
       const jobs = this.sqlExec(`SELECT scheduler_decision FROM jobs WHERE id = ?`, jobId);
       if (jobs.length === 0 || !jobs[0].scheduler_decision) {
-        return json({ decision: null, message: "No decision record" });
+        return json({ status: "ok", decision: null, message: "No decision record" });
       }
-      return json({ decision: JSON.parse(jobs[0].scheduler_decision) });
+      const dec = JSON.parse(jobs[0].scheduler_decision);
+      return json({ status: "ok", decision: dec, ...dec });
     }
 
     if (path.includes("/cancel") && method === "POST") {

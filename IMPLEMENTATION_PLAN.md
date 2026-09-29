@@ -1,421 +1,346 @@
-# SPaaS — Repair Physical Android Job Dispatch/Execution Pipeline
-## Authoritative End-to-End Implementation Plan
+# SPaaS Universal Edge Compute Fabric — Authoritative Implementation Plan
+## Production-Grade Heterogeneous Edge Compute Pipeline & UX Overhaul
 
-**Document Version:** 6.1.0  
-**Status:** COMPLETED / VERIFIED (100% Pass Rate across 20 Test Suites, 92.38% Control Plane Line Coverage)  
-**Author:** Principal Distributed Systems, Cloudflare DO, Android/Kotlin, Rust/WASM & SRE Engineer  
-**Target:** Physical Android Smartphone Compute Pipeline (`spaas-console.pages.dev` ↔ Cloudflare Workers DO SQLite ↔ Physical Android Node)
+**Document Version:** 7.0.0  
+**Status:** READY FOR EXECUTION  
+**Target:** Cloudflare Pages + Workers + SQLite Durable Objects (Primary) ↔ Cloud Run / Rust (DR) ↔ Physical Android / Desktop / iOS Workers  
+**Author:** Principal Distributed Systems, Cloudflare DO, WASM/GPU-AI, Android/Kotlin, Rust, Security & Product UX Architect  
 
 ---
 
-## Executive Summary & Architectural Invariant
+## 1. Architectural Baseline & Principles
 
-The SPaaS Edge Compute Fabric coordinates compute execution across enrolled consumer hardware (physical Android smartphones, iOS nodes, desktop workers). This plan governs the forensic repair and verification of the physical Android execution pipeline across 10 sequential phases.
+SPaaS coordinates voluntary compute provision across mobile, desktop, and edge hardware:
+- **Primary Control Plane:** Cloudflare Worker (`apps/cloudflare-control-plane/src/index.js`) + Durable Object SQLite (`coordinator.js`, `sqlite-bridge.js`) at `https://spaas-control-plane.dayashimoga.workers.dev`.
+- **Primary Web Console:** Cloudflare Pages at `https://spaas-console.pages.dev` (built from `apps/web-console`).
+- **Disaster Recovery (Cold Standby):** Google Cloud Run Rust Control Plane (`apps/control-plane`) with epoch fencing.
+- **Physical Mobile Worker:** Android App (`apps/android-node`, package `dev.spaas.node`), executing sandboxed WASM stack machine via `WasmRuntimeEngine.kt` on ARM64.
+- **Desktop Worker:** Rust Native Daemon (`apps/desktop-worker`, `crates/workload-runtime`) with `wasmi` WASI preview 1.
+- **Evidence Label Standard:** ONLY `PROVEN`, `PHYSICAL-DEVICE-PROVEN`, `EMULATOR-PROVEN`, `SIMULATION-PROVEN`, `IMPLEMENTED-UNPROVEN`, `HARDWARE-REQUIRED`, `UNSUPPORTED`. Zero mocks or fabricated benchmarks.
 
 ```
-Cloudflare Pages (spaas-console.pages.dev)
-        ↓  POST /api/v1/nodes/{id}/dispatch-challenge (Authenticated)
-Worker API / Ingress Gateway (index.js)
-        ↓  Authoritative Durable Object Router
-Durable Object + SQLite (coordinator.js)
-        ↓  Job Lifecycle: CREATED → QUEUED → ASSIGNED → LEASED → DISPATCHED
-[WSS Push Notification] OR [Authenticated Heartbeat / Poll Fallback]
-        ↓
-Physical Android Worker (dev.spaas.node)
-        ↓  1. Validates artifact SHA-256 & lease
-        ↓  2. Emits ACK (DISPATCHED → ACKNOWLEDGED)
-        ↓  3. Emits START (ACKNOWLEDGED → RUNNING)
-        ↓  4. Executes authentic WASM stack machine (_start with unpredictable nonce)
-        ↓  5. Emits signed result receipt (RUNNING → RESULT_SUBMITTED)
-Server Verifier (coordinator.js)
-        ↓  RESULT_SUBMITTED → VERIFYING → VERIFIED
-Double-Entry TEST-Credit Settlement
-        ↓  VERIFIED → SETTLED → COMPLETED (Exactly-once idempotent ledger transaction)
-Real-Time Web Console Update & Android Activity History
++-------------------------------------------------------------------------------------------------------+
+|                                          SPaaS Edge Fabric Architecture                               |
++-------------------------------------------------------------------------------------------------------+
+|                                                                                                       |
+|  CONSUMERS / WEB CONSOLE (spaas-console.pages.dev)                                                    |
+|  - Progressive Disclosure: Simple Mode (Wizard) vs Advanced (YAML, Fuel, Leases)                     |
+|  - Realtime SSE / Polling Fallback ↔ Convergence                                                     |
+|                                     │                                                                 |
+|                                     ▼                                                                 |
+|  CLOUDFLARE INGRESS GATEWAY (index.js)                                                                |
+|  - CORS, Rate Limiting (Token Bucket), Security Headers, APK Downloads                                |
+|                                     │                                                                 |
+|                                     ▼                                                                 |
+|  AUTHORITATIVE DURABLE OBJECT + SQLITE (coordinator.js)                                               |
+|  - Authoritative State Machine (12 States + 5 Failure States)                                         |
+|  - Capability-Aware Pareto Scheduler ("Why selected / excluded?")                                    |
+|  - Single-use Pairing Tokens, Device Auth, Fencing Tokens, Leases, Double-Entry Ledger                |
+|  - WebSocket Hibernation API + Fallback Polling (`/heartbeat`, `/poll`)                              |
+|                                     │                                                                 |
+|         ┌───────────────────────────┴───────────────────────────┐                                     |
+|         ▼                                                       ▼                                     |
+|  PHYSICAL ANDROID WORKER (dev.spaas.node)             DESKTOP / EDGE DAEMON (Rust)                    |
+|  - 6-Tab Architecture:                                - Native CLI / Daemon                           |
+|    Home / Jobs / Performance / Controls /             - `wasmi` WASI Preview 1 Sandbox                |
+|    Earnings / Security                                - Ed25519 Result Attestation                    |
+|  - Provider Policy (Auto / Ask Me / Paused)           - Hardware Probing                              |
+|  - Sandboxed WASM Stack Machine (WasmRuntimeEngine)                                                   |
+|  - Ed25519 Result Attestation                                                                        |
+|                                                                                                       |
++-------------------------------------------------------------------------------------------------------+
 ```
 
 ---
 
-## Phase 1 — Reproduce and Trace First Broken Boundary
+## 2. Forensic Audit & Root Cause Analysis of Active Gaps
 
-### 1. Components & Files
-- `apps/cloudflare-control-plane/src/index.js`
-- `apps/cloudflare-control-plane/src/coordinator.js`
-- `apps/cloudflare-control-plane/src/sqlite-bridge.js`
-- `apps/android-node/app/src/main/java/dev/spaas/node/service/ComputeWorkerClient.kt`
-- `apps/android-node/app/src/main/java/dev/spaas/node/service/ComputeForegroundService.kt`
-- `apps/web-console/src/main.js`
-
-### 2. Root Cause Forensic Analysis
-From live diagnostic inspection of the production Cloudflare Worker (`https://spaas-control-plane.dayashimoga.workers.dev`):
-1. **Device State:** Physical device `9c1820f9-0c70-498c-94a8-544e4c54e425` ("I2221", Vivo Android 16) is enrolled, qualified (score 88/100), and sending heartbeats every 2s (`battery_pct: 73`, `charging_state: DISCHARGING`, `network: wifi_unmetered`).
-2. **First Broken Boundary (Job Creation Semantics):** `POST /api/v1/nodes/{id}/dispatch-challenge` inserted the job directly with `state = 'Running'` and `lease_expires_at = now + 60000`. It did NOT create a distinct `lease_id`, did NOT perform an explicit WSS notification, and marked node state `'Running'`.
-3. **Second Broken Boundary (Heartbeat Ingestion on Android):** The control plane returned `assigned_job` in `POST /api/v1/nodes/heartbeat` responses. However, `ComputeWorkerClient.sendHeartbeat()` in Kotlin completely ignored `assigned_job` and only parsed `command.action == "cancel_job"`.
-4. **Third Broken Boundary (Device Policy & Yielding):** The physical phone was discharging. `ComputeForegroundService.kt` evaluated `safetyPolicy.evaluateYield()` which returned `YieldReason.DEVICE_UNPLUGGED` because `onlyWhileCharging` was active. `ComputeForegroundService` bypassed `pollAndExecuteJob()` whenever yielding, so fallback polling never ran.
-5. **Fourth Broken Boundary (Lease Sweeper & Node State Deadlock):** After 60 seconds of no result, Cloudflare DO `alarm()` swept the job:
-   ```sql
-   UPDATE jobs SET state = 'Pending', assigned_node_id = NULL, lease_expires_at = NULL, retry_count = retry_count + 1 WHERE id = ?
-   ```
-   However, `alarm()` did NOT revert the node's state back to `'Ready'`—it left `nodes.state = 'Running'`. Heartbeats only set `Ready` if previous state was `Offline` or `Registered`. Furthermore, the scheduler queried `WHERE state = 'Ready'`, finding 0 nodes. The job was permanently orphaned in `Pending` (displayed as "Queued" in Web Console), while the node was stuck in `'Running'`.
-6. **Fifth Broken Boundary (No Device ACK):** There was no endpoint or client call for device acknowledgment or start confirmation.
-
-### 3. Change
-Capture sanitized boundary evidence; document exact failure points; prepare test cases matching these reproduction steps.
-
-### 4. Test
-Reproduce in `tests/coordinator.test.js` by dishing a challenge, advancing lease expiration, and demonstrating the deadlock.
-
-### 5. Acceptance Criterion
-Exact failure boundaries established with evidence; 0 speculative guesses.
-
-### 6. Evidence Label
-`PROVEN` (Boundary traces captured from live Cloudflare Worker API & SQLite table dumps).
+| Gap ID | Symptom / Failure | Boundary & Offending File | Root Cause Mechanism | Evidence / Screenshot Reference | Planned Fix |
+|---|---|---|---|---|---|
+| **GAP-01** | `Submission failed: mode is not defined` red banner in Web Console | `apps/web-console/src/main.js` (line 390) | In `setConnectionState(newState, reason)`, line 390 evaluated `mode === 'UNCONFIGURED'`. `mode` is undeclared (should be `newState`). When `submitCurrentWorkload()` called `await refreshAllData()` after POST `/jobs`, this ReferenceError was caught, displaying a failure toast even though the job was created. | Screenshot 1 (`mode is not defined`) | Replace `mode === 'UNCONFIGURED'` with `newState === 'UNCONFIGURED'`. |
+| **GAP-02** | Generic workload (`edge-matrix-multiplication`) stuck in `DISPATCHED` | `coordinator.js` (line 1675-1707) ↔ `ComputeWorkerClient.kt` (line 610-664) | 1. In `coordinator.js` `/poll`, `wasm_bytes` was set to `wasmBytes` which parsed as `null` for base64 strings.<br>2. `spec.artifact_uri` was `'inline://wasm'`, but the server only injected data URI if `artifact_uri === ""`.<br>3. Android received no base64 and non-data URI, falling into the 48-byte stub.<br>4. Android computed SHA-256 of the 48-byte stub, which mismatched the real Matrix WASM SHA-256 recorded on the server.<br>5. Android threw `IllegalStateException`, which was caught and swallowed by `executeJobPayload` without sending a failure receipt to the server. | Screenshot 3 (`edge-matrix-multiplication DISPATCHED`) | 1. Pass `wasm_bytes` properly and ensure `data:application/wasm;base64,...` is always populated in `artifact_uri`.<br>2. Handle `inline://wasm` on Android.<br>3. Send explicit failure receipt to `/api/v1/nodes/results` on verification error so the server transitions the job to `FAILED` and frees the node. |
+| **GAP-03** | Subsequent queued jobs stuck in `QUEUED` | `coordinator.js` (line 483, 639) | When Job 3 was dispatched, `nodes.state` was set to `'Busy'`. Because Job 3 was stuck, the node never transitioned back to `'Ready'`. The scheduler queries `WHERE state = 'Ready'`, finding 0 nodes, leaving Job 1 and Job 2 permanently queued. | Screenshot 3 (2 jobs `QUEUED`, 1 `DISPATCHED`) | Release node state to `'Ready'` on failure, lease expiration, or job cancellation; handle concurrency. |
+| **GAP-04** | Fragmented State Machine & Non-Standard States | `coordinator.js` ↔ `main.js` ↔ `ComputeWorkerClient.kt` | States were inconsistent: `Pending`, `Queued`, `Scheduled`, `Running`, `Completed`, `DISPATCHED`, `ACKNOWLEDGED`. Need strict DAG: `SUBMITTED` -> `QUEUED` -> `MATCHING` -> `OFFERED` -> `ASSIGNED` -> `LEASED` -> `DOWNLOADING` -> `EXECUTING` -> `UPLOADING` -> `VERIFYING` -> `COMPLETED` -> `SETTLED`. | Baseline requirement 1 | Implement unified 12-state machine with transitions, timestamps, reasons, and next-action in `job_transitions`. |
+| **GAP-05** | Capability Scheduler Lacks Explainability & Pareto Trade-offs | `coordinator.js` (`schedulePendingJobs`) | Scheduling used fixed heuristic weights without checking workload capability requirements (RAM, architecture, thermal headroom, provider policy). Decisions lacked "Why selected / excluded?" breakdowns. | Baseline requirement 3 | Implement capability matching filter + Pareto scoring + transparent rationale explaining candidate exclusions and selection. |
+| **GAP-06** | Missing Provider Controls (Auto Accept / Ask Me / Scheduled Auto / Paused) | `apps/android-node` ↔ `apps/web-console` | Provider policies only supported basic battery/charging sliders. No pre-execution "Ask Me" prompt, no schedule windows, no emergency stop button on node. | Baseline requirement 4 | Implement 4 provider modes (Auto Accept, Ask Me, Scheduled Auto, Paused) with interactive prompt on mobile before execution. |
+| **GAP-07** | Fleet Management Scalability & Mixed Inventory | `apps/web-console` (`Devices` view) ↔ `coordinator.js` | Bulk select, search, tag filtering, and separation of physical vs simulated nodes were basic. Simulated nodes could contaminate production metrics if not strictly filtered. | Baseline requirement 5 | Add bulk selection, tagging/pools, search/filter, and strict isolation of simulated nodes from production metrics. |
+| **GAP-08** | Web Console Complexity & Missing Progressive Disclosure | `apps/web-console` (`index.html`, `main.js`) | Workload submission exposed raw YAML, fuel, memory bytes, and lease parameters by default. Dialogs used `alert()` instead of toasts. Duplicate buttons existed. | Baseline requirement 6 | Overhaul navigation (Overview, Fleet, Workloads, Jobs, Usage & Credits, Administration). Workload Studio wizard with simple mode + Advanced toggle. Replace `alert()`. |
+| **GAP-09** | Mobile UX Architecture Needs 6 Distinct Sections | `apps/android-node` (`MainActivity.kt`) | Mobile UI had navigation tabs but lacked granular details in Performance, Controls, and Security; history lacked individual delete and clear all. | Baseline requirement 7 | Align Android tabs: Home, Jobs, Performance, Controls, Earnings, Security with real-time progress and policy controls. |
+| **GAP-10** | Generic Workload Verification & Settlement Parity | `coordinator.js` (`handleResultSubmission`) | Verification only checked `expected_digest` for challenge jobs. Generic jobs need execution verification (exit code 0, fuel within bounds, output signature) and identical double-entry ledger settlement. | Baseline requirement 2, 8 | Standardize generic workload verification, output digests, and double-entry settlement across all presets. |
 
 ---
 
-## Phase 2 — Repair Job Lifecycle Semantics & State Persistence
+## 3. Authoritative State Machine Specification
 
-### 1. Components & Files
-- `apps/cloudflare-control-plane/src/coordinator.js`
-- `apps/cloudflare-control-plane/src/sqlite-bridge.js`
+### 3.1 Lifecycle States & Directed Acyclic Graph (DAG)
 
-### 2. Root Cause
-Lack of granular state transitions and transition audit persistence. Jobs jumped directly from non-existent to `Running`, then to `Completed` or `Pending`.
-
-### 3. Change
-1. Implement authoritative state transitions:
-   `CREATED` → `QUEUED` → `ASSIGNED` → `LEASED` → `DISPATCHED` → `ACKNOWLEDGED` → `RUNNING` → `RESULT_SUBMITTED` → `VERIFYING` → `VERIFIED` → `SETTLED` → `COMPLETED`.
-   Failure states: `REJECTED`, `FAILED`, `CANCELLED`, `TIMED_OUT`, `LEASE_EXPIRED`, `DISCONNECTED`, `UNVERIFIED`.
-   Node states: `READY`, `BUSY`, `PAUSED`, `DRAINING`, `OFFLINE`, `REVOKED`.
-2. Create SQLite tables:
-   - `job_transitions`: `(id TEXT PRIMARY KEY, job_id TEXT, from_state TEXT, to_state TEXT, reason TEXT, timestamp INTEGER, metadata TEXT)`
-   - `leases`: `(lease_id TEXT PRIMARY KEY, job_id TEXT, node_id TEXT, fencing_token TEXT, epoch INTEGER, expires_at INTEGER, state TEXT, created_at INTEGER)`
-3. Implement `recordJobTransition(jobId, fromState, toState, reason, metadata)` enforcing valid Directed Acyclic Graph (DAG) state progression.
-4. Update node state: Node transitions to `BUSY` upon lease issuance, NOT `Running`. Node transitions back to `READY` when job completes, fails, or lease expires.
-5. In `alarm()`, sweep expired leases: transition job to `LEASE_EXPIRED`, revert node to `READY`, and re-queue to `QUEUED` if retry budget remains.
-
-### 4. Test
-Unit test verifying every state transition, asserting rejection of illegal jumps (e.g. `CREATED` → `RUNNING` or `COMPLETED` → `RUNNING`).
-
-### 5. Acceptance Criterion
-Every lifecycle change persisted to `job_transitions` with timestamp, epoch, and reason.
-
-### 6. Evidence Label
-`PROVEN` (Unit tests passing with 100% assertion pass).
-
----
-
-## Phase 3 — Repair DO/Session Routing and WSS Dispatch
-
-### 1. Components & Files
-- `apps/cloudflare-control-plane/src/index.js`
-- `apps/cloudflare-control-plane/src/coordinator.js`
-
-### 2. Root Cause
-- Ingress gateway `index.js` used `url.searchParams.get("cluster") || "spaas-primary-fabric"` without device-to-shard routing metadata.
-- `dispatch-challenge` did not invoke WebSocket dispatch even when an active WebSocket session was connected to the DO.
-
-### 3. Change
-1. Create `device_sessions` table in SQLite:
-   ```sql
-   CREATE TABLE IF NOT EXISTS device_sessions (
-     node_id TEXT PRIMARY KEY,
-     tenant_id TEXT,
-     shard TEXT,
-     session_id TEXT,
-     connection_state TEXT,
-     last_seen INTEGER,
-     active_lease_id TEXT,
-     active_job_id TEXT,
-     updated_at INTEGER
-   );
-   ```
-2. Update `index.js` DO router to deterministically route all requests targeting a specific node (`/api/v1/nodes/:id/...`) or job (`/api/v1/jobs/:id/...`) to the authoritative DO shard.
-3. In `dispatch-challenge`, query `this.ctx.getWebSockets(nodeId)`: if an active socket exists, immediately push `JobDispatch` payload:
-   ```json
-   {
-     "type": "JobDispatch",
-     "job_id": "...",
-     "workload_id": "...",
-     "lease_id": "...",
-     "fencing_token": "...",
-     "artifact_uri": "...",
-     "artifact_sha256": "...",
-     "args": ["..."],
-     "limits": { ... },
-     "lease_expires_at": 123456789
-   }
-   ```
-4. Reconstruct session metadata on WebSocket open/close and hibernation wake.
-
-### 4. Test
-DO WebSocket dispatch test asserting immediate message transmission upon job placement.
-
-### 5. Acceptance Criterion
-Live WebSocket connections receive sub-50ms dispatch pushes without polling delay.
-
-### 6. Evidence Label
-`PROVEN`.
-
----
-
-## Phase 4 — Repair Heartbeat/Poll Fallback and Explicit ACK
-
-### 1. Components & Files
-- `apps/cloudflare-control-plane/src/coordinator.js`
-- `apps/android-node/app/src/main/java/dev/spaas/node/service/ComputeWorkerClient.kt`
-- `apps/android-node/app/src/main/java/dev/spaas/node/service/ComputeForegroundService.kt`
-- `apps/android-node/app/src/main/java/dev/spaas/node/policy/ProviderSafetyPolicy.kt`
-
-### 2. Root Cause
-- Android heartbeat dropped `assigned_job`.
-- Device ACK & START endpoints did not exist.
-- Fallback polling (`GET /api/v1/nodes/:id/poll`) returned null because it only checked `state = 'Running'`.
-- Android `ComputeForegroundService` suppressed polling while on battery due to `onlyWhileCharging`.
-- Policy changes from console (`POST /api/v1/nodes/:id/policy`) were neither implemented on backend nor synced to Android.
-
-### 3. Change
-1. Server Endpoints:
-   - `POST /api/v1/nodes/ack` & `POST /api/v1/jobs/:id/ack`: Validates `{ node_id, job_id, lease_id, fencing_token, artifact_sha256 }`. Transitions `DISPATCHED` → `ACKNOWLEDGED`.
-   - `POST /api/v1/nodes/start` & `POST /api/v1/jobs/:id/start`: Transitions `ACKNOWLEDGED` → `RUNNING`.
-   - `POST /api/v1/nodes/:id/policy`: Stores updated owner policy in `nodes.policy`.
-   - `POST /api/v1/nodes/heartbeat`: Returns `assigned_job` (with full lease/spec payload) AND active `policy` to sync server policy changes down to Android.
-   - `GET /api/v1/nodes/:id/poll`: Returns executable specification for jobs in `ASSIGNED`, `LEASED`, or `DISPATCHED` states.
-2. Android Node Client:
-   - In `ComputeWorkerClient.sendHeartbeat()`: When `assigned_job` is returned, immediately invoke execution pipeline. When `policy` is returned, synchronize local `safetyPolicy`.
-   - In `ComputeWorkerClient.pollAndExecuteJob()`:
-     a. Download artifact & verify SHA-256.
-     b. Send `POST /api/v1/nodes/ack` with lease_id and fencing_token.
-     c. Send `POST /api/v1/nodes/start` right before runtime instantiation.
-     d. Execute WASM in sandbox.
-     e. Send signed result to `POST /api/v1/nodes/results`.
-   - In `ComputeForegroundService.kt`: Allow priority verification/challenge jobs to execute if battery > min threshold, regardless of AC charging status.
-
-### 4. Test
-Test heartbeat assignment return, fallback poll claim, ACK state transition, and START state transition.
-
-### 5. Acceptance Criterion
-Server transitions `DISPATCHED` → `ACKNOWLEDGED` → `RUNNING` only upon verifiable Android receipt and execution commencement.
-
-### 6. Evidence Label
-`PROVEN`.
-
----
-
-## Phase 5 — Prove Actual Android WASM Execution with Unpredictable Challenge
-
-### 1. Components & Files
-- `apps/cloudflare-control-plane/src/coordinator.js`
-- `apps/android-node/app/src/main/java/dev/spaas/node/service/WasmRuntimeEngine.kt`
-- `crates/workload-runtime/src/wasi_host.rs`
-- `fixtures/sha256_hasher.wasm`
-
-### 2. Root Cause
-`WasmRuntimeEngine.kt` had synthetic Kotlin fallbacks (`MessageDigest.getInstance("SHA-256")`) when WASM bytecode output was empty. Challenge WASM artifact was static output.
-
-### 3. Change
-1. Implement authentic WASI `args_sizes_get` and `args_get` in `WasmRuntimeEngine.kt`:
-   - Copy `config.args` into WASM linear memory as `argv` null-terminated pointers and string buffer.
-2. Build genuine WASM challenge module (`sha256_challenge.wasm`):
-   - Reads unpredictable server-generated nonce via WASI `args_get` / `args_sizes_get`.
-   - Computes genuine SHA-256 over the nonce within WASM instructions.
-   - Writes hex digest to stdout via `fd_write`.
-3. Strip all synthetic Kotlin fallback calculation in `WasmRuntimeEngine.kt`: Execution must be 100% pure WebAssembly stack machine.
-4. Establish cross-runtime parity: Execute identical challenge module with identical nonces on Android `WasmRuntimeEngine` and Rust `wasmi` (`crates/workload-runtime`), verifying identical stdout bytes.
-
-### 4. Test
-Shared conformance test executing identical binary on both runtimes and asserting identical digest output.
-
-### 5. Acceptance Criterion
-Zero Kotlin or Rust workarounds; strictly sandboxed WASM execution.
-
-### 6. Evidence Label
-`PROVEN`.
-
----
-
-## Phase 6 — Result Verification & Exactly-Once Settlement
-
-### 1. Components & Files
-- `apps/cloudflare-control-plane/src/coordinator.js`
-
-### 2. Root Cause
-Result handler did not verify challenge stdout against server-side ground truth; did not enforce multi-step verification states (`RESULT_SUBMITTED` → `VERIFYING` → `VERIFIED` → `SETTLED` → `COMPLETED`); duplicate submissions were not strictly idempotent.
-
-### 3. Change
-1. In `handleResultSubmission`:
-   - Validate device signature over result digest using registered node public key.
-   - Validate job ownership, active lease, and fencing token.
-   - Compute expected SHA-256 of the unpredictable challenge nonce server-side and verify exact stdout match.
-   - If mismatch: transition to `UNVERIFIED` / `FAILED` with 0 credits.
-   - If match: transition `RESULT_SUBMITTED` → `VERIFYING` → `VERIFIED` → `SETTLED` → `COMPLETED`.
-2. Idempotent Double-Entry Settlement:
-   - Ledger transaction ID `tx_${job_id}` with unique idempotency keys `settle_${job_id}_debit` and `settle_${job_id}_credit`.
-   - If `POST /results` is called again for an already settled job, return existing settlement record with HTTP 200 without creating duplicate ledger rows.
-
-### 4. Test
-Unit tests for valid result settlement, tampered output rejection, and idempotent duplicate result submission.
-
-### 5. Acceptance Criterion
-Exactly-once economic credit effect; 0 credits earned for unverified results.
-
-### 6. Evidence Label
-`PROVEN`.
-
----
-
-## Phase 7 — Web & Android Real-Time UX and Diagnostics
-
-### 1. Components & Files
-- `apps/web-console/src/main.js`
-- `apps/web-console/index.html`
-- `apps/android-node/app/src/main/java/dev/spaas/node/MainActivity.kt`
-- `apps/android-node/app/src/main/java/dev/spaas/node/history/LocalJobHistory.kt`
-
-### 2. Root Cause
-- Web console immediately jumped to "Running" and did not display live lifecycle stages.
-- Node counts in web console header/sidebar had discrepancies.
-- Android UI did not display granular dispatch states and history was not populated with verified results.
-
-### 3. Change
-1. Web Console:
-   - "Run Challenge" button transitions:
-     `Creating Job…` → `Queued` → `Assigned to I2221` → `Dispatched` → `Device acknowledged` → `Running` → `Verifying` → `Completed`.
-   - Jobs tab displays live job card immediately with ID, lease, fencing token, artifact hash, fuel, wall time, stdout, verification status, and credit transaction ID.
-   - Fix all count inconsistencies between sidebar, header metrics, and device list.
-2. Android UI:
-   - Foreground notification and home card display:
-     `READY` (waiting) → `Receiving workload` → `Verifying artifact` → `Running Cryptographic Challenge` → `Submitting result` → `Verified/Completed`.
-   - Local activity history persists real job ID, duration, fuel, and settlement confirmation.
-
-### 4. Test
-End-to-end UI state verification and count synchronization checks.
-
-### 5. Acceptance Criterion
-Visual states on Web Console and Android correspond precisely to authoritative backend SQLite states.
-
-### 6. Evidence Label
-`PROVEN`.
-
----
-
-## Phase 8 — Failure / Recovery / Security Regression Suite
-
-### 1. Components & Files
-- `apps/cloudflare-control-plane/tests/coordinator.test.js`
-
-### 2. Scenarios Automated
-- WSS available dispatch
-- WSS unavailable → polling fallback succeeds
-- Disconnect before dispatch
-- Disconnect after lease
-- Disconnect while executing
-- Worker / DO restart reconstruction
-- Android process restart recovery
-- Expired lease & re-queue
-- Duplicate poll claim rejection
-- Duplicate result idempotency
-- Stale fencing token rejection
-- Job cancellation
-- Emergency stop
-- Artifact SHA-256 mismatch rejection
-- Execution timeout
-- Memory & fuel exhaustion traps
-
-### 3. Acceptance Criterion
-100% pass of all failure/recovery suites; measured test coverage > 90% across control plane.
-
-### 4. Evidence Label
-`PROVEN`.
-
----
-
-## Phase 9 — Architecture, Performance & Resource Optimization
-
-### 1. Components & Files
-- `apps/cloudflare-control-plane/src/coordinator.js`
-- `apps/android-node/app/src/main/java/dev/spaas/node/service/ComputeWorkerClient.kt`
-
-### 2. Optimization Targets
-- Adaptive polling backoff: Poll every 2s only when active leases are pending or reconnecting; backoff to 15s-30s when WSS is connected and healthy.
-- DO alarm cleanup: Purge expired pairing tokens, prune stale dead sessions, and sweep unverified leases.
-- Zero memory leaks in DO memory or Android coroutine scopes.
-
-### 3. Acceptance Criterion
-Android battery drain < 1% per hour when idle in ready state; 0 memory leaks in DO heap.
-
-### 4. Evidence Label
-`PROVEN`.
-
----
-
-## Phase 10 — Physical-Device Production Acceptance
-
-### 1. Components & Files
-- Enrolled physical Vivo I2221 Android smartphone
-- Public `spaas-console.pages.dev`
-- Live Worker `spaas-control-plane.dayashimoga.workers.dev`
-- `scripts/physical-android-acceptance.ps1`
-- `physical-android-acceptance-report.json`
-
-### 2. Mandatory Production Acceptance Sequence
-1. Select physical device `9c1820f9-0c70-498c-94a8-544e4c54e425` on `spaas-console.pages.dev`.
-2. Click "Run Challenge".
-3. Persist genuine challenge job with unpredictable nonce.
-4. Jobs tab immediately shows `QUEUED` / `ASSIGNED`.
-5. Device receives assignment via WSS or authenticated poll fallback.
-6. Android verifies artifact SHA-256 and emits ACK (`ACKNOWLEDGED`).
-7. Android emits START and starts execution (`RUNNING`).
-8. Android executes authentic WASM stack machine and produces calculated SHA-256.
-9. Android submits cryptographically signed result receipt (`RESULT_SUBMITTED`).
-10. Control plane independently verifies output against expected SHA-256 (`VERIFIED`).
-11. Exactly one TEST-credit double-entry settlement is minted (`SETTLED` → `COMPLETED`).
-12. Both Web Console and Android Activity display identical completed job, duration, fuel, and ledger transaction ID.
-13. Repeat with WSS disabled to prove authenticated poll fallback works identically.
-
-### 3. Acceptance Criterion
-End-to-end execution completed and confirmed with verified transaction evidence.
-
-### 4. Evidence Label
-`PHYSICAL-DEVICE-PROVEN`.
-
----
-
-## 11. Verified Implementation & Test Metrics
-
-### Test Suite Execution Evidence (100% Pass Rate across 20 Subtests)
 ```
-ok 1 - SPaaSCoordinator — Public Health & System Diagnostics
-ok 2 - SPaaSCoordinator — Rate Limiting Enforcement
-ok 3 - SPaaSCoordinator — Administrative Authentication Boundaries
-ok 4 - SPaaSCoordinator — Single-Use Pairing Tokens & Device Registration
-ok 5 - SPaaSCoordinator — Device Authentication for Heartbeat & Results
-ok 6 - SPaaSCoordinator — Workload Submission, Placement & Dynamic Settlement
-ok 7 - SPaaSCoordinator — Operational Fabric Controls & Emergency Stop
-ok 8 - SPaaSCoordinator — Device Revocation & DR Checkpoint Export
-ok 9 - SPaaS Gateway — Ingress CORS & APK Download Metadata
-ok 10 - SPaaSCoordinator — DO Alarms, Lease Reconciler & Node Heartbeat Timeout
-ok 11 - SPaaSCoordinator — WebSocket Hibernation Messaging
-ok 12 - SPaaSCoordinator — Node Operational Management (Rename, State, Delete)
-ok 13 - SPaaSCoordinator — Job Queries, Decisions, Cancellation & Challenge Workload
-ok 14 - SPaaSCoordinator — Ledger, Demo Simulated Cluster & Audit Log
-ok 15 - SPaaSCoordinator — True Double-Entry Ledger & CSV Download (GAP-M06)
-ok 16 - SPaaSCoordinator — Cross-Cloud DR Epoch Handoff & Fencing
-ok 17 - SPaaSCoordinator — Empirical Qualification & Challenge Dispatch
-ok 18 - SPaaSCoordinator — End-to-End Authoritative Challenge Lifecycle, ACK, START, Verification & Trace
-ok 19 - SPaaSCoordinator — Comprehensive Failure, Security, Rejection & Recovery Boundaries
-ok 20 - SPaaSCoordinator — Fleet Inventory, WebSocket Hibernation Full Lifecycle, APK Downloads & Bulk Pruning
-# pass 20 / fail 0 / duration 238ms
+[SUBMITTED]
+    │  Workload validated, spec saved in workloads table
+    ▼
+[QUEUED]
+    │  Enqueued for capability matching
+    ▼
+[MATCHING]
+    │  Scheduler filters candidates (capabilities, policy, battery, thermals)
+    ▼
+[OFFERED]  <── (Optional: If node provider policy is "ASK ME")
+    │  User accepts on device (or automatically bypassed if AUTO_ACCEPT)
+    ▼
+[ASSIGNED]
+    │  Node bound to job in SQLite
+    ▼
+[LEASED]
+    │  Lease minted (fencing token, epoch, 60s lease timer)
+    ▼
+[DOWNLOADING]
+    │  Node fetches artifact URI / base64 and verifies SHA-256
+    ▼
+[EXECUTING]
+    │  Node launches sandboxed WASM stack machine (fuel & memory capped)
+    ▼
+[UPLOADING]
+    │  Node signs result digest and sends HTTP POST /api/v1/nodes/results
+    ▼
+[VERIFYING]
+    │  Server verifies signature, lease, fencing token, output digest
+    ▼
+[SETTLED]
+    │  Double-entry ledger transaction minted (DEBIT consumer, CREDIT provider)
+    ▼
+[COMPLETED]
+    ── Final terminal success state
 ```
 
-### Control Plane Code Coverage Report
-- `src/coordinator.js`: **91.25%** Line Coverage (82.35% Function Coverage)
-- `src/index.js`: **83.07%** Line Coverage (75.00% Function Coverage)
-- `src/sqlite-bridge.js`: **81.04%** Line Coverage (72.73% Function Coverage)
-- `tests/coordinator.test.js`: **100.00%** Line Coverage (97.06% Function Coverage)
-- **Overall Measured Control Plane:** **92.38%** Line Coverage (Exceeds >=90% target threshold)
+**Failure & Recovery Branches:**
+- From `MATCHING`: If no nodes match $\rightarrow$ `QUEUED` with `wait_reason: "NO_CAPABLE_NODES (Waiting for Android aarch64 with >=512MB RAM)"`.
+- From `OFFERED`: If provider declines $\rightarrow$ `REJECTED` $\rightarrow$ Re-queued with candidate excluded.
+- From `LEASED` / `DOWNLOADING` / `EXECUTING`: If lease timer expires $\rightarrow$ `LEASE_EXPIRED` $\rightarrow$ Node reset to `Ready` $\rightarrow$ Re-queued if retries $< 3$, else `FAILED`.
+- From `DOWNLOADING`: If artifact SHA-256 fails $\rightarrow$ `REJECTED (ARTIFACT_CORRUPT)` $\rightarrow$ Node reset to `Ready`.
+- From `EXECUTING`: If out of fuel $\rightarrow$ `FAILED (OUT_OF_FUEL)` $\rightarrow$ Settled for fuel consumed, 0 bonus credits.
+- From any non-terminal state: Admin cancellation $\rightarrow$ `CANCELLED` $\rightarrow$ Node reset to `Ready`.
 
-### Multi-Cloud & Workspace Verification
-- `cargo test --workspace`: **100% Passed** (Rust core crates, scheduler, runtime, persistence, protocol, verification)
-- `cargo test --test adversarial_security`: **100% Passed** (6/6 adversarial security and Byzantine fault tests)
-- `npm run build` in `apps/web-console`: **100% Clean Production Bundle** (dist/ created in 670ms)
+### 3.2 Transition Persistence Model (`job_transitions`)
+Each transition persists:
+- `job_id`: Unique job identifier.
+- `from_state`: Prior state.
+- `to_state`: New authoritative state.
+- `reason`: Human-readable cause (e.g., `"Candidate node selected by Pareto scheduler"`).
+- `next_action`: Next expected pipeline action (e.g., `"Awaiting device ACK / download"`).
+- `metadata`: JSON payload containing lease ID, fencing token, score breakdown, or error details.
+- `timestamp`: UTC millisecond timestamp.
+
+---
+
+## 4. Phase-by-Phase Implementation Blueprint
+
+### Phase 1: Critical Root-Cause Fixes & Deadlock Prevention
+- **Files Modified:**
+  - `apps/web-console/src/main.js`
+  - `apps/cloudflare-control-plane/src/coordinator.js`
+  - `apps/android-node/app/src/main/java/dev/spaas/node/service/ComputeWorkerClient.kt`
+- **Actions:**
+  1. Fix `mode === 'UNCONFIGURED'` in `main.js` line 390 $\rightarrow$ `newState === 'UNCONFIGURED'`.
+  2. In `coordinator.js` `/poll` and `/heartbeat`, ensure `wasm_bytes` is returned as a base64 string and `spec.artifact_uri` is always set to `data:application/wasm;base64,...` whenever `wasm_bytes` exists.
+  3. In `ComputeWorkerClient.kt`, support `inline://wasm` artifact URIs and decode base64 wasm bytes reliably.
+  4. In `ComputeWorkerClient.kt`, wrap artifact validation and execution in explicit failure reporting: if validation fails, send an explicit failure receipt to `/api/v1/nodes/results` with reason `ARTIFACT_HASH_MISMATCH` so the job is marked `FAILED` and the node is freed back to `Ready`.
+  5. In `coordinator.js` `alarm()`, ensure any expired lease resets `nodes.state = 'Ready'` immediately.
+- **Verification:**
+  - Unit test verifying `mode` error resolution.
+  - Test `/poll` returns executable payload with valid SHA-256 match.
+
+### Phase 2: Complete Authoritative State Machine & Transition DAG
+- **Files Modified:**
+  - `apps/cloudflare-control-plane/src/coordinator.js`
+  - `apps/cloudflare-control-plane/src/sqlite-bridge.js`
+  - `apps/web-console/src/main.js`
+- **Actions:**
+  1. Update `recordJobTransition` to enforce valid DAG transitions and store `next_action`.
+  2. Implement states: `SUBMITTED`, `QUEUED`, `MATCHING`, `OFFERED`, `ASSIGNED`, `LEASED`, `DOWNLOADING`, `EXECUTING`, `UPLOADING`, `VERIFYING`, `SETTLED`, `COMPLETED`.
+  3. Expose `wait_reason` in `/api/v1/jobs` when state is `QUEUED`.
+  4. Add `/api/v1/jobs/:id/trace` returning the complete chronological lifecycle timeline with timestamps, reasons, and next-actions.
+- **Verification:**
+  - Automated test creating a job and asserting all transitions are recorded in `job_transitions` without illegal jumps.
+
+### Phase 3: Generic Compute Execution Pipeline (No Verification-Only Special Casing)
+- **Files Modified:**
+  - `apps/cloudflare-control-plane/src/coordinator.js`
+  - `apps/android-node/app/src/main/java/dev/spaas/node/service/ComputeWorkerClient.kt`
+  - `apps/android-node/app/src/main/java/dev/spaas/node/service/WasmRuntimeEngine.kt`
+  - `apps/web-console/src/main.js`
+- **Actions:**
+  1. Ensure Hello World, SHA-256 Hasher, Prime Sieve, Matrix Multiplication, and custom uploaded WASM use the exact same submission, placement, dispatch, and settlement pipeline.
+  2. Standardize result payload: `stdout`, `stderr`, `exit_code`, `fuel_consumed`, `wall_time_ms`, `peak_memory_bytes`, `result_digest`, `node_signature`.
+  3. In `coordinator.js` `handleResultSubmission`:
+     - Verify signature using node public key.
+     - For deterministic workloads, verify stdout or digest.
+     - For general compute, verify exit code 0 and fuel/memory constraints.
+     - Award credits via double-entry ledger.
+- **Verification:**
+  - Automated test running Hello World, SHA-256, Prime Sieve, and Matrix Multiplication through the DO control plane.
+
+### Phase 4: Capability-Aware Scheduler with Pareto Ranking & Explainability
+- **Files Modified:**
+  - `apps/cloudflare-control-plane/src/coordinator.js`
+  - `apps/web-console/src/main.js`
+- **Actions:**
+  1. Profile candidates on:
+     - CPU: Single-thread, multi-thread, WASM fuel MIPS, ISA architecture.
+     - Memory: Available RAM, max allocation.
+     - Network: RTT ping, downlink bandwidth, network type (Wi-Fi, unmetered, cellular).
+     - Power & Thermals: Charging state, battery %, thermal headroom.
+     - Reliability: Historical job success rate (0-100%).
+  2. Filter: Exclude nodes failing workload requirements (e.g. `min_ram_mb`, `require_charging`, `require_unmetered_network`).
+  3. Filter: Enforce provider safety policies (`charging_only`, `min_battery_threshold_pct`, `thermal_cutoff`).
+  4. Rank: Compute Pareto composite score with transparent breakdown.
+  5. Explain: Store `scheduler_decision` with:
+     - `selected_node`: ID, name, score.
+     - `rationale`: Human-readable summary.
+     - `score_breakdown`: Itemized scores for battery, charging, thermal, network, reliability.
+     - `excluded_candidates`: List of rejected nodes with specific disqualification reasons (e.g., `"Excluded phone-xyz: Battery 22% below required 30%"`).
+- **Verification:**
+  - Test verifying scheduler correctly filters out under-resourced nodes and records explanation.
+
+### Phase 5: Provider Controls (Auto Accept / Ask Me / Scheduled Auto / Paused)
+- **Files Modified:**
+  - `apps/cloudflare-control-plane/src/coordinator.js`
+  - `apps/android-node/app/src/main/java/dev/spaas/node/policy/ProviderSafetyPolicy.kt`
+  - `apps/android-node/app/src/main/java/dev/spaas/node/service/ComputeWorkerClient.kt`
+  - `apps/android-node/app/src/main/java/dev/spaas/node/MainActivity.kt`
+- **Actions:**
+  1. Define 4 Provider Modes:
+     - `AUTO_ACCEPT`: Automatically accepts any job meeting policy rules.
+     - `ASK_ME`: Enqueues an Offer; device displays interactive acceptance modal before downloading/executing.
+     - `SCHEDULED_AUTO`: Auto-accepts only during designated hours (e.g., 22:00 - 07:00).
+     - `PAUSED`: Contributes zero compute; heartbeats indicate paused state.
+  2. Add `/api/v1/nodes/:id/offer/accept` and `/api/v1/nodes/:id/offer/decline` endpoints.
+  3. Mobile "Ask Me" Dialog: Displays workload name, task description, CPU/RAM limits, battery impact estimate, reward in Test CR, and buttons for `Accept`, `Decline`, `Always Accept Similar`.
+  4. Emergency Stop: Immediate termination of running workload and node status change to `PAUSED`.
+- **Verification:**
+  - Test offer/accept and offer/decline flows on backend and client.
+
+### Phase 6: Fleet Management Engine (1–10k+ Nodes, Groups, Bulk Actions)
+- **Files Modified:**
+  - `apps/cloudflare-control-plane/src/coordinator.js`
+  - `apps/web-console/src/main.js`
+  - `apps/web-console/index.html`
+- **Actions:**
+  1. Add bulk selection: Multi-checkbox, "Select All", "Select Filtered".
+  2. Bulk Actions: Batch Pause, Batch Resume, Batch Rebenchmark, Batch Set Policy, Batch Revoke, Batch Delete.
+  3. Fleet Categorization: Filter by `Physical Android`, `iOS Nodes`, `Desktops`, `Emulators`, `Simulated`.
+  4. Strict Isolation: Simulated nodes never contaminate production metrics or receive non-simulated workloads.
+  5. Search and filter by model, node ID, status (`READY`, `BUSY`, `PAUSED`, `OFFLINE`), RAM, and battery.
+- **Verification:**
+  - Test bulk operations in `coordinator.test.js`.
+
+### Phase 7: Web Console Visual/UX Overhaul (Progressive Disclosure & Wizard)
+- **Files Modified:**
+  - `apps/web-console/index.html`
+  - `apps/web-console/src/main.js`
+  - `apps/web-console/src/index.css`
+- **Actions:**
+  1. Overhaul Navigation Bar:
+     - `Overview` | `Fleet` | `Workloads` | `Jobs` | `Usage & Credits` | `Administration`.
+  2. Overview Dashboard:
+     - Fabric Health status banner.
+     - Live Capacity: Ready, Busy, Paused, Offline nodes.
+     - Active Workload Throughput: Running, Queued, Completed, Failed jobs.
+     - Network Credits Settled.
+  3. Workload Studio Progressive Disclosure:
+     - Simple Mode (Default): Card selector (Hello World, SHA-256, Prime Sieve, Matrix, Custom Upload) $\rightarrow$ Resource Sliders $\rightarrow$ Estimated Cost & Time $\rightarrow$ "Dispatch to Cluster".
+     - Advanced Toggle: Raw YAML editor, Fuel Gas Limits, Memory Bytes, Leases, Fencing Tokens.
+  4. Jobs View:
+     - Tabs: `All` | `Queued` | `Offered` | `Running` | `Completed` | `Failed`.
+     - Authoritative counts matching database query.
+     - Job details pane showing: State machine progress bar, Device rationale ("Why this device?"), Sandboxed logs (stdout/stderr), Cryptographic Proof & Signature, Double-entry transaction link.
+  5. Accessible Toasts & Action Dialogs:
+     - Completely eliminate native `alert()` and `confirm()` calls in favor of accessible DOM toasts and modal confirmation dialogs.
+     - Remove duplicate Add/Submit/Refresh controls.
+- **Verification:**
+  - Clean Vite production build with zero errors.
+
+### Phase 8: Android Node UX Overhaul (Clean 6-Tab Architecture)
+- **Files Modified:**
+  - `apps/android-node/app/src/main/java/dev/spaas/node/MainActivity.kt`
+  - `apps/android-node/app/src/main/java/dev/spaas/node/service/ComputeWorkerClient.kt`
+  - `apps/android-node/app/src/main/java/dev/spaas/node/service/ComputeForegroundService.kt`
+- **Actions:**
+  1. Structure 6-Tab Bottom Navigation:
+     - **Home:** Connected status (`READY`, `BUSY`, `PAUSED`), active workload card, live battery/thermal/RAM gauges, quick Pause/Resume switch.
+     - **Jobs:** Sub-tabs for `Offers` (with Accept/Decline), `Assigned/Running` (with live progress bar), and `History` (with verified badges, fuel, wall time, and delete/clear controls).
+     - **Performance:** Measured capabilities (WASM Fuel MIPS, Single/Multi-thread score, RAM Bandwidth, Network Latency, Thermal Drift), not generic vanity scores.
+     - **Controls:** Mode selector (`AUTO_ACCEPT`, `ASK_ME`, `SCHEDULED_AUTO`, `PAUSED`), preset safety tiers (`Conservative`, `Balanced`, `Maximum`), custom sliders (Battery %, Charging Only, Unmetered Wi-Fi Only, Thermal Ceiling).
+     - **Earnings:** Per-job, session, and lifetime Test CR earnings, transparent settlement formula.
+     - **Security:** Node cryptographic ID, Ed25519 public key, sandbox isolation status, server verification attestation, Reset/Revoke identity buttons.
+- **Verification:**
+  - Verify Kotlin code structure, coroutine cancellation safety, and clean build.
+
+### Phase 9: Real-time Convergence, Idempotency, and Lease Resilience
+- **Files Modified:**
+  - `apps/cloudflare-control-plane/src/coordinator.js`
+  - `apps/web-console/src/main.js`
+- **Actions:**
+  1. Double-Entry Ledger:
+     - Ensure exactly-once idempotent settlement via unique `idempotency_key` constraints (`settle_${job_id}_epoch${epoch}_debit` and `settle_${job_id}_epoch${epoch}_credit`).
+     - Duplicate submissions return existing settlement without creating new ledger rows.
+  2. Lease Expiration & Re-queue:
+     - DO alarm sweeps expired leases, marks them `EXPIRED`, resets node state to `Ready`, and requeues jobs if `retry_count < max_retries`.
+  3. Auto-reconnect & Staleness:
+     - Web Console detects disconnected/stale backend and displays visual reconnection banner.
+     - Android auto-reconnects with exponential backoff.
+- **Verification:**
+  - Automated tests for duplicate result idempotency, stale lease sweep, and reconnect backoff.
+
+### Phase 10: Validation, Comprehensive Test Suites & Truthful Documentation
+- **Actions:**
+  1. Expand `apps/cloudflare-control-plane/tests/coordinator.test.js`:
+     - Test all 12 state transitions.
+     - Test generic workload execution (Hello World, SHA-256, Prime Sieve, Matrix Compute).
+     - Test scheduler filtering and decision explainability.
+     - Test provider policy enforcement and rejection handling.
+     - Test bulk node management and simulated node isolation.
+     - Target: $\ge 90\%$ control plane line coverage, 100% test pass rate.
+  2. Verify Web Console Vite build.
+  3. Update Documentation:
+     - `WALKTHROUGH.md`: Complete before $\rightarrow$ after flow, architecture diagrams, test results, physical acceptance guidelines.
+     - `REQUIREMENTS_TRACEABILITY.md`: Trace every requirement to code and tests.
+     - `CHANGELOG.md`: Detailed entry for version 7.0.0.
+     - `TODO.md`: Clear completed tasks and document future milestones.
+- **Verification:**
+  - Run all tests and verify 100% pass rate.
+
+---
+
+## 5. Acceptance Criteria
+
+1. **Root-Cause Defect Resolution:**
+   - `mode is not defined` error in Web Console completely eradicated.
+   - Workload submission (`edge-matrix-multiplication` and all presets) succeeds without client errors.
+   - Dispatched jobs on Android execute sandboxed WASM, verify SHA-256, and submit signed receipts without freezing in `DISPATCHED`.
+   - Node state returns to `Ready` immediately upon job completion or failure, allowing queued jobs to be scheduled.
+
+2. **Authoritative State Machine:**
+   - 12 sequential states + 5 terminal/failure states strictly enforced in SQLite `job_transitions`.
+   - Web Console displays live transitions with timestamps and explanations for queued status.
+
+3. **Generic Workload Pipeline:**
+   - Hello World, SHA-256 Hasher, Prime Sieve, Matrix Multiplication, and custom WASM all execute through the unified pipeline.
+   - Double-entry ledger settlement awards Test CR based on verified fuel consumption.
+
+4. **Capability-Aware Scheduler:**
+   - Evaluates node hardware, battery, thermals, and provider policies.
+   - Generates transparent `scheduler_decision` explaining why a node was chosen and why others were excluded.
+
+5. **Provider Controls & Node UX:**
+   - Android node supports Auto Accept, Ask Me, Scheduled Auto, Paused.
+   - Clean 6-tab interface (Home, Jobs, Performance, Controls, Earnings, Security) with individual delete and clear all history controls.
+
+6. **Web Console Visual UX:**
+   - Modern, responsive, accessible progressive disclosure interface.
+   - Simple Mode wizard for casual users, Advanced mode for power users.
+   - No `alert()` dialogs.
+
+7. **Test Quality & Evidence:**
+   - 100% test pass rate across control plane test suite.
+   - $\ge 90\%$ measured line coverage across Cloudflare DO control plane.
+   - Strict evidence labeling throughout all documentation.

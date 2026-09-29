@@ -37,10 +37,10 @@ import kotlinx.coroutines.launch
 
 enum class NodeNavTab(val title: String, val iconEmoji: String) {
     HOME("Home", "🏠"),
+    JOBS("Jobs", "💼"),
     PERFORMANCE("Perf", "⚡"),
     CONTROLS("Controls", "🎛️"),
-    ACTIVITY("Activity", "📋"),
-    EARNINGS("Credits", "🪙"),
+    EARNINGS("Earnings", "🪙"),
     SECURITY("Security", "🛡️")
 }
 
@@ -286,6 +286,56 @@ fun SpaasAppScaffold(
         }
     }
 
+    var pendingOffer by remember { mutableStateOf<Triple<String, String, Double>?>(null) }
+    var onAcceptCallback by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var onDeclineCallback by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    LaunchedEffect(Unit) {
+        ComputeWorkerClient.onJobOffered = { jobId, name, credits, accept, decline ->
+            pendingOffer = Triple(jobId, name, credits)
+            onAcceptCallback = accept
+            onDeclineCallback = decline
+        }
+    }
+
+    if (pendingOffer != null) {
+        AlertDialog(
+            onDismissRequest = { /* explicit choice required */ },
+            title = { Text("Workload Offer Received", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Workload: ${pendingOffer!!.second}", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Job ID: ${pendingOffer!!.first.take(12)}...", color = Color.Gray, fontSize = 12.sp)
+                    Text("Estimated Reward: ${pendingOffer!!.third} TEST CR", color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                    Text("Policy check passed. Execute this sandboxed task?", color = Color.LightGray, fontSize = 12.sp)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cb = onAcceptCallback
+                        pendingOffer = null
+                        cb?.invoke()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                ) {
+                    Text("Accept & Run", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        val cb = onDeclineCallback
+                        pendingOffer = null
+                        cb?.invoke()
+                    }
+                ) {
+                    Text("Decline", color = Color(0xFFEF4444))
+                }
+            }
+        )
+    }
+
     Scaffold(
         bottomBar = {
             NavigationBar(
@@ -375,6 +425,21 @@ fun SpaasAppScaffold(
                     onPauseToggle = onPauseToggle
                 )
 
+                NodeNavTab.JOBS -> JobsView(
+                    context = context,
+                    pendingOffer = pendingOffer,
+                    onAcceptOffer = {
+                        val cb = onAcceptCallback
+                        pendingOffer = null
+                        cb?.invoke()
+                    },
+                    onDeclineOffer = {
+                        val cb = onDeclineCallback
+                        pendingOffer = null
+                        cb?.invoke()
+                    }
+                )
+
                 NodeNavTab.PERFORMANCE -> PerformanceView(
                     telemetry = telemetry
                 )
@@ -382,7 +447,10 @@ fun SpaasAppScaffold(
                 NodeNavTab.CONTROLS -> ControlsView(
                     policy = safetyPolicy,
                     onPolicyChanged = {
-                        // Persist or trigger effective policy update
+                        coroutineScope.launch {
+                            val tel = telemetry ?: monitor.collectTelemetry()
+                            ComputeWorkerClient.sendHeartbeat(tel, safetyPolicy)
+                        }
                     },
                     onEmergencyStop = {
                         safetyPolicy.emergencyStopImmediately = true
@@ -394,11 +462,15 @@ fun SpaasAppScaffold(
                     }
                 )
 
-                NodeNavTab.ACTIVITY -> ActivityView()
-
                 NodeNavTab.EARNINGS -> EarningsView()
 
-                NodeNavTab.SECURITY -> SecurityView(context = context)
+                NodeNavTab.SECURITY -> SecurityView(
+                    context = context,
+                    onUnpair = {
+                        ComputeWorkerClient.clearIdentity(context)
+                        onStopService()
+                    }
+                )
             }
         }
     }
@@ -920,6 +992,9 @@ fun BenchmarkRow(metric: String, value: String, subtext: String) {
 // ==========================================
 // 3. CONTROLS VIEW (Android Owner Control Center)
 // ==========================================
+// ==========================================
+// 3. CONTROLS VIEW (Android Owner Control Center)
+// ==========================================
 @Composable
 fun ControlsView(
     policy: ProviderSafetyPolicy,
@@ -927,6 +1002,7 @@ fun ControlsView(
     onEmergencyStop: () -> Unit,
     onPause: () -> Unit
 ) {
+    var providerMode by remember { mutableStateOf(policy.providerMode) }
     var enableContribution by remember { mutableStateOf(policy.enableContribution) }
     var maxCpuPct by remember { mutableFloatStateOf(policy.maxCpuPct.toFloat()) }
     var maxRamMb by remember { mutableFloatStateOf(policy.maxRamMb.toFloat()) }
@@ -938,13 +1014,121 @@ fun ControlsView(
     var minBattery by remember { mutableFloatStateOf(policy.minBatteryThresholdPct.toFloat()) }
     var stopBattery by remember { mutableFloatStateOf(policy.stopBatteryThresholdPct.toFloat()) }
 
+    fun refreshFromPolicy() {
+        providerMode = policy.providerMode
+        enableContribution = policy.enableContribution
+        maxCpuPct = policy.maxCpuPct.toFloat()
+        maxRamMb = policy.maxRamMb.toFloat()
+        onlyWhileCharging = policy.onlyWhileCharging
+        onlyOnWifi = policy.onlyOnUnmeteredWifi
+        allowMobileData = policy.allowMobileData
+        minBattery = policy.minBatteryThresholdPct.toFloat()
+        stopBattery = policy.stopBatteryThresholdPct.toFloat()
+        onPolicyChanged()
+    }
+
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Text("Owner Control Center", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text("You maintain final authority over this phone. The server cannot override your settings.", fontSize = 12.sp, color = Color.Gray)
+            Text("You maintain sovereign authority over this phone. The server cannot override your settings.", fontSize = 12.sp, color = Color.Gray)
         }
 
-        // Section: Compute
+        // Section: Provider Mode (AUTO ACCEPT / ASK ME / SCHEDULED / PAUSED)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("PROVIDER OPERATING MODE", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E5FF))
+                    Text("Select how this device accepts incoming workloads from the fabric.", fontSize = 11.sp, color = Color.Gray)
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        dev.spaas.node.policy.ProviderMode.values().forEach { mode ->
+                            val isSelected = providerMode == mode
+                            val label = when (mode) {
+                                dev.spaas.node.policy.ProviderMode.AUTO_ACCEPT -> "Auto"
+                                dev.spaas.node.policy.ProviderMode.ASK_ME -> "Ask Me"
+                                dev.spaas.node.policy.ProviderMode.SCHEDULED_AUTO -> "Sched"
+                                dev.spaas.node.policy.ProviderMode.PAUSED -> "Paused"
+                            }
+                            Button(
+                                onClick = {
+                                    providerMode = mode
+                                    policy.providerMode = mode
+                                    onPolicyChanged()
+                                },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) Color(0xFF00E5FF) else Color(0xFF1E293B),
+                                    contentColor = if (isSelected) Color.Black else Color.LightGray
+                                )
+                            ) {
+                                Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    val modeDescription = when (providerMode) {
+                        dev.spaas.node.policy.ProviderMode.AUTO_ACCEPT -> "Auto Accept: Workloads matching your resource policies run automatically."
+                        dev.spaas.node.policy.ProviderMode.ASK_ME -> "Ask Me: Interactive dialog prompts you before each workload runs with details & rewards."
+                        dev.spaas.node.policy.ProviderMode.SCHEDULED_AUTO -> "Scheduled Auto: Only accepts workloads during preferred time windows or while charging."
+                        dev.spaas.node.policy.ProviderMode.PAUSED -> "Paused: No new workloads will be accepted until resumed."
+                    }
+                    Text(modeDescription, fontSize = 11.sp, color = Color(0xFF94A3B8))
+                }
+            }
+        }
+
+        // Section: Presets (Conservative / Balanced / Maximum)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("SAFETY PRESETS", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF10B981))
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(
+                            onClick = {
+                                policy.applyConservativePreset()
+                                refreshFromPolicy()
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
+                        ) {
+                            Text("Conservative", fontSize = 10.sp, color = Color(0xFF38BDF8))
+                        }
+                        Button(
+                            onClick = {
+                                policy.applyBalancedPreset()
+                                refreshFromPolicy()
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
+                        ) {
+                            Text("Balanced", fontSize = 10.sp, color = Color(0xFF10B981))
+                        }
+                        Button(
+                            onClick = {
+                                policy.applyMaximumPreset()
+                                refreshFromPolicy()
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
+                        ) {
+                            Text("Maximum", fontSize = 10.sp, color = Color(0xFFF59E0B))
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section: Compute Capacity
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1077,11 +1261,26 @@ fun ControlsView(
 }
 
 // ==========================================
-// 4. ACTIVITY VIEW
+// 4. JOBS VIEW (Offers / Running / History)
 // ==========================================
+enum class JobsSubTab(val label: String) {
+    ALL("All"),
+    OFFERS("Offers"),
+    RUNNING("Running"),
+    HISTORY("History")
+}
+
 @Composable
-fun ActivityView() {
+fun JobsView(
+    context: Context,
+    pendingOffer: Triple<String, String, Double>?,
+    onAcceptOffer: () -> Unit,
+    onDeclineOffer: () -> Unit
+) {
+    var selectedSubTab by remember { mutableStateOf(JobsSubTab.ALL) }
     var history by remember { mutableStateOf(LocalJobHistoryRepository.getRecent()) }
+    val activeJob = ComputeForegroundService.currentActiveJob
+    val nodeState = ComputeForegroundService.currentNodeState
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -1091,46 +1290,173 @@ fun ActivityView() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Execution History & Audit Log", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text("Auditable cryptographic record of jobs executed on this phone", fontSize = 12.sp, color = Color.Gray)
+                    Text("Workload Execution & History", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Realtime offers, active sandbox executions, and auditable history", fontSize = 12.sp, color = Color.Gray)
                 }
-                if (history.isNotEmpty()) {
+                if (history.isNotEmpty() && (selectedSubTab == JobsSubTab.ALL || selectedSubTab == JobsSubTab.HISTORY)) {
                     TextButton(
                         onClick = {
                             LocalJobHistoryRepository.clearHistory()
                             history = emptyList()
                         }
                     ) {
-                        Text("Clear All", color = Color(0xFFEF4444), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("Clear History", color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
 
-        if (history.isEmpty()) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Text(
-                        "No jobs in history.\nRun a verification job from the Web Console or wait for scheduled workloads.",
-                        modifier = Modifier.padding(20.dp),
-                        color = Color.Gray,
-                        fontSize = 13.sp
-                    )
+        // Sub-Tab Filter Pills
+        item {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                JobsSubTab.values().forEach { tab ->
+                    val isSelected = selectedSubTab == tab
+                    val badgeCount = when (tab) {
+                        JobsSubTab.ALL -> (if (pendingOffer != null) 1 else 0) + (if (activeJob != null) 1 else 0) + history.size
+                        JobsSubTab.OFFERS -> if (pendingOffer != null) 1 else 0
+                        JobsSubTab.RUNNING -> if (activeJob != null) 1 else 0
+                        JobsSubTab.HISTORY -> history.size
+                    }
+                    Button(
+                        onClick = { selectedSubTab = tab },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isSelected) Color(0xFF00E5FF) else Color(0xFF1E293B),
+                            contentColor = if (isSelected) Color.Black else Color.LightGray
+                        )
+                    ) {
+                        Text("${tab.label} ($badgeCount)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
-        } else {
-            items(history, key = { it.jobId }) { entry ->
-                JobHistoryCard(
-                    entry = entry,
-                    onDelete = {
-                        LocalJobHistoryRepository.removeEntry(entry.jobId)
-                        history = LocalJobHistoryRepository.getRecent()
+        }
+
+        // Section: Active Offers
+        if (selectedSubTab == JobsSubTab.ALL || selectedSubTab == JobsSubTab.OFFERS) {
+            if (pendingOffer != null) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B))
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("OFFER PENDING APPROVAL", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("${pendingOffer.third} TEST CR", color = Color(0xFF10B981), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                            Text(pendingOffer.second, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 15.sp)
+                            Text("Job ID: ${pendingOffer.first.take(16)}...", fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = Color.Gray)
+                            Text("Deterministic WASM Sandbox | Policy-Verified Clean", fontSize = 11.sp, color = Color.LightGray)
+
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = onAcceptOffer,
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Accept & Execute", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                                OutlinedButton(
+                                    onClick = onDeclineOffer,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Decline", color = Color(0xFFEF4444), fontSize = 12.sp)
+                                }
+                            }
+                        }
                     }
-                )
+                }
+            } else if (selectedSubTab == JobsSubTab.OFFERS) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Text(
+                            "No pending workload offers at this time.",
+                            modifier = Modifier.padding(20.dp),
+                            color = Color.Gray,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // Section: Currently Running Workload
+        if (selectedSubTab == JobsSubTab.ALL || selectedSubTab == JobsSubTab.RUNNING) {
+            if (activeJob != null) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF064E3B))
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("ACTIVE SANDBOX EXECUTION", color = Color(0xFF34D399), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text(nodeState, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                            Text(activeJob, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth().height(6.dp),
+                                color = Color(0xFF00E5FF),
+                                trackColor = Color(0xFF0F766E)
+                            )
+                            Text("Sandboxed WASI execution in progress. Cryptographic proof will be Ed25519-signed upon completion.", fontSize = 11.sp, color = Color.LightGray)
+                        }
+                    }
+                }
+            } else if (selectedSubTab == JobsSubTab.RUNNING) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Text(
+                            "No workload actively running. Device is $nodeState.",
+                            modifier = Modifier.padding(20.dp),
+                            color = Color.Gray,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // Section: Execution History
+        if (selectedSubTab == JobsSubTab.ALL || selectedSubTab == JobsSubTab.HISTORY) {
+            if (history.isEmpty()) {
+                if (selectedSubTab == JobsSubTab.HISTORY || (pendingOffer == null && activeJob == null)) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            Text(
+                                "No jobs in execution history.\nSubmit a workload from the Web Console to observe edge execution.",
+                                modifier = Modifier.padding(20.dp),
+                                color = Color.Gray,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+            } else {
+                items(history, key = { it.jobId }) { entry ->
+                    JobHistoryCard(
+                        entry = entry,
+                        onDelete = {
+                            LocalJobHistoryRepository.removeEntry(entry.jobId)
+                            history = LocalJobHistoryRepository.getRecent()
+                        }
+                    )
+                }
             }
         }
     }
@@ -1220,9 +1546,43 @@ fun EarningsView() {
 // 6. SECURITY VIEW
 // ==========================================
 @Composable
-fun SecurityView(context: Context) {
+fun SecurityView(
+    context: Context,
+    onUnpair: () -> Unit
+) {
     val pubKeyHex = ComputeWorkerClient.getPublicKeyHex()
     val nodeId = ComputeWorkerClient.pairedNodeId ?: "Not Paired"
+    var showRevokeConfirm by remember { mutableStateOf(false) }
+
+    if (showRevokeConfirm) {
+        AlertDialog(
+            onDismissRequest = { showRevokeConfirm = false },
+            title = { Text("Reset & Revoke Identity?", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Revoking this node will delete its cryptographic Ed25519 identity key and unpair it from the fabric cluster. You will need to re-scan a QR code to reconnect.",
+                    color = Color.White,
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showRevokeConfirm = false
+                        onUnpair()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+                ) {
+                    Text("Confirm Revoke", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showRevokeConfirm = false }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            }
+        )
+    }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -1273,8 +1633,31 @@ fun SecurityView(context: Context) {
                 }
             }
         }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1014))
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("NODE IDENTITY MANAGEMENT", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+                    Text("Node ID: $nodeId", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+
+                    Button(
+                        onClick = { showRevokeConfirm = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("🗑️ Reset & Revoke Device Identity", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
     }
 }
+
+
 
 @Composable
 fun PermissionAuditRow(name: String, status: String) {

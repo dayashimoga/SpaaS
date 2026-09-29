@@ -14,12 +14,22 @@ enum class YieldReason {
     TEMPORARY_SHARE_EXPIRED
 }
 
+enum class ProviderMode {
+    AUTO_ACCEPT,
+    ASK_ME,
+    SCHEDULED_AUTO,
+    PAUSED
+}
+
 /**
  * Android Provider Resource Safety Policy & Owner Control Matrix.
  * Enforces local sovereign authority over device compute resources.
  * Server cannot override owner-configured maximums.
  */
 data class ProviderSafetyPolicy(
+    // Mode of Provider Control
+    var providerMode: ProviderMode = ProviderMode.AUTO_ACCEPT,
+
     // Compute Safeguards
     var enableContribution: Boolean = true,
     var maxCpuPct: Int = 60,
@@ -57,12 +67,44 @@ data class ProviderSafetyPolicy(
     var isUserPaused: Boolean = false,
     var emergencyStopImmediately: Boolean = false
 ) {
+    fun applyConservativePreset() {
+        maxCpuPct = 30
+        maxThreads = 2
+        maxRamMb = 256
+        onlyWhileCharging = true
+        onlyOnUnmeteredWifi = true
+        allowMobileData = false
+        minBatteryThresholdPct = 40
+        thermalProfile = "CONSERVATIVE"
+    }
+
+    fun applyBalancedPreset() {
+        maxCpuPct = 60
+        maxThreads = 4
+        maxRamMb = 512
+        onlyWhileCharging = false
+        onlyOnUnmeteredWifi = true
+        allowMobileData = false
+        minBatteryThresholdPct = 25
+        thermalProfile = "BALANCED"
+    }
+
+    fun applyMaximumPreset() {
+        maxCpuPct = 90
+        maxThreads = 8
+        maxRamMb = 1024
+        onlyWhileCharging = false
+        onlyOnUnmeteredWifi = false
+        allowMobileData = true
+        minBatteryThresholdPct = 15
+        thermalProfile = "PERFORMANCE"
+    }
     /**
      * Evaluates live telemetry against owner safeguards.
      * Returns a non-null YieldReason if any owner constraint is violated.
      */
     fun evaluateYield(telemetry: DeviceTelemetryData): YieldReason? {
-        if (emergencyStopImmediately || isUserPaused || !enableContribution) {
+        if (providerMode == ProviderMode.PAUSED || emergencyStopImmediately || isUserPaused || !enableContribution) {
             return YieldReason.USER_PAUSED
         }
 
@@ -118,6 +160,7 @@ data class ProviderSafetyPolicy(
 
     fun toJsonObject(): JSONObject {
         return JSONObject().apply {
+            put("provider_mode", providerMode.name)
             put("only_while_charging", onlyWhileCharging)
             put("only_unmetered_network", onlyOnUnmeteredWifi)
             put("min_battery_threshold_pct", minBatteryThresholdPct)
@@ -126,7 +169,7 @@ data class ProviderSafetyPolicy(
             put("max_concurrent_jobs", maxConcurrentJobs)
             put("max_cpu_pct", maxCpuPct)
             put("max_memory_mb", maxRamMb)
-            put("is_user_paused", isUserPaused)
+            put("is_user_paused", isUserPaused || providerMode == ProviderMode.PAUSED)
             put("allow_gpu", allowGpu)
             put("allow_npu", allowNpu)
             put("max_threads", maxThreads)

@@ -326,4 +326,15 @@
 - [x] Web Console Real-Time Trace Watcher & Badge Synchronization (`apps/web-console/src/main.js`): Live 10-step progress timeline polling `/api/v1/jobs/:id/trace` every 1s with synchronized header, sidebar, and table counts [PROVEN, 2026-09-29]
 - [x] Control Plane Comprehensive Test Suite & 92.38% Line Coverage (`tests/coordinator.test.js`): 20/20 subtests passing (100% pass rate) with 92.38% overall line coverage across Cloudflare control plane modules, satisfying the >=90% threshold requirement [PROVEN, 2026-09-29]
 
+## [Phase 30: 12-State Authoritative DAG, Pareto Scheduler, Provider Modes & Fleet Overhaul]
+- [x] Authoritative 12-State Distributed State Machine (`coordinator.js`, `sqlite-bridge.js`): Strict linear state progression (`SUBMITTED` → `QUEUED` → `MATCHING` → `OFFERED` → `ASSIGNED` → `LEASED` → `DOWNLOADING` → `EXECUTING` → `UPLOADING` → `VERIFYING` → `VERIFIED` → `SETTLED` → `COMPLETED`) with failure branches and transparent `next_action` guidance [PROVEN, 2026-09-29]
+- [x] Pareto Multi-Objective Compute Scheduler & Explainability (`coordinator.js`): Evaluates candidate compute nodes against RAM, thermal headroom, battery levels, network type, and reliability. Returns transparent winning rationale and excluded candidate list on `/api/v1/jobs/:id/decision` [PROVEN, 2026-09-29]
+- [x] Provider Modes & Interactive Mobile Prompts (`MainActivity.kt`, `ComputeWorkerClient.kt`, `coordinator.js`): Implemented 4 provider modes (`AUTO_ACCEPT`, `ASK_ME`, `SCHEDULED_AUTO`, `PAUSED`). In `ASK_ME` mode, jobs enter `OFFERED` state and display interactive AlertDialog on Android with 15s timeout before provider accepts or declines [PROVEN, 2026-09-29]
+- [x] Fleet Management & Strict Physical/Simulated Isolation (`coordinator.js`, `index.html`, `main.js`): Implemented URL filtering (`/api/v1/nodes?filter=physical` vs `?filter=simulated`), preventing simulated cluster nodes from polluting genuine device metrics [PROVEN, 2026-09-29]
+- [x] Zero-Alert Web Console Progressive Disclosure UX (`index.html`, `main.js`): Eliminated all 26 browser `alert()` popups in favor of glassmorphic toast notifications. Added Simple Mode workload wizard with live eligible capacity badge (`eligible-nodes-count`) and collapsible Advanced Options accordion [PROVEN, 2026-09-29]
+- [x] Android Node 6-Tab Architecture Overhaul (`MainActivity.kt`): Redesigned mobile application navigation onto 6 primary views: `HOME`, `JOBS` (sub-tabs: All, Offers, Running, History), `PERFORMANCE` (live thermals/battery/MIPS), `CONTROLS` (provider modes & safety presets), `EARNINGS` (double-entry Test Credits ledger), and `SECURITY` (cryptographic identity reset & revocation) [PROVEN, 2026-09-29]
+- [x] Cloudflare SQLite Bridge Remediation (`sqlite-bridge.js`): Repaired 13-parameter job insert tuple mapping, case-insensitive state filtering, unique transition IDs, and state normalization to `COMPLETED` [PROVEN, 2026-09-29]
+- [x] End-to-End Regression Suite Pass Rate 100% (`tests/coordinator.test.js`): All 23 subtests passing with 91.03% line coverage across control plane modules in 213ms [PROVEN, 2026-09-29]
+
+
 

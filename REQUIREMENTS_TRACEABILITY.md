@@ -55,7 +55,7 @@
 | REQ-SCH-01 | Multi-attribute Pareto scheduling (Rust) | COMPLETE | `spaas-scheduler-core`: 5 tests, 10K-node benchmark | — |
 | REQ-SCH-02 | Cloudflare DO scheduling | COMPLETE | Multi-attribute capability scoring ported to Cloudflare Durable Object coordinator | GAP-C02 (RESOLVED) |
 | REQ-SCH-03 | Renewable job leases & fencing | COMPLETE | Integration test `lease_lifecycle_reschedule` passes | — |
-| REQ-SCH-04 | Job lifecycle (submit/schedule/execute/verify/complete) | COMPLETE | 11-step authoritative lifecycle (`CREATED` -> `QUEUED` -> `ASSIGNED` -> `LEASED` -> `DISPATCHED` -> `ACKNOWLEDGED` -> `RUNNING` -> `RESULT_SUBMITTED` -> `VERIFYING` -> `VERIFIED` -> `SETTLED` -> `COMPLETED`) verified via WSS push & poll fallback in `coordinator.test.js` Subtests 18 & 20 | — |
+| REQ-SCH-04 | Job lifecycle (submit/schedule/execute/verify/complete) | COMPLETE | Authoritative 12-state DAG (`SUBMITTED` → `QUEUED` → `MATCHING` → `OFFERED` → `ASSIGNED` → `LEASED` → `DOWNLOADING` → `EXECUTING` → `UPLOADING` → `VERIFYING` → `VERIFIED` → `SETTLED` → `COMPLETED`) with Pareto explainability and provider modes (`AUTO_ACCEPT`, `ASK_ME`, `SCHEDULED_AUTO`, `PAUSED`) verified via `coordinator.test.js` Subtests 17, 18, 20, 22 & 23 | — |
 
 ## Domain 5: Metering & Credits
 

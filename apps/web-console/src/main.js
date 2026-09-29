@@ -387,7 +387,7 @@ function setConnectionState(newState, reason) {
   const walIntegrity = document.getElementById('wal-integrity-val');
   const workerChanMetric = document.getElementById('metric-worker-channel');
 
-  const isUnconfigured = mode === 'UNCONFIGURED' || (!API_BASE && window.location.protocol === 'https:' && !localStorage.getItem('spaas_api_url'));
+  const isUnconfigured = newState === 'UNCONFIGURED' || (!API_BASE && window.location.protocol === 'https:' && !localStorage.getItem('spaas_api_url'));
 
   if (endpointLabel) {
     if (isUnconfigured) {
@@ -820,7 +820,7 @@ function repairConfiguration() {
   connectEventStream();
   refreshAllData();
   runDiagnostics();
-  alert('Configuration successfully restored to default production endpoint: ' + (API_BASE || CLOUDFLARE_WORKER_URL));
+  showToast('Configuration successfully restored to default production endpoint: ' + (API_BASE || CLOUDFLARE_WORKER_URL), 'success');
 }
 
 function copyDiagnosticsReport() {
@@ -1228,10 +1228,29 @@ async function fetchNodes() {
     } else {
       renderNodeDetails(null);
     }
+    updateStudioCapacityEstimate();
   } catch (err) {
     console.warn('Error fetching nodes:', err);
   }
 }
+
+function updateStudioCapacityEstimate() {
+  const countEl = document.getElementById('eligible-nodes-count');
+  const rewardEl = document.getElementById('estimated-reward-text');
+  if (!countEl) return;
+  const readyNodes = (cachedNodes || []).filter(n => {
+    const st = (n.state || '').toUpperCase();
+    return st === 'READY' || st === 'ACTIVE' || st === 'IDLE';
+  });
+  countEl.textContent = readyNodes.length > 0 ? `${readyNodes.length} Device${readyNodes.length > 1 ? 's' : ''} Ready` : '0 Devices (Will Queue)';
+  countEl.style.color = readyNodes.length > 0 ? '#10B981' : '#F59E0B';
+  if (rewardEl) {
+    const preset = document.getElementById('form-starter-preset')?.value || 'hello';
+    const cr = preset === 'hello' ? '12 TEST CR' : (preset === 'sha256' ? '25 TEST CR' : (preset === 'primes' ? '30 TEST CR' : '38 TEST CR'));
+    rewardEl.textContent = cr;
+  }
+}
+window.updateStudioCapacityEstimate = updateStudioCapacityEstimate;
 
 function renderNodesTable(nodes) {
   const tbody = document.getElementById('nodes-table-body');
@@ -1397,7 +1416,7 @@ window.spaasRevokeNode = async function(nodeId) {
     await fetchNodes();
     await fetchSystemHealth();
   } catch (err) {
-    alert(`Failed to revoke node: ${err.message}`);
+    showToast(`Failed to revoke node: ${err.message}`, 'error');
   }
 };
 
@@ -1416,7 +1435,7 @@ window.spaasDeleteNode = async function(nodeId) {
     await fetchNodes();
     await fetchSystemHealth();
   } catch (err) {
-    alert(`Failed to delete node: ${err.message}`);
+    showToast(`Failed to delete node: ${err.message}`, 'error');
   }
 };
 
@@ -1434,7 +1453,7 @@ window.spaasPruneRevokedNodes = async function() {
     await fetchNodes();
     await fetchSystemHealth();
   } catch (err) {
-    alert(`Failed to prune devices: ${err.message}`);
+    showToast(`Failed to prune devices: ${err.message}`, 'error');
   }
 };
 
@@ -1450,7 +1469,7 @@ window.spaasClearAllNodes = async function() {
     await fetchNodes();
     await fetchSystemHealth();
   } catch (err) {
-    alert(`Failed to clear devices: ${err.message}`);
+    showToast(`Failed to clear devices: ${err.message}`, 'error');
   }
 };
 
@@ -1863,23 +1882,51 @@ async function fetchJobs() {
   }
 }
 
+function updateJobPillCounts(jobs) {
+  const total = jobs.length;
+  const queued = jobs.filter(j => ['QUEUED', 'PENDING', 'SCHEDULED', 'MATCHING'].includes((j.state || '').toUpperCase())).length;
+  const offered = jobs.filter(j => (j.state || '').toUpperCase() === 'OFFERED').length;
+  const running = jobs.filter(j => ['RUNNING', 'DISPATCHED', 'ACKNOWLEDGED', 'DOWNLOADING', 'EXECUTING', 'UPLOADING'].includes((j.state || '').toUpperCase())).length;
+  const completed = jobs.filter(j => ['COMPLETED', 'SETTLED', 'VERIFIED'].includes((j.state || '').toUpperCase())).length;
+  const failed = jobs.filter(j => ['FAILED', 'CANCELLED', 'EXPIRED', 'UNVERIFIED'].includes((j.state || '').toUpperCase())).length;
+
+  const elAll = document.getElementById('job-count-all');
+  if (elAll) elAll.textContent = total;
+  const elQueued = document.getElementById('job-count-queued');
+  if (elQueued) elQueued.textContent = queued;
+  const elOffered = document.getElementById('job-count-offered');
+  if (elOffered) elOffered.textContent = offered;
+  const elRunning = document.getElementById('job-count-running');
+  if (elRunning) elRunning.textContent = running;
+  const elCompleted = document.getElementById('job-count-completed');
+  if (elCompleted) elCompleted.textContent = completed;
+  const elFailed = document.getElementById('job-count-failed');
+  if (elFailed) elFailed.textContent = failed;
+  const elTotal = document.getElementById('job-list-count');
+  if (elTotal) elTotal.textContent = total;
+  const elBadge = document.getElementById('badge-jobs');
+  if (elBadge) elBadge.textContent = total;
+}
+
 function renderJobsTable(jobs) {
   const tbody = document.getElementById('jobs-table-body');
   if (!tbody) return;
 
+  updateJobPillCounts(cachedJobs);
+
   if (jobs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No jobs submitted yet. Use "+ Submit Job" or dispatch from the starter catalog.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted" style="padding: 24px;">No jobs match current filter. Use "Submit Workload" or dispatch from the starter catalog.</td></tr>';
     return;
   }
 
   tbody.innerHTML = jobs.map(j => {
-    const state = j.state || 'Queued';
-    const stateClass = (state === 'Completed' || state === 'Settled' || state === 'Verified') ? 'status-healthy'
-      : ((state === 'Running' || state === 'Dispatched' || state === 'Acknowledged') ? 'status-active'
-      : ((state === 'Queued' || state === 'Pending' || state === 'Scheduled') ? 'status-paused'
-      : ((state === 'Verifying') ? 'status-active' : 'status-error')));
+    const rawState = (j.state || 'QUEUED').toUpperCase();
+    const stateClass = (rawState === 'COMPLETED' || rawState === 'SETTLED' || rawState === 'VERIFIED') ? 'status-healthy'
+      : ((rawState === 'RUNNING' || rawState === 'DISPATCHED' || rawState === 'ACKNOWLEDGED' || rawState === 'DOWNLOADING' || rawState === 'EXECUTING' || rawState === 'UPLOADING') ? 'status-active'
+      : ((rawState === 'OFFERED') ? 'status-paused'
+      : ((rawState === 'QUEUED' || rawState === 'PENDING' || rawState === 'SCHEDULED' || rawState === 'MATCHING') ? 'status-paused'
+      : 'status-error')));
 
-    // Safe field access with fallbacks for both old and new API field names
     const jobId = j.job_id || j.id || 'unknown';
     const leaseId = j.current_lease?.lease_id
       ? `${j.current_lease.lease_id.substring(0, 8)}...`
@@ -1888,11 +1935,27 @@ function renderJobsTable(jobs) {
     const duration = j.result ? `${j.result.wall_time_ms ?? j.result.duration_ms ?? 0}ms` : '-';
     const workloadName = j.spec?.name || j.workload_id || 'workload';
 
+    // Rich status column with wait reason or live progress bar
+    let statusContent = `<div><span class="status-badge ${stateClass}">${rawState}</span></div>`;
+    if (rawState === 'QUEUED' && j.wait_reason) {
+      statusContent += `<div style="font-size: 0.72rem; color: #94a3b8; margin-top: 3px; max-width: 220px;" title="${escapeHtml(j.wait_reason)}">⏳ ${escapeHtml(j.wait_reason)}</div>`;
+    } else if (rawState === 'OFFERED') {
+      statusContent += `<div style="font-size: 0.7rem; color: #F59E0B; margin-top: 2px;">🤝 Awaiting provider accept</div>`;
+    } else if (['RUNNING', 'DOWNLOADING', 'EXECUTING', 'UPLOADING', 'DISPATCHED', 'ACKNOWLEDGED'].includes(rawState)) {
+      const pct = j.progress_pct != null ? j.progress_pct : 50;
+      statusContent += `
+        <div style="width: 100px; background: rgba(255,255,255,0.1); height: 4px; border-radius: 2px; margin-top: 4px; overflow: hidden;">
+          <div style="width: ${pct}%; background: #00E5FF; height: 100%; transition: width 0.3s ease;"></div>
+        </div>
+        <div style="font-size: 0.7rem; color: #38bdf8; margin-top: 2px;">${escapeHtml(j.stage_details || 'Executing in sandbox...')}</div>
+      `;
+    }
+
     return `
       <tr class="${selectedJob && (selectedJob.job_id || selectedJob.id) === jobId ? 'row-selected' : ''}" onclick="window.spaasSelectJob('${jobId}')">
         <td class="font-mono text-cyan">${jobId.substring(0, 12)}${jobId.length > 12 ? '...' : ''}</td>
         <td><strong>${escapeHtml(workloadName)}</strong></td>
-        <td><span class="status-badge ${stateClass}">${state.toUpperCase()}</span></td>
+        <td>${statusContent}</td>
         <td class="font-mono">${j.assigned_node_id ? j.assigned_node_id.substring(0, 8) + '...' : '-'}</td>
         <td class="font-mono">${leaseId}</td>
         <td>${j.retry_count || 0}</td>
@@ -1902,7 +1965,7 @@ function renderJobsTable(jobs) {
           <div style="display: flex; gap: 4px; align-items: center;">
             <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); window.spaasSelectJob('${jobId}')" title="View Telemetry & Logs">Details</button>
             <button class="btn btn-xs btn-primary" onclick="event.stopPropagation(); window.spaasEditJob('${jobId}')" title="Edit Parameters">Edit</button>
-            ${(state.toUpperCase() === 'QUEUED' || state.toUpperCase() === 'PENDING' || state.toUpperCase() === 'SCHEDULED' || state.toUpperCase() === 'RUNNING' || state.toUpperCase() === 'DISPATCHED' || state.toUpperCase() === 'ACKNOWLEDGED') ? `
+            ${(rawState === 'QUEUED' || rawState === 'PENDING' || rawState === 'SCHEDULED' || rawState === 'RUNNING' || rawState === 'DISPATCHED' || rawState === 'ACKNOWLEDGED' || rawState === 'OFFERED') ? `
               <button class="btn btn-xs btn-warning" onclick="event.stopPropagation(); window.spaasCancelJob('${jobId}')" title="Cancel Execution">Cancel</button>
             ` : `
               <button class="btn btn-xs btn-secondary" onclick="event.stopPropagation(); window.spaasRetryJob('${jobId}')" title="Re-queue / Retry">Retry</button>
@@ -2678,7 +2741,7 @@ function renderMeteringTable(records) {
 
 function downloadLedgerCsv() {
   if (!cachedMetering || cachedMetering.length === 0) {
-    alert('No ledger records available to export.');
+    showToast('No ledger records available to export.', 'warning');
     return;
   }
   const headers = ['id', 'tx_id', 'entry_type', 'account', 'counterparty', 'job_id', 'amount_credits', 'fuel_used', 'duration_ms', 'status', 'timestamp_iso'];
@@ -2816,7 +2879,7 @@ function initManifestStudio() {
       const validation = validateManifest(text);
 
       if (!validation.valid) {
-        alert(`Cannot submit invalid manifest:\n${validation.error}`);
+        showToast(`Cannot submit invalid manifest: ${validation.error}`, 'error');
         return;
       }
 
@@ -3260,7 +3323,7 @@ function initModals() {
   if (btnSaveTunnel && inputTunnel) {
     btnSaveTunnel.addEventListener('click', () => {
       const url = inputTunnel.value.trim();
-      if (!url) return alert('Please enter an HTTPS endpoint URL');
+      if (!url) return showToast('Please enter an HTTPS endpoint URL', 'warning');
       localStorage.setItem('spaas_api_url', url);
       API_BASE = url;
       btnSaveTunnel.textContent = 'Connecting...';
@@ -3284,7 +3347,7 @@ function initModals() {
       connectEventStream();
       refreshAllData();
       runDiagnostics();
-      alert('Successfully switched active endpoint to Primary Cloudflare Edge!');
+      showToast('Successfully switched active endpoint to Primary Cloudflare Edge!', 'success');
     });
   }
 
@@ -3560,7 +3623,7 @@ function initDeviceControls() {
 
   if (btnRename) {
     btnRename.addEventListener('click', async () => {
-      if (!selectedNode) return alert('No device selected.');
+      if (!selectedNode) return showToast('No device selected.', 'warning');
       const currentName = selectedNode.capabilities?.device_model || selectedNode.node_id;
       const newName = prompt('Enter new display name for device:', currentName);
       if (!newName || newName.trim() === currentName) return;
@@ -3573,14 +3636,14 @@ function initDeviceControls() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         await fetchNodes();
       } catch (err) {
-        alert(`Rename failed: ${err.message}`);
+        showToast(`Rename failed: ${err.message}`, 'error');
       }
     });
   }
 
   if (btnTogglePause) {
     btnTogglePause.addEventListener('click', async () => {
-      if (!selectedNode) return alert('No device selected.');
+      if (!selectedNode) return showToast('No device selected.', 'warning');
       const newState = selectedNode.state === 'Paused' ? 'Active' : 'Paused';
       try {
         const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/state`, {
@@ -3591,14 +3654,14 @@ function initDeviceControls() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         await fetchNodes();
       } catch (err) {
-        alert(`Failed to update state: ${err.message}`);
+        showToast(`Failed to update state: ${err.message}`, 'error');
       }
     });
   }
 
   if (btnDrain) {
     btnDrain.addEventListener('click', async () => {
-      if (!selectedNode) return alert('No device selected.');
+      if (!selectedNode) return showToast('No device selected.', 'warning');
       if (!confirm(`Drain active and scheduled workloads on ${selectedNode.node_id.substring(0, 8)}?`)) return;
       try {
         const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/state`, {
@@ -3609,13 +3672,13 @@ function initDeviceControls() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         await fetchNodes();
       } catch (err) {
-        alert(`Drain failed: ${err.message}`);
+        showToast(`Drain failed: ${err.message}`, 'error');
       }
     });
   }
 
   const runQualification = async () => {
-    if (!selectedNode) return alert('No device selected.');
+    if (!selectedNode) return showToast('No device selected.', 'warning');
     const btn = document.getElementById('btn-device-run-qualification') || btnRequalify;
     const oldText = btn ? btn.textContent : '';
     if (btn) {
@@ -3634,9 +3697,9 @@ function initDeviceControls() {
       }
       await fetchNodes();
       renderNodeDetails(selectedNode);
-      alert(`Empirical qualification completed for ${selectedNode.capabilities?.device_model || selectedNode.node_id}!\nEdge Score: ${data.profile?.edge_score || 85}/100\nWASM Fuel: ${data.profile?.measured_fuel_mips?.toFixed(1) || '-'} MIPS`);
+      showToast(`Empirical qualification completed for ${selectedNode.capabilities?.device_model || selectedNode.node_id}! Edge Score: ${data.profile?.edge_score || 85}/100`, 'success');
     } catch (err) {
-      alert(`Qualification failed: ${err.message}`);
+      showToast(`Qualification failed: ${err.message}`, 'error');
     } finally {
       if (btn) {
         btn.textContent = oldText;
@@ -3720,7 +3783,7 @@ function initDeviceControls() {
 
   if (btnSavePolicy) {
     btnSavePolicy.addEventListener('click', async () => {
-      if (!selectedNode) return alert('No device selected.');
+      if (!selectedNode) return showToast('No device selected.', 'warning');
       const cpu = parseInt(document.getElementById('policy-input-cpu').value) || 60;
       const ram = parseInt(document.getElementById('policy-input-ram').value) || 512;
       const battery = parseInt(document.getElementById('policy-input-battery').value) || 40;
@@ -3744,25 +3807,27 @@ function initDeviceControls() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         btnSavePolicy.textContent = '✅ Policy Saved!';
         setTimeout(() => { btnSavePolicy.textContent = '💾 Save Device Policy'; }, 2000);
+        showToast('Device safety policy updated successfully!', 'success');
         await fetchNodes();
       } catch (err) {
-        alert(`Failed to save policy: ${err.message}`);
+        showToast(`Failed to save policy: ${err.message}`, 'error');
       }
     });
   }
 
   if (btnCancelJob) {
     btnCancelJob.addEventListener('click', async () => {
-      if (!selectedNode || !selectedNode.current_job_id) return alert('No active job running on this device.');
+      if (!selectedNode || !selectedNode.current_job_id) return showToast('No active job running on this device.', 'warning');
       if (!confirm(`Cancel job ${selectedNode.current_job_id}?`)) return;
       try {
         const res = await fetch(`${API_BASE}/api/v1/jobs/${selectedNode.current_job_id}/cancel`, {
           method: 'POST'
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        showToast(`Job ${selectedNode.current_job_id.substring(0, 8)} cancelled successfully.`, 'info');
         await refreshAllData();
       } catch (err) {
-        alert(`Failed to cancel job: ${err.message}`);
+        showToast(`Failed to cancel job: ${err.message}`, 'error');
       }
     });
   }
@@ -3776,11 +3841,11 @@ async function triggerStartDemoCluster() {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    alert(`Demo Cluster Started: ${data.simulated_nodes_added} simulated phones + ${data.desktop_nodes_added} desktop worker added!`);
+    showToast(`Demo Cluster Started: ${data.simulated_nodes_added} simulated phones + ${data.desktop_nodes_added} desktop worker added!`, 'success');
     await refreshAllData();
     switchTab('devices');
   } catch (err) {
-    alert(`Error starting demo cluster: ${err.message}`);
+    showToast(`Error starting demo cluster: ${err.message}`, 'error');
   }
 }
 
@@ -3905,14 +3970,14 @@ function initSearchAndFilters() {
         const res = await fetch(`${API_BASE}/api/v1/demo/purge-simulated-nodes`, { method: 'POST' });
         if (res.ok) {
           const data = await res.json();
-          alert(`Cluster Cleaned: ${data.purged_count} simulated nodes purged. ${data.remaining_nodes} physical/desktop nodes active.`);
+          showToast(`Cluster Cleaned: ${data.purged_count} simulated nodes purged. ${data.remaining_nodes} physical/desktop nodes active.`, 'success');
           await fetchNodes();
           await fetchHealth();
         } else {
-          alert('Failed to purge simulated nodes.');
+          showToast('Failed to purge simulated nodes.', 'error');
         }
       } catch (err) {
-        alert('Error purging nodes: ' + err.message);
+        showToast('Error purging nodes: ' + err.message, 'error');
       } finally {
         btnPurgeSim.disabled = false;
         btnPurgeSim.textContent = 'Purge Simulated Fleet';
@@ -3988,15 +4053,35 @@ function initSearchAndFilters() {
 
   const jobSearch = document.getElementById('job-search');
   const jobFilter = document.getElementById('job-filter-state');
+  let activeJobPill = 'ALL';
+
+  const jobPillButtons = document.querySelectorAll('#job-filter-pills .btn-filter-tab');
+  jobPillButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      jobPillButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeJobPill = btn.getAttribute('data-job-tab') || 'ALL';
+      applyJobFilters();
+    });
+  });
 
   const applyJobFilters = () => {
     const q = (jobSearch?.value || '').toLowerCase();
-    const st = jobFilter?.value || 'ALL';
+    const st = activeJobPill !== 'ALL' ? activeJobPill : (jobFilter?.value || 'ALL');
 
     const filtered = cachedJobs.filter(j => {
+      const rawState = (j.state || 'QUEUED').toUpperCase();
       const matchesQuery = !q || (j.spec?.name || '').toLowerCase().includes(q)
-        || j.job_id.toLowerCase().includes(q);
-      const matchesState = st === 'ALL' || (j.state || '').toUpperCase() === st;
+        || (j.job_id || '').toLowerCase().includes(q);
+
+      const matchesState = st === 'ALL'
+        || (st === 'QUEUED' && ['QUEUED', 'PENDING', 'SCHEDULED', 'MATCHING'].includes(rawState))
+        || (st === 'OFFERED' && rawState === 'OFFERED')
+        || (st === 'RUNNING' && ['RUNNING', 'DISPATCHED', 'ACKNOWLEDGED', 'DOWNLOADING', 'EXECUTING', 'UPLOADING'].includes(rawState))
+        || (st === 'COMPLETED' && ['COMPLETED', 'SETTLED', 'VERIFIED'].includes(rawState))
+        || (st === 'FAILED' && ['FAILED', 'CANCELLED', 'EXPIRED', 'UNVERIFIED'].includes(rawState))
+        || rawState === st;
+
       return matchesQuery && matchesState;
     });
 
@@ -4005,6 +4090,14 @@ function initSearchAndFilters() {
 
   if (jobSearch) jobSearch.addEventListener('input', applyJobFilters);
   if (jobFilter) jobFilter.addEventListener('change', applyJobFilters);
+
+  // Wire up Workload Studio capacity estimate updater
+  const presetSelector = document.getElementById('form-starter-preset');
+  if (presetSelector) {
+    presetSelector.addEventListener('change', () => {
+      if (typeof updateStudioCapacityEstimate === 'function') updateStudioCapacityEstimate();
+    });
+  }
 }
 
 // Device Comparison Feature

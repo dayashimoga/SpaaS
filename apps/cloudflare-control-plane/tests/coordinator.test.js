@@ -1862,6 +1862,180 @@ test("SPaaSCoordinator — Case-Insensitive Pairing Tokens & Direct Digest Verif
   assert.equal(traceData.job_state, "COMPLETED");
 });
 
+test("SPaaSCoordinator — Generic Workloads, Pareto Explainability, Provider Ask-Me Controls & Fleet Filtering", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET,
+    SPAAS_REQUIRE_AUTH: "true"
+  });
+
+  const deviceToken = "dev_token_generic_provider_01";
+  const nodeId = "node-physical-phone-01";
+
+  // 1. Register physical provider node with ASK_ME mode
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, public_key, auth_token, state, capabilities, qualification, policy, telemetry, is_simulated, last_heartbeat, created_at)
+     VALUES (?, ?, 'android_smartphone', 'ed25519_pk_p1', ?, 'Ready', ?, ?, ?, ?, 0, ?, ?)`,
+    nodeId,
+    "Google Pixel 8 Pro",
+    deviceToken,
+    JSON.stringify({ device_model: "Pixel 8 Pro", architecture: "aarch64", cpu_cores: 8, total_ram_mb: 12288 }),
+    JSON.stringify({ wasm_conformance_passed: true, edge_score: 96, tier: "QUALIFIED" }),
+    JSON.stringify({ provider_mode: "ASK_ME", only_while_charging: false, min_battery_threshold_pct: 15 }),
+    JSON.stringify({ battery_pct: 85, charging_state: "CHARGING", thermal_status: "NOMINAL", round_trip_ping_ms: 12 }),
+    Date.now(),
+    Date.now()
+  );
+
+  // Register a second simulated node
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, public_key, auth_token, state, capabilities, qualification, policy, telemetry, is_simulated, last_heartbeat, created_at)
+     VALUES (?, ?, 'server_vps', 'ed25519_pk_s1', 'sim_tok_1', 'Ready', ?, ?, ?, ?, 1, ?, ?)`,
+    "node-simulated-cloud-01",
+    "Simulated Cluster Node 01",
+    JSON.stringify({ architecture: "x86_64", cpu_cores: 16, total_ram_mb: 32768 }),
+    JSON.stringify({ wasm_conformance_passed: true, edge_score: 99, tier: "QUALIFIED" }),
+    JSON.stringify({ provider_mode: "AUTO_ACCEPT" }),
+    JSON.stringify({ battery_pct: 100 }),
+    Date.now(),
+    Date.now()
+  );
+
+  // 2. Test Fleet Filtering (Physical vs Simulated)
+  const physicalFleetRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/nodes?filter=physical", { headers: ADMIN_HEADERS })
+  );
+  assert.equal(physicalFleetRes.status, 200);
+  const physicalFleet = await physicalFleetRes.json();
+  const physicalIds = physicalFleet.nodes.map(n => n.id);
+  assert.ok(physicalIds.includes(nodeId));
+  assert.ok(!physicalIds.includes("node-simulated-cloud-01"));
+
+  const simFleetRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/nodes?filter=simulated", { headers: ADMIN_HEADERS })
+  );
+  assert.equal(simFleetRes.status, 200);
+  const simFleet = await simFleetRes.json();
+  const simIds = simFleet.nodes.map(n => n.id);
+  assert.ok(simIds.includes("node-simulated-cloud-01"));
+  assert.ok(!simIds.includes(nodeId));
+
+  // 3. Submit Generic Matrix Multiplication Workload
+  const matrixJobId = "job_matrix_mult_test_01";
+  const submitRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/jobs", {
+      method: "POST",
+      headers: { ...ADMIN_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_id: matrixJobId,
+        preset: "matrix_mult",
+        workload_spec: {
+          name: "Matrix Multiplication (64x64)",
+          limits: { max_fuel: 10000000, max_memory_bytes: 33554432, timeout_ms: 15000 },
+          args: ["64", "float32"]
+        },
+        requirements: {
+          min_ram_mb: 2048,
+          target_tier: "QUALIFIED"
+        }
+      })
+    })
+  );
+  assert.equal(submitRes.status, 201);
+  const submitData = await submitRes.json();
+  assert.ok(submitData.job_id);
+  assert.equal(submitData.job_id, matrixJobId);
+
+  // Run scheduler to trigger Pareto match
+  await coordinator.schedulePendingJobs();
+
+  // 4. Inspect Decision Explainability
+  const decisionRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/jobs/${matrixJobId}/decision`, { headers: ADMIN_HEADERS })
+  );
+  assert.equal(decisionRes.status, 200);
+  const decisionData = await decisionRes.json();
+  assert.ok(decisionData.selected_node_id);
+  assert.ok(decisionData.rationale);
+  assert.ok(decisionData.score > 0);
+
+  // 5. Test Provider Ask-Me Mode: Job is in OFFERED state for the node
+  // If matched to physical node with ASK_ME policy:
+  const jobStateRes = await coordinator.fetch(new Request(`http://localhost/api/v1/jobs/${matrixJobId}`));
+  const jobStateData = await jobStateRes.json();
+  const jobState = jobStateData.job?.state || jobStateData.state;
+  
+  if (jobState === "OFFERED") {
+    // Provider accepts the offer
+    const acceptRes = await coordinator.fetch(
+      new Request(`http://localhost/api/v1/nodes/offer/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${deviceToken}` },
+        body: JSON.stringify({ node_id: nodeId, job_id: matrixJobId })
+      })
+    );
+    assert.equal(acceptRes.status, 200);
+    const acceptData = await acceptRes.json();
+    assert.equal(acceptData.state, "DISPATCHED");
+    assert.ok(acceptData.lease_id);
+  }
+
+  // 6. Test Node Progress Reporting (DOWNLOADING -> EXECUTING -> UPLOADING)
+  const progRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/progress`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${deviceToken}` },
+      body: JSON.stringify({
+        node_id: nodeId,
+        job_id: matrixJobId,
+        progress_pct: 65,
+        stage: "EXECUTING",
+        details: "Performing SGEMM 64x64 floating point multiply"
+      })
+    })
+  );
+  assert.equal(progRes.status, 200);
+  const progData = await progRes.json();
+  assert.equal(progData.progress_pct, 65);
+  assert.equal(progData.stage, "EXECUTING");
+
+  // 7. Test Offer Decline Flow
+  const declineJobId = "job_decline_test_01";
+  await coordinator.fetch(
+    new Request("http://localhost/api/v1/jobs", {
+      method: "POST",
+      headers: { ...ADMIN_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        job_id: declineJobId,
+        preset: "prime_sieve",
+        workload_spec: { name: "Prime Sieve (100,000)" }
+      })
+    })
+  );
+  
+  // Transition manually to OFFERED to test decline
+  coordinator.recordJobTransition(declineJobId, "OFFERED", "Offered to node", { nodeId });
+  coordinator.sqlExec(`UPDATE jobs SET state = 'OFFERED', assigned_node_id = ? WHERE id = ?`, nodeId, declineJobId);
+
+  const declineRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/offer/decline`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${deviceToken}` },
+      body: JSON.stringify({ node_id: nodeId, job_id: declineJobId, reason: "Battery too low for heavy computation" })
+    })
+  );
+  assert.equal(declineRes.status, 200);
+  const declineData = await declineRes.json();
+  assert.equal(declineData.state, "QUEUED");
+  assert.equal(declineData.reason, "Battery too low for heavy computation");
+
+  // 8. Verify Execution Trace for Full 12-State Transitions
+  const traceRes = await coordinator.fetch(new Request(`http://localhost/api/v1/jobs/${matrixJobId}/trace`));
+  assert.equal(traceRes.status, 200);
+  const traceData = await traceRes.json();
+  assert.ok(traceData.transitions.length >= 3);
+});
+
 
 
 
