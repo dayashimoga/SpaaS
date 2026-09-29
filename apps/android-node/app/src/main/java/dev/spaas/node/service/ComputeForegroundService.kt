@@ -49,6 +49,16 @@ class ComputeForegroundService : Service() {
         super.onCreate()
         telemetryMonitor = AndroidTelemetryMonitor(this)
         createNotificationChannel()
+
+        ComputeWorkerClient.onJobLifecycleUpdate = { state, details ->
+            currentNodeState = state
+            currentActiveJob = if (state == "COMPLETED" || state == "FAILED" || state == "IDLE") null else details
+            updateNotification("$state: $details")
+        }
+        ComputeWorkerClient.onPolicyUpdated = { policyObj ->
+            activePolicy.onlyWhileCharging = policyObj.optBoolean("only_while_charging", false)
+            activePolicy.minBatteryThresholdPct = policyObj.optInt("min_battery_threshold_pct", activePolicy.minBatteryThresholdPct)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -72,7 +82,7 @@ class ComputeForegroundService : Service() {
                     isRunning = true
                     isPaused = false
                     currentNodeState = "IDLE"
-                    startForeground(NOTIFICATION_ID, buildNotification("IDLE - Ready for workloads"))
+                    startForeground(NOTIFICATION_ID, buildNotification("READY - Waiting for workloads"))
                     startComputeLoop()
                 }
             }
@@ -85,9 +95,9 @@ class ComputeForegroundService : Service() {
             while (isActive && isRunning) {
                 val telemetry = telemetryMonitor.collectTelemetry()
 
-                // Check safety policy auto-yield
-                val yieldReason = safetyPolicy.evaluateYield(telemetry)
-                val isCurrentlyYielding = yieldReason != null || isPaused
+                // Check safety policy auto-yield (do not yield if active job is running)
+                val yieldReason = if (currentActiveJob == null) safetyPolicy.evaluateYield(telemetry) else null
+                val isCurrentlyYielding = (yieldReason != null || isPaused) && currentActiveJob == null
 
                 if (isCurrentlyYielding) {
                     currentNodeState = "PAUSED"
@@ -123,26 +133,22 @@ class ComputeForegroundService : Service() {
                         continue
                     }
 
-                    // Only poll and execute jobs if connected and not yielding
-                    if (!isCurrentlyYielding && ComputeWorkerClient.connectionState == ComputeWorkerClient.ConnectionState.CONNECTED) {
+                    // Only poll and execute jobs if connected and not yielding and no job active
+                    if (!isCurrentlyYielding && currentActiveJob == null && ComputeWorkerClient.connectionState == ComputeWorkerClient.ConnectionState.CONNECTED) {
                         val executed = ComputeWorkerClient.pollAndExecuteJob()
                         if (executed != null) {
-                            currentActiveJob = executed.workloadName
-                            currentNodeState = "ACTIVE"
-                            updateNotification("ACTIVE: Executed ${executed.workloadName}")
-                            delay(1000)
                             currentActiveJob = null
+                            delay(1000)
                         }
                     }
                 }
 
                 if (currentActiveJob != null) {
-                    currentNodeState = "ACTIVE"
-                    updateNotification("ACTIVE: Executing $currentActiveJob (Battery: ${telemetry.batteryPct}%)")
+                    // Active notification is managed by onJobLifecycleUpdate
                 } else if (!isCurrentlyYielding) {
                     currentNodeState = "IDLE"
                     val pairStatus = if (ComputeWorkerClient.isPaired) "Paired" else "Standby"
-                    updateNotification("IDLE ($pairStatus) - Ready for workloads (Battery: ${telemetry.batteryPct}%)")
+                    updateNotification("READY ($pairStatus) - Waiting for workloads (Battery: ${telemetry.batteryPct}%)")
                 }
 
                 delay(2000)

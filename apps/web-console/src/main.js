@@ -1065,6 +1065,8 @@ async function fetchNodes() {
 
     const elCount = document.getElementById('node-list-count');
     if (elCount) elCount.textContent = cachedNodes.length;
+    const badgeNodes = document.getElementById('badge-nodes');
+    if (badgeNodes) badgeNodes.textContent = cachedNodes.length;
 
     // Categorize nodes by real-world nature
     let physicalCount = 0;
@@ -1783,7 +1785,10 @@ async function fetchJobs() {
     const data = await res.json();
     cachedJobs = data.jobs || [];
 
-    document.getElementById('job-list-count').textContent = cachedJobs.length;
+    const elJobCount = document.getElementById('job-list-count');
+    if (elJobCount) elJobCount.textContent = cachedJobs.length;
+    const badgeJobs = document.getElementById('badge-jobs');
+    if (badgeJobs) badgeJobs.textContent = cachedJobs.length;
 
     // Empty state visibility
     const emptyJobs = document.getElementById('jobs-empty-state');
@@ -1886,12 +1891,74 @@ function renderRecentJobs(jobs) {
   }).join('');
 }
 
+let activeTraceInterval = null;
+
+function startJobTraceWatcher(jobId) {
+  if (activeTraceInterval) clearInterval(activeTraceInterval);
+  let pollAttempts = 0;
+  activeTraceInterval = setInterval(async () => {
+    pollAttempts++;
+    if (pollAttempts > 60) {
+      clearInterval(activeTraceInterval);
+      activeTraceInterval = null;
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/jobs/${jobId}/trace`);
+      if (!res.ok) return;
+      const trace = await res.json();
+      if (!trace || trace.error) return;
+
+      const existing = cachedJobs.find(j => j.job_id === jobId);
+      if (existing) {
+        existing.state = trace.job_state;
+        if (trace.completed_at) existing.completed_at = trace.completed_at;
+        if (trace.settlements && trace.settlements.length > 0) {
+          existing.settlement = trace.settlements[0];
+          existing.credits_settled = trace.settlements[0].amount_credits;
+          existing.tx_id = trace.settlements[0].tx_id;
+        }
+      }
+
+      if (pollAttempts % 3 === 0) {
+        await fetchJobs();
+      }
+
+      if (selectedJob && selectedJob.job_id === jobId) {
+        selectedJob.state = trace.job_state;
+        if (trace.completed_at) selectedJob.completed_at = trace.completed_at;
+        if (trace.settlements && trace.settlements.length > 0) {
+          selectedJob.settlement = trace.settlements[0];
+          selectedJob.credits_settled = trace.settlements[0].amount_credits;
+          selectedJob.tx_id = trace.settlements[0].tx_id;
+        }
+        renderJobDetails(selectedJob);
+      }
+
+      const st = (trace.job_state || '').toUpperCase();
+      if (['COMPLETED', 'SETTLED', 'FAILED', 'CANCELLED', 'UNVERIFIED'].includes(st)) {
+        clearInterval(activeTraceInterval);
+        activeTraceInterval = null;
+        await fetchJobs();
+        await fetchNodes();
+      }
+    } catch (e) {
+      console.warn('[Trace Watcher Error]', e);
+    }
+  }, 1000);
+}
+
 window.spaasSelectJob = function(jobId) {
   const job = cachedJobs.find(j => j.job_id === jobId);
   if (!job) return;
   selectedJob = job;
   renderJobDetails(job);
   renderJobsTable(cachedJobs);
+
+  const st = (job.state || '').toUpperCase();
+  if (!['COMPLETED', 'SETTLED', 'FAILED', 'CANCELLED'].includes(st)) {
+    startJobTraceWatcher(jobId);
+  }
 
   // Auto-scroll to details panel if in jobs tab
   const detailsPanel = document.getElementById('job-details-panel');
@@ -2003,20 +2070,43 @@ function renderJobDetails(job) {
 
   // Sub-tab 2: Lifecycle Timeline (10 visible steps)
   const steps = ['tl-step-1', 'tl-step-2', 'tl-step-3', 'tl-step-4', 'tl-step-5', 'tl-step-6', 'tl-step-7', 'tl-step-8', 'tl-step-9', 'tl-step-10'];
+  const stateUpper = (job.state || '').toUpperCase();
   let completedCount = 1;
   let activeStep = null;
-  if (job.state === 'Completed' || job.state === 'Settled') {
+  if (['COMPLETED', 'SETTLED'].includes(stateUpper)) {
     completedCount = 10;
-  } else if (job.state === 'Running') {
+  } else if (stateUpper === 'VERIFIED') {
+    completedCount = 9;
+    activeStep = 10;
+  } else if (stateUpper === 'VERIFYING') {
+    completedCount = 8;
+    activeStep = 9;
+  } else if (stateUpper === 'RESULT_SUBMITTED') {
+    completedCount = 7;
+    activeStep = 8;
+  } else if (stateUpper === 'RUNNING') {
+    completedCount = 6;
+    activeStep = 7;
+  } else if (stateUpper === 'ACKNOWLEDGED') {
     completedCount = 5;
     activeStep = 6;
-  } else if (job.state === 'Scheduled') {
+  } else if (stateUpper === 'DISPATCHED' || stateUpper === 'LEASED') {
+    completedCount = 4;
+    activeStep = 5;
+  } else if (stateUpper === 'ASSIGNED' || stateUpper === 'SCHEDULED') {
     completedCount = 3;
     activeStep = 4;
-  } else if (job.state === 'Queued' || job.state === 'Pending') {
+  } else if (stateUpper === 'QUEUED' || stateUpper === 'PENDING') {
+    completedCount = 2;
+    activeStep = 3;
+  } else if (stateUpper === 'CREATED') {
     completedCount = 1;
     activeStep = 2;
+  } else if (['FAILED', 'UNVERIFIED', 'CANCELLED', 'REJECTED'].includes(stateUpper)) {
+    completedCount = 5;
+    activeStep = null;
   }
+
   steps.forEach((sId, idx) => {
     const el = document.getElementById(sId);
     if (!el) return;
@@ -2031,10 +2121,18 @@ function renderJobDetails(job) {
 
   const elPhaseDesc = document.getElementById('timeline-phase-desc');
   if (elPhaseDesc) {
-    elPhaseDesc.textContent = (job.state === 'Completed' || job.state === 'Settled')
-      ? 'Execution Complete & Settled (Dual-entry accounting complete)'
-      : (job.state === 'Running' ? 'Executing Sandboxed WASI inside Worker Node'
-      : (job.state === 'Scheduled' ? 'Dispatched with Active Lease' : 'In Scheduler Queue'));
+    elPhaseDesc.textContent = (stateUpper === 'COMPLETED' || stateUpper === 'SETTLED')
+      ? 'Execution Complete & Verified (Double-Entry Ledger Settled)'
+      : (stateUpper === 'VERIFIED' ? 'Cryptographic Output & Receipt Verified'
+      : (stateUpper === 'VERIFYING' ? 'Control Plane Verifying Challenge Nonce Digest'
+      : (stateUpper === 'RESULT_SUBMITTED' ? 'Result Receipt Submitted by Physical Device'
+      : (stateUpper === 'RUNNING' ? 'Executing Pure Sandboxed WASM on Android'
+      : (stateUpper === 'ACKNOWLEDGED' ? 'Device Acknowledged & Verified Artifact SHA-256'
+      : (stateUpper === 'DISPATCHED' || stateUpper === 'LEASED' ? 'Dispatched to Device Delivery Queue'
+      : (stateUpper === 'ASSIGNED' || stateUpper === 'SCHEDULED' ? 'Scheduled & Assigned to Device'
+      : (stateUpper === 'QUEUED' || stateUpper === 'PENDING' ? 'Queued in Scheduler Engine'
+      : (stateUpper === 'FAILED' ? 'Execution / Verification Failed (Zero Credits Awarded)'
+      : 'Workload Initialized')))))))));
   }
 
   const elTimeSub = document.getElementById('timeline-time-submitted');
@@ -3332,21 +3430,28 @@ function initDeviceControls() {
     btnRunChallenge.addEventListener('click', async () => {
       if (!selectedNode) return alert('No device selected.');
       const oldText = btnRunChallenge.textContent;
-      btnRunChallenge.textContent = '🎯 Dispatching Challenge...';
       btnRunChallenge.disabled = true;
+      btnRunChallenge.textContent = '⏳ Creating Job…';
       try {
         const correlationId = 'corr_ch_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+        btnRunChallenge.textContent = '⚡ Queued in scheduler…';
         const res = await fetch(`${API_BASE}/api/v1/nodes/${selectedNode.node_id}/dispatch-challenge`, {
           method: 'POST',
           headers: authedHeaders({ 'X-Correlation-ID': correlationId })
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || `HTTP ${res.status}`);
+        }
         const data = await res.json();
+        const nodeName = selectedNode.name || selectedNode.capabilities?.device_model || 'Device';
+        btnRunChallenge.textContent = `🚀 Assigned to ${nodeName}…`;
         await fetchJobs();
         await fetchNodes();
         switchTab('jobs');
         if (data.job_id) {
           window.spaasSelectJob(data.job_id);
+          startJobTraceWatcher(data.job_id);
         }
       } catch (err) {
         alert(`Failed to dispatch challenge: ${err.message}`);

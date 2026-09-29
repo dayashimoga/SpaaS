@@ -368,45 +368,6 @@ object WasmRuntimeEngine {
             }
         }
 
-        // If bytecode execution produced no standard output (e.g. minimal test module),
-        // provide deterministic execution feedback for challenge/prime/matrix workloads
-        if (stdoutStream.size() == 0) {
-            val model = try { android.os.Build.MODEL ?: "Android-Node" } catch (_: Throwable) { "Android-Node" }
-            val isChallenge = workloadName.contains("challenge", ignoreCase = true) ||
-                    workloadName.contains("sha256", ignoreCase = true) ||
-                    config.args.any { it.length >= 8 && it.matches(Regex("^[a-fA-F0-9]+$")) }
-
-            if (isChallenge) {
-                val inputNonce = config.args.firstOrNull() ?: "spaas_challenge_default_nonce_2026"
-                fuelRemaining -= 250_000L
-                val md = MessageDigest.getInstance("SHA-256")
-                val digestBytes = md.digest(inputNonce.toByteArray(Charsets.UTF_8))
-                val hexDigest = digestBytes.joinToString("") { "%02x".format(it) }
-                val out = "SPaaS WASM Sandbox [Device: $model, Runtime: wasm_wasi]\n" +
-                        "Execution Entrypoint: _start\n" +
-                        "Challenge Input Nonce: $inputNonce\n" +
-                        "Challenge SHA-256 Output: $hexDigest\n" +
-                        "WASI Status: SUCCESS (exit code 0)\n"
-                val outBytes = out.toByteArray(Charsets.UTF_8)
-                stdoutStream.write(outBytes, 0, minOf(outBytes.size, config.maxOutputBytes))
-            } else if (workloadName.contains("prime", ignoreCase = true)) {
-                fuelRemaining -= 550_000L
-                val out = "SPaaS WASM Sandbox: Prime Sieve\nPrimes Found: 168\nLargest Prime: 997\n"
-                val outBytes = out.toByteArray(Charsets.UTF_8)
-                stdoutStream.write(outBytes, 0, minOf(outBytes.size, config.maxOutputBytes))
-            } else if (workloadName.contains("matrix", ignoreCase = true)) {
-                fuelRemaining -= 650_000L
-                val out = "SPaaS WASM Sandbox: Matrix Multiplication\nComputed FLOPs: 524288\n"
-                val outBytes = out.toByteArray(Charsets.UTF_8)
-                stdoutStream.write(outBytes, 0, minOf(outBytes.size, config.maxOutputBytes))
-            } else {
-                fuelRemaining -= 50_000L
-                val out = "Hello from SPaaS Universal Edge Compute Fabric on $model!\n"
-                val outBytes = out.toByteArray(Charsets.UTF_8)
-                stdoutStream.write(outBytes, 0, minOf(outBytes.size, config.maxOutputBytes))
-            }
-        }
-
         val wallTimeMs = (System.currentTimeMillis() - startTime).coerceAtLeast(1)
         val fuelConsumed = (config.maxFuel - fuelRemaining).coerceAtLeast(10_000L)
 
@@ -632,8 +593,116 @@ object WasmRuntimeEngine {
                             val rval = stack[--sp].toInt()
                             exitCodeRef[0] = rval
                             return
+                        } else if (imp.name == "args_sizes_get") {
+                            fuelRef[0] -= 20L
+                            val bufSizePtr = stack[--sp].toInt()
+                            val argcPtr = stack[--sp].toInt()
+                            val mem = memoryRef[0]
+                            val count = config.args.size
+                            var totalSize = 0
+                            for (arg in config.args) {
+                                totalSize += arg.toByteArray(Charsets.UTF_8).size + 1
+                            }
+                            if (argcPtr + 4 <= mem.size && bufSizePtr + 4 <= mem.size) {
+                                mem[argcPtr] = (count and 0xFF).toByte()
+                                mem[argcPtr + 1] = ((count shr 8) and 0xFF).toByte()
+                                mem[argcPtr + 2] = ((count shr 16) and 0xFF).toByte()
+                                mem[argcPtr + 3] = ((count shr 24) and 0xFF).toByte()
+                                mem[bufSizePtr] = (totalSize and 0xFF).toByte()
+                                mem[bufSizePtr + 1] = ((totalSize shr 8) and 0xFF).toByte()
+                                mem[bufSizePtr + 2] = ((totalSize shr 16) and 0xFF).toByte()
+                                mem[bufSizePtr + 3] = ((totalSize shr 24) and 0xFF).toByte()
+                            }
+                            stack[sp++] = 0L
+                        } else if (imp.name == "args_get") {
+                            fuelRef[0] -= 50L
+                            var bufPtr = stack[--sp].toInt()
+                            var argvPtr = stack[--sp].toInt()
+                            val mem = memoryRef[0]
+                            for (arg in config.args) {
+                                val bytes = arg.toByteArray(Charsets.UTF_8)
+                                if (argvPtr + 4 <= mem.size) {
+                                    mem[argvPtr] = (bufPtr and 0xFF).toByte()
+                                    mem[argvPtr + 1] = ((bufPtr shr 8) and 0xFF).toByte()
+                                    mem[argvPtr + 2] = ((bufPtr shr 16) and 0xFF).toByte()
+                                    mem[argvPtr + 3] = ((bufPtr shr 24) and 0xFF).toByte()
+                                    argvPtr += 4
+                                }
+                                if (bufPtr + bytes.size + 1 <= mem.size) {
+                                    System.arraycopy(bytes, 0, mem, bufPtr, bytes.size)
+                                    bufPtr += bytes.size
+                                    mem[bufPtr++] = 0 // null terminator
+                                }
+                            }
+                            stack[sp++] = 0L
+                        } else if (imp.name == "environ_sizes_get") {
+                            fuelRef[0] -= 20L
+                            val bufSizePtr = stack[--sp].toInt()
+                            val countPtr = stack[--sp].toInt()
+                            val mem = memoryRef[0]
+                            val count = config.envVars.size
+                            var totalSize = 0
+                            for ((k, v) in config.envVars) {
+                                totalSize += "$k=$v\u0000".toByteArray(Charsets.UTF_8).size
+                            }
+                            if (countPtr + 4 <= mem.size && bufSizePtr + 4 <= mem.size) {
+                                mem[countPtr] = (count and 0xFF).toByte()
+                                mem[countPtr + 1] = ((count shr 8) and 0xFF).toByte()
+                                mem[countPtr + 2] = ((count shr 16) and 0xFF).toByte()
+                                mem[countPtr + 3] = ((count shr 24) and 0xFF).toByte()
+                                mem[bufSizePtr] = (totalSize and 0xFF).toByte()
+                                mem[bufSizePtr + 1] = ((totalSize shr 8) and 0xFF).toByte()
+                                mem[bufSizePtr + 2] = ((totalSize shr 16) and 0xFF).toByte()
+                                mem[bufSizePtr + 3] = ((totalSize shr 24) and 0xFF).toByte()
+                            }
+                            stack[sp++] = 0L
+                        } else if (imp.name == "environ_get") {
+                            fuelRef[0] -= 50L
+                            var bufPtr = stack[--sp].toInt()
+                            var envPtr = stack[--sp].toInt()
+                            val mem = memoryRef[0]
+                            for ((k, v) in config.envVars) {
+                                val bytes = "$k=$v\u0000".toByteArray(Charsets.UTF_8)
+                                if (envPtr + 4 <= mem.size) {
+                                    mem[envPtr] = (bufPtr and 0xFF).toByte()
+                                    mem[envPtr + 1] = ((bufPtr shr 8) and 0xFF).toByte()
+                                    mem[envPtr + 2] = ((bufPtr shr 16) and 0xFF).toByte()
+                                    mem[envPtr + 3] = ((bufPtr shr 24) and 0xFF).toByte()
+                                    envPtr += 4
+                                }
+                                if (bufPtr + bytes.size <= mem.size) {
+                                    System.arraycopy(bytes, 0, mem, bufPtr, bytes.size)
+                                    bufPtr += bytes.size
+                                }
+                            }
+                            stack[sp++] = 0L
+                        } else if (imp.name == "clock_time_get") {
+                            fuelRef[0] -= 10L
+                            val timePtr = stack[--sp].toInt()
+                            stack[--sp] // precision
+                            stack[--sp] // id
+                            val mem = memoryRef[0]
+                            val nowNanos = System.currentTimeMillis() * 1_000_000L
+                            if (timePtr + 8 <= mem.size) {
+                                for (b in 0..7) {
+                                    mem[timePtr + b] = ((nowNanos shr (b * 8)) and 0xFF).toByte()
+                                }
+                            }
+                            stack[sp++] = 0L
+                        } else if (imp.name == "random_get") {
+                            fuelRef[0] -= 20L
+                            val bufLen = stack[--sp].toInt()
+                            val bufPtr = stack[--sp].toInt()
+                            val mem = memoryRef[0]
+                            if (bufPtr + bufLen <= mem.size) {
+                                val rnd = java.security.SecureRandom()
+                                val bytes = ByteArray(bufLen)
+                                rnd.nextBytes(bytes)
+                                System.arraycopy(bytes, 0, mem, bufPtr, bufLen)
+                            }
+                            stack[sp++] = 0L
                         } else {
-                            // fd_read, fd_close, environ_sizes_get, args_sizes_get, etc.
+                            // fd_read, fd_close, fd_seek, fd_fdstat_get
                             stack[sp++] = 0L
                         }
                     }
@@ -758,6 +827,27 @@ object WasmRuntimeEngine {
                     mem[addr] = (value and 0xFF).toByte()
                 }
 
+                0x3F -> { // memory.size
+                    pcRef[0]++ // skip reserved 0x00
+                    pc = pcRef[0]
+                    stack[sp++] = (memoryRef[0].size / 65536).toLong()
+                }
+                0x40 -> { // memory.grow
+                    pcRef[0]++ // skip reserved 0x00
+                    pc = pcRef[0]
+                    val deltaPages = stack[--sp].toInt()
+                    val currentPages = memoryRef[0].size / 65536
+                    val newPages = currentPages + deltaPages
+                    if (newPages.toLong() * 65536 <= config.maxMemoryBytes) {
+                        val newMem = ByteArray(newPages * 65536)
+                        System.arraycopy(memoryRef[0], 0, newMem, 0, memoryRef[0].size)
+                        memoryRef[0] = newMem
+                        stack[sp++] = currentPages.toLong()
+                    } else {
+                        stack[sp++] = -1L
+                    }
+                }
+
                 0x41 -> { // i32.const
                     val v = readVarInt32(code, pcRef)
                     pc = pcRef[0]
@@ -828,6 +918,24 @@ object WasmRuntimeEngine {
                 0x74 -> { val b = stack[--sp].toInt(); val a = stack[--sp].toInt(); stack[sp++] = (a shl (b and 31)).toLong() }
                 0x75 -> { val b = stack[--sp].toInt(); val a = stack[--sp].toInt(); stack[sp++] = (a shr (b and 31)).toLong() }
                 0x76 -> { val b = stack[--sp].toInt(); val a = stack[--sp].toInt(); stack[sp++] = (a ushr (b and 31)).toLong() }
+                0x77 -> { val b = stack[--sp].toInt(); val a = stack[--sp].toInt(); stack[sp++] = java.lang.Integer.rotateLeft(a, b).toLong() }
+                0x78 -> { val b = stack[--sp].toInt(); val a = stack[--sp].toInt(); stack[sp++] = java.lang.Integer.rotateRight(a, b).toLong() }
+                // i64 arithmetic
+                0x7C -> { val b = stack[--sp]; val a = stack[--sp]; stack[sp++] = a + b }
+                0x7D -> { val b = stack[--sp]; val a = stack[--sp]; stack[sp++] = a - b }
+                0x7E -> { val b = stack[--sp]; val a = stack[--sp]; stack[sp++] = a * b }
+                0x7F -> { val b = stack[--sp]; val a = stack[--sp]; stack[sp++] = a / b }
+                0x80 -> { val b = stack[--sp]; val a = stack[--sp]; stack[sp++] = java.lang.Long.divideUnsigned(a, b) }
+                0x81 -> { val b = stack[--sp]; val a = stack[--sp]; stack[sp++] = a % b }
+                0x82 -> { val b = stack[--sp]; val a = stack[--sp]; stack[sp++] = java.lang.Long.remainderUnsigned(a, b) }
+                0x83 -> { val b = stack[--sp]; val a = stack[--sp]; stack[sp++] = a and b }
+                0x84 -> { val b = stack[--sp]; val a = stack[--sp]; stack[sp++] = a or b }
+                0x85 -> { val b = stack[--sp]; val a = stack[--sp]; stack[sp++] = a xor b }
+                0x86 -> { val b = stack[--sp].toInt(); val a = stack[--sp]; stack[sp++] = a shl (b and 63) }
+                0x87 -> { val b = stack[--sp].toInt(); val a = stack[--sp]; stack[sp++] = a shr (b and 63) }
+                0x88 -> { val b = stack[--sp].toInt(); val a = stack[--sp]; stack[sp++] = a ushr (b and 63) }
+                0x89 -> { val b = stack[--sp].toInt(); val a = stack[--sp]; stack[sp++] = java.lang.Long.rotateLeft(a, b) }
+                0x8A -> { val b = stack[--sp].toInt(); val a = stack[--sp]; stack[sp++] = java.lang.Long.rotateRight(a, b) }
 
                 // Float Arithmetic
                 0x92 -> { // f32.add

@@ -482,6 +482,14 @@ object ComputeWorkerClient {
                             }
                         }
                     }
+                    val policyObj = respObj.optJSONObject("policy")
+                    if (policyObj != null) {
+                        onPolicyUpdated?.invoke(policyObj)
+                    }
+                    val assignedJobObj = respObj.optJSONObject("assigned_job")
+                    if (assignedJobObj != null) {
+                        executeJobPayload(assignedJobObj)
+                    }
                 } catch (_: Throwable) {}
             } else if (responseCode == 401 || responseCode == 403 || responseCode == 404) {
                 // Device was revoked or deleted from cluster fabric
@@ -497,40 +505,85 @@ object ComputeWorkerClient {
         }
     }
 
-    suspend fun pollAndExecuteJob(): DispatchedJobExecution? = withContext(Dispatchers.IO) {
+    var onJobLifecycleUpdate: ((state: String, details: String) -> Unit)? = null
+    var onPolicyUpdated: ((JSONObject) -> Unit)? = null
+
+    suspend fun sendDeviceAck(
+        nodeId: String,
+        jobId: String,
+        leaseId: String,
+        fencingToken: String,
+        artifactSha256: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("$serverBaseUrl/api/v1/nodes/ack")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json")
+                authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+                connectTimeout = 4000
+                readTimeout = 4000
+                doOutput = true
+            }
+            val body = JSONObject().apply {
+                put("node_id", nodeId)
+                put("job_id", jobId)
+                put("lease_id", leaseId)
+                put("fencing_token", fencingToken)
+                put("artifact_sha256", artifactSha256)
+            }
+            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+            conn.responseCode in 200..299
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun sendDeviceStart(
+        nodeId: String,
+        jobId: String,
+        leaseId: String,
+        fencingToken: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("$serverBaseUrl/api/v1/nodes/start")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json")
+                authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+                connectTimeout = 4000
+                readTimeout = 4000
+                doOutput = true
+            }
+            val body = JSONObject().apply {
+                put("node_id", nodeId)
+                put("job_id", jobId)
+                put("lease_id", leaseId)
+                put("fencing_token", fencingToken)
+            }
+            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+            conn.responseCode in 200..299
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun executeJobPayload(jobObj: JSONObject): DispatchedJobExecution? = withContext(Dispatchers.IO) {
         val nodeId = pairedNodeId ?: return@withContext null
         try {
-            val url = URL("$serverBaseUrl/api/v1/nodes/$nodeId/poll")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
-                connectTimeout = 5000
-                readTimeout = 5000
-            }
-
-            if (conn.responseCode == 401 || conn.responseCode == 403 || conn.responseCode == 404) {
-                android.util.Log.w("ComputeWorkerClient", "Cluster rejected job poll with HTTP ${conn.responseCode}. Resetting identity.")
-                clearIdentity(appContext)
-                return@withContext null
-            }
-            if (conn.responseCode !in 200..299) return@withContext null
-            val responseText = conn.inputStream.bufferedReader().use { it.readText() }
-            val root = JSONObject(responseText)
-            if (root.isNull("job")) return@withContext null
-
-            val jobObj = root.getJSONObject("job")
             val jobId = jobObj.getString("job_id")
             val correlationId = jobObj.optString("correlation_id", jobId)
-            val leaseId = jobObj.getString("lease_id")
+            val leaseId = jobObj.optString("lease_id", "lease_$jobId")
+            val fencingToken = jobObj.optString("fencing_token", leaseId)
             val specObj = jobObj.getJSONObject("spec")
-            val workloadName = specObj.optString("name", "Edge Workload")
+            val workloadName = specObj.optString("name", "Cryptographic Challenge")
 
-            // 0. Check if job was cancelled prior to execution (Sprint 5: GE-02)
+            onJobLifecycleUpdate?.invoke("ASSIGNED", "Receiving workload: $workloadName")
+
             if (cancelledJobIds.remove(jobId)) {
                 return@withContext null
             }
 
-            // 1. Extract Workload Limits and Arguments
             val limitsObj = specObj.optJSONObject("limits")
             val maxFuel = limitsObj?.optLong("max_fuel", 50_000_000L) ?: 50_000_000L
             val maxMemoryBytes = limitsObj?.optLong("max_memory_bytes", 64 * 1024 * 1024L) ?: (64 * 1024 * 1024L)
@@ -544,7 +597,6 @@ object ComputeWorkerClient {
                 }
             }
 
-            // 2. Retrieve Binary WASM Artifact
             val wasmBytesArray = jobObj.optJSONArray("wasm_bytes")
             val artifactUri = specObj.optString("artifact_uri", "")
             val wasmBytes: ByteArray = when {
@@ -568,7 +620,6 @@ object ComputeWorkerClient {
                     dlConn.inputStream.use { it.readBytes() }
                 }
                 else -> {
-                    // Default valid WebAssembly module: (module (memory (export "memory") 1) (func (export "_start")))
                     byteArrayOf(
                         0x00.toByte(), 0x61.toByte(), 0x73.toByte(), 0x6D.toByte(),
                         0x01.toByte(), 0x00.toByte(), 0x00.toByte(), 0x00.toByte(),
@@ -583,7 +634,7 @@ object ComputeWorkerClient {
                 }
             }
 
-            // 3. Verify Artifact Integrity Hash
+            onJobLifecycleUpdate?.invoke("VERIFYING_ARTIFACT", "Verifying artifact SHA-256...")
             val expectedHash = specObj.optString("artifact_sha256", "")
             val md = MessageDigest.getInstance("SHA-256")
             val computedArtifactHash = md.digest(wasmBytes).joinToString("") { "%02x".format(it) }
@@ -591,12 +642,20 @@ object ComputeWorkerClient {
                     expectedHash.startsWith("0000") ||
                     expectedHash.equals(computedArtifactHash, ignoreCase = true)
 
-            // 4. Execute WASM inside sandboxed WasmRuntimeEngine
+            if (!isHashValid) {
+                throw IllegalStateException("Artifact SHA-256 verification failed: expected $expectedHash, got $computedArtifactHash")
+            }
+
+            // Explicit Device ACK (DISPATCHED -> ACKNOWLEDGED)
+            sendDeviceAck(nodeId, jobId, leaseId, fencingToken, computedArtifactHash)
+            onJobLifecycleUpdate?.invoke("ACKNOWLEDGED", "Workload acknowledged to control plane")
+
+            // Explicit Device START (ACKNOWLEDGED -> RUNNING)
+            sendDeviceStart(nodeId, jobId, leaseId, fencingToken)
+            onJobLifecycleUpdate?.invoke("RUNNING", "Running $workloadName in sandboxed WASM...")
+
             val startTime = System.currentTimeMillis()
             val execResult = try {
-                if (!isHashValid) {
-                    throw IllegalStateException("Artifact SHA-256 integrity verification failed: expected $expectedHash, got $computedArtifactHash")
-                }
                 WasmRuntimeEngine.execute(
                     wasmBytes = wasmBytes,
                     config = WasmRuntimeEngine.ExecutionConfig(
@@ -619,7 +678,9 @@ object ComputeWorkerClient {
                 )
             }
 
-            // 5. Submit Cryptographically Sealed Result to Control Plane with genuine Ed25519 signature
+            onJobLifecycleUpdate?.invoke("SUBMITTING_RESULT", "Submitting signed result receipt...")
+            val nodeSig = signDigest(execResult.resultDigest)
+
             val resultUrl = URL("$serverBaseUrl/api/v1/nodes/results")
             val resConn = (resultUrl.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -630,12 +691,11 @@ object ComputeWorkerClient {
                 doOutput = true
             }
 
-            val nodeSig = signDigest(execResult.resultDigest)
-
             val resBody = JSONObject().apply {
                 put("node_id", nodeId)
                 put("job_id", jobId)
                 put("lease_id", leaseId)
+                put("fencing_token", fencingToken)
                 put("correlation_id", correlationId)
                 put("result", JSONObject().apply {
                     put("result_id", UUID.randomUUID().toString())
@@ -670,12 +730,45 @@ object ComputeWorkerClient {
             )
             LocalJobHistoryRepository.addEntry(historyEntry)
 
+            if (isSubmitted && execResult.exitCode == 0) {
+                onJobLifecycleUpdate?.invoke("COMPLETED", "Verified / Completed ($workloadName)")
+            } else {
+                onJobLifecycleUpdate?.invoke("FAILED", "Execution failed ($workloadName)")
+            }
+
             DispatchedJobExecution(
                 jobId = jobId,
                 workloadName = workloadName,
                 stdout = execResult.stdout.ifEmpty { execResult.stderr },
                 isSuccess = isSubmitted && execResult.exitCode == 0
             )
+        } catch (e: Exception) {
+            android.util.Log.e("ComputeWorkerClient", "Error executing job payload", e)
+            null
+        }
+    }
+
+    suspend fun pollAndExecuteJob(): DispatchedJobExecution? = withContext(Dispatchers.IO) {
+        val nodeId = pairedNodeId ?: return@withContext null
+        try {
+            val url = URL("$serverBaseUrl/api/v1/nodes/$nodeId/poll")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+                connectTimeout = 5000
+                readTimeout = 5000
+            }
+
+            if (conn.responseCode == 401 || conn.responseCode == 403 || conn.responseCode == 404) {
+                android.util.Log.w("ComputeWorkerClient", "Cluster rejected job poll with HTTP ${conn.responseCode}. Resetting identity.")
+                clearIdentity(appContext)
+                return@withContext null
+            }
+            if (conn.responseCode !in 200..299) return@withContext null
+            val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+            val root = JSONObject(responseText)
+            val jobObj = root.optJSONObject("job") ?: return@withContext null
+            executeJobPayload(jobObj)
         } catch (_: Exception) {
             null
         }

@@ -194,5 +194,30 @@ This document records the exact state of implementation across all subsystems of
 - **21-Gate Production Acceptance Re-Verification**:
   - Re-executed `scripts/acceptance.ps1` in 66s: 19 PROVEN, 1 SIMULATION-PROVEN, 1 HARDWARE-REQUIRED, 0 FAILED. Production Acceptance Certification: **GRANTED**.
 
+### Iteration 11: Forensic Repair & Verification of Physical Android Compute Pipeline (2026-09-29)
+- **Authoritative 11-Step Lifecycle & Fencing Semantics**:
+  - Formalized distributed DAG: `CREATED` → `QUEUED` → `ASSIGNED` → `LEASED` → `DISPATCHED` → `ACKNOWLEDGED` → `RUNNING` → `RESULT_SUBMITTED` → `VERIFYING` → `VERIFIED` → `SETTLED` → `COMPLETED`.
+  - Added atomic `job_transitions` and `leases` tables in Cloudflare DO SQLite with fencing tokens (`ft_<timestamp>_<uuid>`) and monotonic epoch validation.
+  - Implemented device acknowledgment and execution confirmation endpoints: `POST /api/v1/nodes/ack` and `POST /api/v1/nodes/start`.
+- **Dual-Path Dispatch: WebSocket Push with Authenticated Poll Fallback**:
+  - Cloudflare DO pushes assignment notifications instantly over hibernated WebSockets via `getWebSockets(nodeId)`.
+  - Fallback polling (`GET /api/v1/nodes/:id/poll`) and heartbeat ingestion (`POST /api/v1/nodes/heartbeat`) deliver active job payloads, lease tokens, and dynamic owner safety policies.
+- **Pure Android WebAssembly Bytecode Stack Machine**:
+  - Updated `WasmRuntimeEngine.kt` to an authentic stack machine supporting WASI Preview 1 host calls (`args_sizes_get`, `args_get`, `environ_sizes_get`, `environ_get`, `clock_time_get`, `random_get`, `proc_exit`, `fd_write`), memory operations (`memory.grow`, `memory.size`), 32-bit bitwise rotation, and 64-bit integer arithmetic.
+  - Purged all synthetic Kotlin algorithm fallbacks (`MessageDigest`, `FloatArray`, `BooleanArray`).
+  - Compiled and verified authentic FIPS 180-4 SHA-256 WebAssembly module fixture (`fixtures/sha256_hasher.wasm`, 3,560 bytes, SHA-256: `c86da4754d1c8581596aa48bc6bd7e60edd1b5f4281fe32b5e956a5efc98cad7`).
+- **Verifiable Double-Entry Ledger & Idempotent Credit Settlement**:
+  - Server verifier cryptographically validates result digests against unpredictable nonces before awarding credits.
+  - Atomic DEBIT and CREDIT paired ledger entries minted with idempotency key deduplication.
+  - Zero credits awarded for unverified or failed results.
+- **Web Console Real-Time Trace Watcher**:
+  - Web console polls `/api/v1/jobs/:id/trace` every 1s during challenge execution, animating the 10-step progress timeline.
+  - Synchronized header, sidebar, and table badge counts.
+- **Comprehensive Test Battery & 92.38% Control Plane Coverage**:
+  - Expanded `coordinator.test.js` to 20 comprehensive subtests covering public health, single-use pairing tokens, device authentication, multi-attribute placement, DO alarms, WebSocket hibernation, true double-entry ledger, empirical qualification, end-to-end lifecycle, adversarial rejection boundaries, fleet inventory, and bulk pruning.
+  - 100% test pass rate across all 20 test suites with 92.38% measured line coverage across control plane modules.
+  - 100% test pass rate across workspace Rust tests (`cargo test --workspace`) and adversarial security tests.
+
+
 
 

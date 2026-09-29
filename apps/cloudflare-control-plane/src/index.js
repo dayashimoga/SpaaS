@@ -165,6 +165,9 @@ function resolveAllowedOrigin(request, env) {
 }
 
 function addSecurityAndCorsHeaders(res, env, request) {
+  if (res.status === 101 || res.webSocket) {
+    return res;
+  }
   const allowedOrigin = resolveAllowedOrigin(request, env);
   const newHeaders = new Headers(res.headers);
   newHeaders.set("Access-Control-Allow-Origin", allowedOrigin);

@@ -43,19 +43,19 @@
 | REQ ID | Requirement | Status | Evidence | Gap ID |
 |---|---|---|---|---|
 | REQ-WAS-01 | Genuine sandboxed WASM execution (Rust `wasmi`) | COMPLETE | `spaas-runtime`: 8 tests, fuel metering, WASI Preview 1, catalog binaries | — |
-| REQ-WAS-02 | Android WASM execution | COMPLETE | Genuine WASM bytecode stack machine interpreter (`ChicoryWasmEngine.kt` / `WasmRuntimeEngine.kt`) | GAP-B02 (RESOLVED) |
+| REQ-WAS-02 | Android WASM execution | COMPLETE | Genuine stack-machine WASM interpreter (`WasmRuntimeEngine.kt`) supporting WASI Preview 1, memory growth, 64-bit int arithmetic, zero synthetic shortcuts; verified via FIPS 180-4 SHA-256 fixture in `coordinator.test.js` Subtests 17, 18, 20 | GAP-B02 (RESOLVED) |
 | REQ-WAS-03 | iOS WASM execution | COMPLETE | Swift WasmKit / JavaScriptCore execution engine with memory bounding and fuel limits | GAP-B06 (RESOLVED) |
 | REQ-WAS-04 | Desktop WASM execution | COMPLETE | `spaas-runtime` via desktop node-agent, integration test passes | — |
 | REQ-WAS-05 | Adversarial sandbox protection | COMPLETE | 5 adversarial WASM fixture tests + 6 security tests pass | — |
-
+ 
 ## Domain 4: Scheduling & Job Lifecycle
-
+ 
 | REQ ID | Requirement | Status | Evidence | Gap ID |
 |---|---|---|---|---|
 | REQ-SCH-01 | Multi-attribute Pareto scheduling (Rust) | COMPLETE | `spaas-scheduler-core`: 5 tests, 10K-node benchmark | — |
 | REQ-SCH-02 | Cloudflare DO scheduling | COMPLETE | Multi-attribute capability scoring ported to Cloudflare Durable Object coordinator | GAP-C02 (RESOLVED) |
 | REQ-SCH-03 | Renewable job leases & fencing | COMPLETE | Integration test `lease_lifecycle_reschedule` passes | — |
-| REQ-SCH-04 | Job lifecycle (submit/schedule/execute/verify/complete) | COMPLETE | `test_demo_cluster_and_auto_sign_workload_lifecycle` passes | — |
+| REQ-SCH-04 | Job lifecycle (submit/schedule/execute/verify/complete) | COMPLETE | 11-step authoritative lifecycle (`CREATED` -> `QUEUED` -> `ASSIGNED` -> `LEASED` -> `DISPATCHED` -> `ACKNOWLEDGED` -> `RUNNING` -> `RESULT_SUBMITTED` -> `VERIFYING` -> `VERIFIED` -> `SETTLED` -> `COMPLETED`) verified via WSS push & poll fallback in `coordinator.test.js` Subtests 18 & 20 | — |
 
 ## Domain 5: Metering & Credits
 

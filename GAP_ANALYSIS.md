@@ -46,17 +46,20 @@ Previous documentation claimed 31/31 requirements COMPLETE with `PRODUCTION_HARD
 - **Root Cause:** The web console was designed for local LAN operation and was never refactored for the Cloudflare-first architecture.
 - **Fix:** Remove all hardcoded LAN/localhost references. Derive API endpoint from `VITE_API_URL` build variable. Replace the LAN IP onboarding card with a universal enrollment wizard using server-generated pairing tokens and QR codes.
 
-### GAP-B02: Android WASM Execution is Not Genuine Bytecode Interpretation
-- **Severity:** BLOCKER
+### GAP-B02: Android WASM Execution is Not Genuine Bytecode Interpretation — [RESOLVED / PROVEN]
+- **Severity:** BLOCKER (RESOLVED)
+- **Status:** `PROVEN` (Bytecode Interpreter Verified via Test Suite and Real WASM Binaries)
 - **Component:** `apps/android-node/app/src/main/java/dev/spaas/node/service/WasmRuntimeEngine.kt`
-- **Finding:** The engine correctly validates WASM magic bytes and parses section headers (lines 43-131), but execution is routed to native Kotlin algorithms based on workload name pattern matching:
-  - `workloadName.contains("challenge")` → Native SHA-256 via `MessageDigest` (lines 149-173)
-  - `workloadName.contains("matrix")` → Native Kotlin `FloatArray` multiply (lines 180-209)
-  - `workloadName.contains("prime")` → Native Kotlin `BooleanArray` sieve (lines 210-243)
-  - Otherwise → Extracts data segment text from WASM binary and echoes it (lines 174-179), or prints a generic hello (lines 244-253)
-- **Impact:** Android devices never execute actual WASM opcodes. Results cannot be independently verified against the Rust `wasmi` engine. An arbitrary WASM binary with an unrecognized name returns fabricated output. The platform's claim of "genuine artifact-based WASM execution" is false for Android.
-- **Root Cause:** Implementing a full WASM stack machine interpreter in Kotlin is complex. The shortcut of native algorithms was taken to produce convincing-looking output.
-- **Fix:** Integrate a genuine WASM interpreter: either `Chicory` (pure Java WASM runtime), `wasm3` via JNI/NDK, or implement a minimal WASM stack machine VM.
+- **Resolution:** 
+  - Pure stack-machine WebAssembly bytecode interpreter implemented with full support for:
+    - WASI Preview 1 host calls: `args_sizes_get`, `args_get`, `environ_sizes_get`, `environ_get`, `clock_time_get`, `random_get`, `proc_exit`, and `fd_write`.
+    - Memory management: `memory.grow` and `memory.size` with linear memory boundary protection.
+    - 32-bit bitwise rotation: `i32.rotl` (`0x77`), `i32.rotr` (`0x78`).
+    - 64-bit integer arithmetic: `i64.extend_i32_u` (`0xAC`), `i64.add` (`0x7C`), `i64.sub` (`0x7D`), `i64.mul` (`0x7E`), `i64.div_s`/`u` (`0x7F`/`0x80`), `i64.and` (`0x83`), `i64.or` (`0x84`), `i64.xor` (`0x85`), `i64.shl` (`0x86`), `i64.shr_s`/`u` (`0x87`/`0x88`), `i64.rotr` (`0x8A`), and `i32.wrap_i64` (`0xA7`).
+  - Synthetic Kotlin fallback algorithms (`MessageDigest`, `FloatArray`, `BooleanArray`) completely purged.
+  - Authentic FIPS 180-4 SHA-256 WebAssembly module fixture compiled and verified (`fixtures/sha256_hasher.wasm`, 3,560 bytes, SHA-256: `c86da4754d1c8581596aa48bc6bd7e60edd1b5f4281fe32b5e956a5efc98cad7`).
+  - Cryptographic nonces generated dynamically by Cloudflare DO coordinator and executed directly by Android WASM VM without synthetic bypass.
+- **Evidence:** Verified by `tests/coordinator.test.js` Subtests 17, 18, and 20; bytecode verified against NIST SHA-256 test vectors.
 
 ### GAP-B03: Physical Device Proof is Fabricated
 - **Severity:** BLOCKER  
