@@ -95,4 +95,16 @@ object LocalJobHistoryRepository {
 
     @Synchronized
     fun totalFailed(): Int = history.count { !it.isSuccess }
+
+    @Synchronized
+    fun removeEntry(jobId: String, context: android.content.Context? = null) {
+        history.removeAll { it.jobId == jobId }
+        persist(context ?: dev.spaas.node.service.ComputeWorkerClient.appContext)
+    }
+
+    @Synchronized
+    fun clearHistory(context: android.content.Context? = null) {
+        history.clear()
+        persist(context ?: dev.spaas.node.service.ComputeWorkerClient.appContext)
+    }
 }

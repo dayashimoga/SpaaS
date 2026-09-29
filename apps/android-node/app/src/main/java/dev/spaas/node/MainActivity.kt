@@ -1081,12 +1081,30 @@ fun ControlsView(
 // ==========================================
 @Composable
 fun ActivityView() {
-    val history = LocalJobHistoryRepository.getRecent()
+    var history by remember { mutableStateOf(LocalJobHistoryRepository.getRecent()) }
 
     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Text("Execution History & Audit Log", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text("Auditable cryptographic record of jobs executed on this phone", fontSize = 12.sp, color = Color.Gray)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Execution History & Audit Log", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Auditable cryptographic record of jobs executed on this phone", fontSize = 12.sp, color = Color.Gray)
+                }
+                if (history.isNotEmpty()) {
+                    TextButton(
+                        onClick = {
+                            LocalJobHistoryRepository.clearHistory()
+                            history = emptyList()
+                        }
+                    ) {
+                        Text("Clear All", color = Color(0xFFEF4444), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
 
         if (history.isEmpty()) {
@@ -1097,7 +1115,7 @@ fun ActivityView() {
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Text(
-                        "No jobs processed in current session yet.\nSubmit a workload from the Web Console to verify real execution.",
+                        "No jobs in history.\nRun a verification job from the Web Console or wait for scheduled workloads.",
                         modifier = Modifier.padding(20.dp),
                         color = Color.Gray,
                         fontSize = 13.sp
@@ -1105,24 +1123,42 @@ fun ActivityView() {
                 }
             }
         } else {
-            items(history) { entry ->
-                JobHistoryCard(entry = entry)
+            items(history, key = { it.jobId }) { entry ->
+                JobHistoryCard(
+                    entry = entry,
+                    onDelete = {
+                        LocalJobHistoryRepository.removeEntry(entry.jobId)
+                        history = LocalJobHistoryRepository.getRecent()
+                    }
+                )
             }
         }
     }
 }
 
 @Composable
-fun JobHistoryCard(entry: LocalJobHistoryEntry) {
+fun JobHistoryCard(entry: LocalJobHistoryEntry, onDelete: () -> Unit = {}) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(entry.workloadName, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
-                Text(if (entry.isSuccess) "VERIFIED" else "FAILED", color = if (entry.isSuccess) Color(0xFF10B981) else Color(0xFFEF4444), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(entry.workloadName, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (entry.isSuccess) "VERIFIED" else "FAILED", color = if (entry.isSuccess) Color(0xFF10B981) else Color(0xFFEF4444), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "✕",
+                        color = Color.Gray,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clickable { onDelete() }
+                            .padding(4.dp)
+                    )
+                }
             }
             Text("Job ID: ${entry.jobId.take(12)}...", fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = Color.Gray)
             Text("Fuel Consumed: ${entry.fuelConsumed} | Wall Time: ${entry.wallTimeMs}ms", fontSize = 12.sp, color = Color(0xFF00E5FF))

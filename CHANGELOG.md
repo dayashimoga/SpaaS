@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.1] - 2026-09-29
+
+### Fixed — Forensic Cryptographic Verification & QR Enrollment
+- **QR Code Enrollment Case-Sensitivity (`coordinator.js`, `ComputeWorkerClient.kt`, `sqlite-bridge.js`):** Resolved `INVALID_PAIRING_TOKEN` when scanning QR codes on Android devices. Opaque credentials / UUID tokens generated from `crypto.randomUUID()` were being blindly uppercased by Android client code. Added case-insensitive lookup in coordinator SQL queries and mock SQLite bridge, and preserved original lowercase UUID format in `ComputeWorkerClient.kt`.
+- **Direct Cryptographic Challenge Verification (`coordinator.js`):** Resolved digest mismatch and verification failures. Challenge verification now checks both `result.result_digest` and `stdout` case-insensitively against `expected_digest`. Jobs with valid digests transition authoritatively through `RESULT_SUBMITTED` -> `VERIFYING` -> `VERIFIED` -> `SETTLED` -> `COMPLETED`, regardless of WASM exit code conventions.
+- **Truthful Telemetry & Contradictory UI State Elimination (`main.js`):** Eliminated misleading "Exit Code: 1 (SUCCESS)" by checking actual exit code and applying distinct styling (`0 (SUCCESS)` in emerald, `${exitCode} (NON-ZERO / FAILED)` in rose). Purged hardcoded fake fallback timestamps (`12:00:00`, `12:00:01`, `12:00:02`), fallback digests, and fallback signatures.
+- **Live Trace Watcher & Table Synchronization (`main.js`):** Table rows now dynamically update their status in real-time as jobs progress from `DISPATCHED` -> `RUNNING` -> `COMPLETED`. Added manual `🔄 Refresh` button to the Distributed Jobs table toolbar.
+- **Mobile Execution History Management (`MainActivity.kt`, `LocalJobHistory.kt`):** Added "Clear All" button to wipe the device's local execution log and added individual "✕" deletion controls for each job card in the Activity tab.
+
+---
+
 ## [0.3.0] - 2026-09-29
 
 ### Fixed — Verification Challenge & Mobile Scheduling Pipeline

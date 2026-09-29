@@ -1967,12 +1967,16 @@ function startJobTraceWatcher(jobId) {
 
       const existing = cachedJobs.find(j => j.job_id === jobId);
       if (existing) {
+        const stateChanged = existing.state !== trace.job_state;
         existing.state = trace.job_state;
         if (trace.completed_at) existing.completed_at = trace.completed_at;
         if (trace.settlements && trace.settlements.length > 0) {
           existing.settlement = trace.settlements[0];
           existing.credits_settled = trace.settlements[0].amount_credits;
           existing.tx_id = trace.settlements[0].tx_id;
+        }
+        if (stateChanged) {
+          renderJobsTable(cachedJobs);
         }
       }
 
@@ -2321,56 +2325,91 @@ function renderJobDetails(job) {
   }
 
   const elTimeSub = document.getElementById('timeline-time-submitted');
-  if (elTimeSub) elTimeSub.textContent = job.created_at ? new Date(job.created_at).toLocaleTimeString() : '12:00:00';
+  if (elTimeSub) elTimeSub.textContent = job.created_at ? new Date(job.created_at).toLocaleTimeString() : '-';
 
   const elTimeDisp = document.getElementById('timeline-time-dispatched');
-  if (elTimeDisp) elTimeDisp.textContent = job.scheduled_at ? new Date(job.scheduled_at).toLocaleTimeString() : (job.state === 'Completed' ? '12:00:01' : '-');
+  if (elTimeDisp) elTimeDisp.textContent = job.scheduled_at ? new Date(job.scheduled_at).toLocaleTimeString() : (job.dispatched_at ? new Date(job.dispatched_at).toLocaleTimeString() : '-');
 
   const elTimeComp = document.getElementById('timeline-time-completed');
-  if (elTimeComp) elTimeComp.textContent = job.completed_at ? new Date(job.completed_at).toLocaleTimeString() : (job.state === 'Completed' ? '12:00:02' : '-');
+  if (elTimeComp) elTimeComp.textContent = job.completed_at ? new Date(job.completed_at).toLocaleTimeString() : '-';
 
   // Sub-tab 3: Logs
   const elStdout = document.getElementById('detail-job-stdout');
   if (elStdout) {
-    elStdout.textContent = job.result?.stdout
-      || (job.state === 'Running' ? 'Executing inside edge WASI sandbox...\n[wasm-rt] Decrementing fuel gas...\n[wasm-rt] Writing to standard output stream...'
-      : (job.state === 'Completed' ? '(Zero stdout output recorded)' : 'Job queued/scheduled, awaiting worker execution...'));
+    if (job.result?.stdout) {
+      elStdout.textContent = job.result.stdout;
+    } else if (job.result?.stderr) {
+      elStdout.textContent = `[STDERR]:\n${job.result.stderr}`;
+    } else if (stateUpper === 'RUNNING' || stateUpper === 'DISPATCHED' || stateUpper === 'ACKNOWLEDGED') {
+      elStdout.textContent = 'Workload dispatched to device. Awaiting sandboxed execution output...';
+    } else if (stateUpper === 'FAILED' || stateUpper === 'UNVERIFIED') {
+      elStdout.textContent = job.result?.stderr || 'Execution failed with no standard output.';
+    } else if (stateUpper === 'COMPLETED' || stateUpper === 'SETTLED') {
+      elStdout.textContent = '(Workload completed with empty stdout)';
+    } else {
+      elStdout.textContent = 'Job queued/scheduled, awaiting worker execution...';
+    }
   }
 
   const elStderr = document.getElementById('detail-job-stderr');
-  if (elStderr) elStderr.textContent = job.result?.stderr || 'No errors or traps logged.';
+  if (elStderr) elStderr.textContent = job.result?.stderr || (['FAILED', 'UNVERIFIED'].includes(stateUpper) ? 'Execution or verification failure recorded.' : 'No errors or traps logged.');
 
   // Sub-tab 4: Result
   const elDigest = document.getElementById('detail-job-digest');
   if (elDigest) {
-    elDigest.textContent = job.result?.result_digest || (job.state === 'Completed' ? 'sha256:d54a25391a2822785eff7fdb15151b2eee275611b839d0f03f4ed8906c0e2955' : '-');
+    elDigest.textContent = job.result?.result_digest || job.result?.digest || (job.spec?.expected_digest ? `Expected: ${job.spec.expected_digest}` : '-');
   }
 
   const elResExit = document.getElementById('detail-job-result-exit');
   if (elResExit) {
-    elResExit.textContent = job.result ? `${job.result.exit_code} (SUCCESS)` : (job.state === 'Running' ? 'Running...' : '-');
+    if (job.result) {
+      const ec = job.result.exit_code;
+      if (ec === 0) {
+        elResExit.textContent = '0 (SUCCESS)';
+        elResExit.className = 'spec-val font-mono font-bold text-emerald';
+      } else {
+        elResExit.textContent = `${ec} (NON-ZERO / FAILED)`;
+        elResExit.className = 'spec-val font-mono font-bold text-rose';
+      }
+    } else {
+      elResExit.textContent = (['RUNNING', 'DISPATCHED', 'ACKNOWLEDGED'].includes(stateUpper)) ? 'Executing...' : '-';
+      elResExit.className = 'spec-val font-mono';
+    }
   }
 
   const elResFuel = document.getElementById('detail-job-result-fuel');
   if (elResFuel) {
-    elResFuel.textContent = job.result ? `${(job.result.fuel_consumed || 0).toLocaleString()} Fuel Gas` : '-';
+    elResFuel.textContent = job.result ? `${(job.result.fuel_consumed ?? job.result.fuel_used ?? 0).toLocaleString()} Fuel Gas` : '-';
   }
 
   const elWall = document.getElementById('detail-job-walltime');
-  if (elWall) elWall.textContent = job.result ? `${job.result.wall_time_ms} ms` : '-';
+  if (elWall) elWall.textContent = job.result ? `${job.result.wall_time_ms ?? job.result.duration_ms ?? 0} ms` : '-';
 
   const elMem = document.getElementById('detail-job-memory');
-  if (elMem) elMem.textContent = job.result ? `${Math.round((job.result.peak_memory_bytes || 65536) / 1024)} KB` : '-';
+  if (elMem) elMem.textContent = job.result ? `${Math.round((job.result.peak_memory_bytes || ((job.result.memory_mb || 64) * 1024 * 1024)) / 1024)} KB` : '-';
 
   // Sub-tab 5: Verification & Proof
   const elVerStatus = document.getElementById('detail-job-verification-status');
   if (elVerStatus) {
-    elVerStatus.textContent = (job.state === 'Completed' || job.state === 'Settled') ? 'VERIFIED_VALID (Ed25519 & Digest Confirmed)' : (job.state === 'Running' ? 'Executing in Isolation' : 'Pending Verification');
+    if (['COMPLETED', 'SETTLED', 'VERIFIED'].includes(stateUpper)) {
+      elVerStatus.textContent = 'VERIFIED_VALID (Cryptographic Output & Receipt Confirmed)';
+      elVerStatus.className = 'spec-val font-mono text-emerald font-bold';
+    } else if (['FAILED', 'UNVERIFIED'].includes(stateUpper)) {
+      const reason = job.result?.verification_status || (job.result?.stderr ? job.result.stderr.substring(0, 60) : 'Verification Mismatch or Failure');
+      elVerStatus.textContent = `FAILED (${reason})`;
+      elVerStatus.className = 'spec-val font-mono text-rose font-bold';
+    } else if (['RUNNING', 'RESULT_SUBMITTED', 'VERIFYING'].includes(stateUpper)) {
+      elVerStatus.textContent = 'Verifying Output...';
+      elVerStatus.className = 'spec-val font-mono text-amber';
+    } else {
+      elVerStatus.textContent = 'Pending Verification';
+      elVerStatus.className = 'spec-val font-mono text-muted';
+    }
   }
 
   const elSig = document.getElementById('detail-job-sig');
   if (elSig) {
-    elSig.textContent = job.result?.node_signature || (job.state === 'Completed' ? 'sig_ed25519_verified_attestation_f392a81' : '-');
+    elSig.textContent = job.result?.node_signature || job.result?.signature || '-';
   }
 
   const elSubSig = document.getElementById('detail-job-submitter-sig');
@@ -3461,7 +3500,7 @@ async function fetchPairingCode(overrideIp = null) {
     const primaryUrl = targetBase;
     const backupUrl = localStorage.getItem('spaas_backup_url') || 'https://spaas-dr.a.run.app';
     const opaqueToken = data.opaque_credential || data.token || code;
-    currentPairingUri = data.qr_payload || `spaas://pair?code=${encodeURIComponent(opaqueToken)}&primary=${encodeURIComponent(primaryUrl)}&backup=${encodeURIComponent(backupUrl)}`;
+    currentPairingUri = data.qr_payload || `spaas://pair?token=${encodeURIComponent(opaqueToken)}&primary=${encodeURIComponent(primaryUrl)}&backup=${encodeURIComponent(backupUrl)}`;
     const uriCaption = document.getElementById('modal-qr-uri-caption');
     if (uriCaption) uriCaption.textContent = currentPairingUri.length > 55 ? currentPairingUri.substring(0, 55) + '...' : currentPairingUri;
 
@@ -4141,6 +4180,24 @@ function initDeviceComparison() {
 }
 
 function initJobOperations() {
+  // Refresh Jobs button
+  const btnRefreshJobs = document.getElementById('btn-refresh-jobs');
+  if (btnRefreshJobs) {
+    btnRefreshJobs.addEventListener('click', async () => {
+      btnRefreshJobs.disabled = true;
+      btnRefreshJobs.textContent = '⏳ Refreshing...';
+      try {
+        await fetchJobs();
+        showToast('Execution queue refreshed', 'info');
+      } catch (err) {
+        showToast(`Failed to refresh: ${err.message}`, 'error');
+      } finally {
+        btnRefreshJobs.disabled = false;
+        btnRefreshJobs.textContent = '🔄 Refresh';
+      }
+    });
+  }
+
   // Clear Queue button
   const btnClearJobs = document.getElementById('btn-clear-jobs');
   if (btnClearJobs) {

@@ -1771,5 +1771,97 @@ test("SPaaSCoordinator — Job Management: Edit, Retry, Delete & Bulk Clear", as
   assert.equal(jobsData.total, 0);
 });
 
+test("SPaaSCoordinator — Case-Insensitive Pairing Tokens & Direct Digest Verification", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_CONTROL_PLANE_EPOCH: "1",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  // 1. Generate pairing code (creates opaque_credential UUID, token UUID, and SP-XXXX short code)
+  const codeRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/enrollment/create", {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(codeRes.status, 200);
+  const codeData = await codeRes.json();
+  const opaqueCred = codeData.opaque_credential;
+  assert.ok(opaqueCred);
+
+  // 2. Case-insensitive lookups: uppercase UUID (simulating Android QR uppercase bug)
+  const upperCred = opaqueCred.toUpperCase();
+  const lowerCred = opaqueCred.toLowerCase();
+
+  // Both uppercase and lowercase should successfully resolve in verify/enrollment
+  const enrollRes1 = await coordinator.fetch(
+    new Request("http://localhost/api/v1/devices/pair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pairing_token: upperCred,
+        device_name: "Pixel 9 Pro QR Uppercase",
+        device_type: "android_smartphone"
+      })
+    })
+  );
+  assert.equal(enrollRes1.status, 200);
+  const enrollData1 = await enrollRes1.json();
+  assert.ok(enrollData1.node_id);
+  assert.ok(enrollData1.auth_token);
+
+  const challengeRes = await coordinator.fetch(
+    new Request(`http://localhost/api/v1/nodes/${enrollData1.node_id}/dispatch-challenge`, {
+      method: "POST",
+      headers: ADMIN_HEADERS
+    })
+  );
+  assert.equal(challengeRes.status, 200);
+  const challengeData = await challengeRes.json();
+  const chJobId = challengeData.job_id;
+  const expectedDigest = challengeData.expected_digest;
+  assert.ok(expectedDigest);
+
+  // Submit result with matching result_digest (even if exit_code is 0 or WASM exit code)
+  const resultRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/nodes/results", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${enrollData1.auth_token}`
+      },
+      body: JSON.stringify({
+        node_id: enrollData1.node_id,
+        job_id: chJobId,
+        lease_id: challengeData.lease_id,
+        fencing_token: challengeData.fencing_token,
+        result: {
+          job_id: chJobId,
+          node_id: enrollData1.node_id,
+          exit_code: 0,
+          stdout: "SPaaS WASM Sandbox: SHA-256 Cryptographic Benchmark\nStatus: SUCCESS",
+          stderr: "",
+          result_digest: expectedDigest.toUpperCase(), // Test case-insensitive digest comparison
+          fuel_consumed: 125000,
+          wall_time_ms: 18,
+          node_signature: "ed25519_sig"
+        }
+      })
+    })
+  );
+  assert.equal(resultRes.status, 200);
+  const resultData = await resultRes.json();
+  assert.equal(resultData.status, "accepted");
+  assert.equal(resultData.verification, "VERIFIED");
+
+  // Verify job state transitioned to COMPLETED
+  const traceRes = await coordinator.fetch(new Request(`http://localhost/api/v1/jobs/${chJobId}/trace`));
+  assert.equal(traceRes.status, 200);
+  const traceData = await traceRes.json();
+  assert.equal(traceData.job_state, "COMPLETED");
+});
+
+
 
 

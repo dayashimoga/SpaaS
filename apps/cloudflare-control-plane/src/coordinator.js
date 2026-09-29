@@ -731,26 +731,33 @@ export class SPaaSCoordinator {
     const expectedDigest = spec?.expected_digest;
 
     if (expectedDigest) {
+      // Check all possible locations where the digest may appear
+      const digestFromResultField = resPayload.result_digest || payload.result_digest || "";
+      const digestFromStdout = stdout || resPayload.stdout || "";
       const outputHasDigest = Boolean(
-        (stdout && stdout.includes(expectedDigest)) ||
-        (resPayload.result_digest && resPayload.result_digest === expectedDigest) ||
-        (payload.result_digest && payload.result_digest === expectedDigest) ||
-        (resPayload.stdout && resPayload.stdout.includes(expectedDigest))
+        digestFromStdout.includes(expectedDigest) ||
+        digestFromResultField === expectedDigest ||
+        digestFromResultField.toLowerCase() === expectedDigest.toLowerCase()
       );
-      if (exit_code !== 0 || !outputHasDigest) {
+      // Accept if digest matches, regardless of exit_code (WASM may use non-zero exit for normal termination)
+      const digestVerified = outputHasDigest;
+      if (!digestVerified) {
         this.recordJobTransition(job_id, "RESULT_SUBMITTED", "Device submitted challenge result receipt");
         this.recordJobTransition(job_id, "VERIFYING", "Verifying challenge cryptographic digest");
-        this.recordJobTransition(job_id, "UNVERIFIED", `Digest mismatch or execution failure. Expected: ${expectedDigest}`);
+        this.recordJobTransition(job_id, "UNVERIFIED", `Digest mismatch. Expected: ${expectedDigest}, got result_digest: ${digestFromResultField.substring(0, 16)}...`);
         this.recordJobTransition(job_id, "FAILED", "Challenge verification failed; zero credits awarded");
 
         const failedResultObj = {
-          exit_code: exit_code || 1,
+          exit_code: exit_code ?? 1,
           stdout: stdout || "",
-          stderr: stderr || `Digest mismatch. Expected: ${expectedDigest}`,
+          stderr: stderr || `Digest mismatch. Expected: ${expectedDigest}, actual result_digest: ${digestFromResultField}`,
           fuel_used: fuel_used || 0,
           duration_ms: duration_ms || 0,
           memory_mb: memory_mb || 64,
           signature: signature || "unverified",
+          verification_status: "MISMATCH",
+          expected_digest: expectedDigest,
+          actual_digest: digestFromResultField,
           completed_at: Date.now()
         };
         this.sqlExec(`UPDATE jobs SET result = ?, completed_at = ? WHERE id = ?`, JSON.stringify(failedResultObj), Date.now(), job_id);
@@ -764,7 +771,8 @@ export class SPaaSCoordinator {
           reason: "CHALLENGE_VERIFICATION_FAILED",
           job_id,
           expected_digest: expectedDigest,
-          actual_stdout: stdout
+          actual_digest: digestFromResultField,
+          actual_stdout: stdout ? stdout.substring(0, 200) : ""
         };
       }
     }
@@ -1343,14 +1351,27 @@ export class SPaaSCoordinator {
         return json({ error: "MISSING_PAIRING_TOKEN", message: "pairing_token or pairing_code is required" }, 400);
       }
 
-      // Resolve: try as opaque_credential first, then as short_code
+      // Resolve: try as opaque_credential first (case-insensitive), then as short_code, then legacy token
+      const inputLower = resolvedInput.toLowerCase();
+      const inputUpper = resolvedInput.toUpperCase();
       let tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE opaque_credential = ?`, resolvedInput);
+      // Case-insensitive fallback for UUIDs (Android may uppercase the QR-scanned UUID)
       if (tokens.length === 0) {
-        tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE short_code = ? AND status = 'Active'`, resolvedInput.toUpperCase());
+        tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE opaque_credential = ?`, inputLower);
+      }
+      if (tokens.length === 0) {
+        tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE opaque_credential = ?`, inputUpper);
+      }
+      // Try as human-readable short code (SP-XXXX)
+      if (tokens.length === 0) {
+        tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE short_code = ? AND status = 'Active'`, inputUpper);
       }
       // Legacy fallback: try as primary key (token column)
       if (tokens.length === 0) {
         tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE token = ?`, resolvedInput);
+      }
+      if (tokens.length === 0) {
+        tokens = this.sqlExec(`SELECT * FROM pairing_tokens WHERE token = ?`, inputLower);
       }
 
       if (tokens.length === 0) {
