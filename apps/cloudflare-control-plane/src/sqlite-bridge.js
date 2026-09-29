@@ -153,7 +153,8 @@ function createMinimalFallbackEngine() {
         return [];
       }
       if (qu.includes("FROM PAIRING_TOKENS WHERE OPAQUE_CREDENTIAL =")) {
-        const match = Array.from(tables.pairing_tokens.values()).find(t => t.opaque_credential === params[0]);
+        const searchVal = (params[0] || "").toLowerCase();
+        const match = Array.from(tables.pairing_tokens.values()).find(t => (t.opaque_credential || "").toLowerCase() === searchVal);
         return match ? [match] : [];
       }
       if (qu.includes("FROM PAIRING_TOKENS WHERE SHORT_CODE =")) {
@@ -162,7 +163,8 @@ function createMinimalFallbackEngine() {
         return matches.length > 0 ? [matches[0]] : [];
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM PAIRING_TOKENS WHERE TOKEN =")) {
-        const t = tables.pairing_tokens.get(params[0]);
+        const searchVal = (params[0] || "").toLowerCase();
+        const t = tables.pairing_tokens.get(params[0]) || Array.from(tables.pairing_tokens.values()).find(t => (t.token || "").toLowerCase() === searchVal);
         return t ? [t] : [];
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM PAIRING_TOKENS")) {

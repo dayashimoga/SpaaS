@@ -278,7 +278,14 @@ object ComputeWorkerClient {
         policy: ProviderSafetyPolicy
     ): PairResult = withContext(Dispatchers.IO) {
         var cleanUrl = baseUrl.trim().trimEnd('/')
-        var cleanCode = pairingCode.trim().uppercase()
+        // Only uppercase SP-XXXX short codes; preserve UUID case for opaque tokens
+        var cleanCode = pairingCode.trim().let { code ->
+            if (code.startsWith("SP-", ignoreCase = true) || code.length <= 7) {
+                code.uppercase()
+            } else {
+                code // Preserve original case for UUIDs/opaque tokens
+            }
+        }
 
         // 1. Automatic parsing if user pasted full spaas://pair? URI
         if (cleanCode.startsWith("SPAAS://PAIR") || cleanCode.startsWith("spaas://pair") || cleanUrl.startsWith("spaas://pair")) {
