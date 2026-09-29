@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.0] - 2026-09-29
+
+### Fixed — Verification Challenge & Mobile Scheduling Pipeline
+- **CORS Ingress & Header Sanitization (`index.js`, `main.js`):** Fixed browser CORS preflight rejections (`Failed to fetch`) when clicking "Run Verification Job" or submitting workloads. Added `X-Correlation-ID` and wildcard header allowance to Worker gateway `Access-Control-Allow-Headers` and removed redundant custom headers from client requests.
+- **Challenge Delivery State Machine (`coordinator.js`):** Resolved issue where verification challenge jobs were stalled in `QUEUED` state. Transitioned challenge jobs to `DISPATCHED` immediately with active lease and fencing token so physical devices polling or heartbeating receive the payload without delay.
+- **FIPS 180-4 SHA-256 Digest Verification on Android (`ComputeWorkerClient.kt`):** Hardened Android WASM runtime fallback to compute authentic SHA-256 challenge receipts, ensuring nodes reliably transition to `QUALIFIED` status and record executions in the mobile Activity audit log.
+
+### Added — Full Distributed Jobs Lifecycle Management (Console & Backend)
+- **Bulk Queue Controls (`index.html`, `main.js`, `coordinator.js`):** Added `Clear Queue` (clears all pending/queued jobs) and `Purge Completed` (removes completed, failed, and cancelled jobs).
+- **Per-Job Operations:** Added action buttons (`Edit`, `Delete`, `Cancel`, `Retry`) on every row in the Distributed Jobs table and inside the Job Details telemetry panel.
+- **Interactive Edit Modal:** Created `#modal-edit-job` allowing operators to edit workload name, target node assignment, lifecycle state, gas fuel limits, timeout, and execution arguments.
+- **Control Plane Endpoints:** Implemented `DELETE /api/v1/jobs` (bulk pruning), `DELETE /api/v1/jobs/:id` (cascading removal), `PATCH/PUT /api/v1/jobs/:id` (live spec/state update), and `POST /api/v1/jobs/:id/retry` (instant scheduler re-dispatch).
+
+---
+
 ## [0.2.0-sprint.2] - 2026-09-27
 
 ### Added — Sprint 2: Cloudflare Primary Control Plane Hardening & Security
