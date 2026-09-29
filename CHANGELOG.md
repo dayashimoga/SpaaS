@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.2] - 2026-09-29
+
+### Fixed & Implemented — 12-State Distributed Machine, Pareto Explainability & UX Overhaul
+- **12-State Authoritative DAG (`coordinator.js`):** Fully implemented the 12-state distributed lifecycle (`SUBMITTED` → `QUEUED` → `MATCHING` → `OFFERED` → `ASSIGNED` → `LEASED` → `DOWNLOADING` → `EXECUTING` → `UPLOADING` → `VERIFYING` → `VERIFIED` → `SETTLED` → `COMPLETED`) with automatic failure branching (`CANCELLED`, `TIMEOUT`, `REJECTED`, `FAILED`). Every transition is logged with timestamp, reason, next action, and metadata.
+- **Pareto Multi-Attribute Scheduling & Decision Explainability (`coordinator.js`):** Implemented multi-objective scoring across battery, thermals, charging, network, reliability, and latency. Exposed explainability endpoint (`GET /api/v1/jobs/:id/decision`) returning winning score, rationale, candidate count, and excluded candidate list.
+- **Provider Control Modes (`coordinator.js`, `ComputeWorkerClient.kt`, `MainActivity.kt`):** Added provider modes (`AUTO_ACCEPT`, `ASK_ME`, `SCHEDULED_AUTO`, `PAUSED`). Implemented `/api/v1/nodes/offer/accept` and `/api/v1/nodes/offer/decline` with automatic lease granting or job requeuing. Added interactive mobile prompt in Android app.
+- **Fleet Management & Simulation Isolation (`coordinator.js`, `index.html`, `main.js`):** Added URL query filter (`/api/v1/nodes?filter=physical` vs `?filter=simulated`) and visual separation in Web Console, preventing simulated nodes from contaminating physical device lists.
+- **Web Console Glassmorphism UX Overhaul (`main.js`, `index.html`):** Purged all 26 blocking `alert()` popups; replaced with non-blocking toast notifications. Added Simple Mode submission wizard with live capacity estimation (`eligible-nodes-count`), Advanced Options collapsible accordion, and live job filter pills (`All`, `Queued`, `Offered`, `Running`, `Completed`, `Failed`).
+- **Android Node 6-Tab Architecture (`MainActivity.kt`):** Restructured into 6 tabs (`HOME`, `JOBS`, `PERFORMANCE`, `CONTROLS`, `EARNINGS`, `SECURITY`) with interactive offer acceptance, provider safety presets, live execution progress bar, and revocable identity controls.
+- **SQLite Bridge Parameter Alignment (`sqlite-bridge.js`):** Resolved 5 critical bridge defects: 13-parameter job insert tuple mapping, case-insensitive state filtering, state normalization to uppercase `COMPLETED`, unique transaction IDs for transitions, and handling for `OFFERED`/`QUEUED` updates.
+
+---
+
 ## [0.3.1] - 2026-09-29
 
 ### Fixed — Forensic Cryptographic Verification & QR Enrollment

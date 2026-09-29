@@ -2918,7 +2918,9 @@ mod tests {
         assert!(revoke_res.is_ok());
 
         // 3. Heartbeat on revoked node must be rejected with 403 FORBIDDEN
-        let hb_revoked_err = heartbeat(State(state.clone()), Json(hb_req)).await.unwrap_err();
+        let hb_revoked_err = heartbeat(State(state.clone()), Json(hb_req))
+            .await
+            .unwrap_err();
         assert_eq!(hb_revoked_err.0, StatusCode::FORBIDDEN);
 
         // 4. Pruning revoked nodes removes it from cluster

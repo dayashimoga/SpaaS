@@ -174,7 +174,7 @@ function createMinimalFallbackEngine() {
       // NODES
       if (qu.startsWith("INSERT OR REPLACE INTO NODES") || qu.startsWith("INSERT INTO NODES")) {
         const id = params[0];
-        const isSimulated = qu.includes("'READY', 1") ? 1 : 0;
+        const isSimulated = (qu.includes("'READY', 1") || qu.includes(", 1,") || qu.includes(", 1 ,")) ? 1 : 0;
         let last_heartbeat = Date.now();
         let created_at = Date.now();
         let public_key = "ed25519_pk";
@@ -405,9 +405,22 @@ function createMinimalFallbackEngine() {
         let correlation_id = null;
         let created_at = Date.now();
 
+        let fencing_token = null;
+        let scheduler_decision = null;
+
         if (params.length === 4) {
           correlation_id = params[2];
           created_at = params[3];
+        } else if (params.length === 13) {
+          state = params[2];
+          assigned_node_id = params[3];
+          lease_expires_at = params[5];
+          fencing_token = params[7];
+          retry_count = params[8];
+          max_retries = params[9];
+          scheduler_decision = params[10];
+          correlation_id = params[11];
+          created_at = params[12];
         } else if (params.length === 10) {
           state = params[2];
           assigned_node_id = params[3];
@@ -440,23 +453,23 @@ function createMinimalFallbackEngine() {
           lease_term: 1,
           lease_expires_at,
           epoch: 1,
-          fencing_token: null,
+          fencing_token,
           retry_count,
           max_retries,
           result: null,
-          scheduler_decision: null,
+          scheduler_decision,
           correlation_id,
           created_at,
           completed_at: null
         });
         return [];
       }
-      if (qu.startsWith("UPDATE JOBS SET STATE = 'RUNNING'") || qu.startsWith("UPDATE JOBS SET STATE = 'DISPATCHED'")) {
+      if (qu.startsWith("UPDATE JOBS SET STATE = 'RUNNING'") || qu.startsWith("UPDATE JOBS SET STATE = 'DISPATCHED'") || qu.startsWith("UPDATE JOBS SET STATE = 'OFFERED'")) {
         const [assigned_node_id, fencing_token, lease_expires_at, scheduler_decision, ...rest] = params;
         const id = rest[rest.length - 1];
         const j = tables.jobs.get(id);
         if (j) {
-          j.state = qu.includes("'DISPATCHED'") ? "DISPATCHED" : "Running";
+          j.state = qu.includes("'DISPATCHED'") ? "DISPATCHED" : (qu.includes("'OFFERED'") ? "OFFERED" : "Running");
           j.assigned_node_id = assigned_node_id;
           j.fencing_token = fencing_token;
           j.lease_expires_at = lease_expires_at;
@@ -471,7 +484,7 @@ function createMinimalFallbackEngine() {
         const [result, completed_at, id] = params;
         const j = tables.jobs.get(id);
         if (j) {
-          j.state = "Completed";
+          j.state = "COMPLETED";
           j.result = result;
           j.completed_at = completed_at;
         }
@@ -488,13 +501,19 @@ function createMinimalFallbackEngine() {
         }
         return [];
       }
-      if (qu.startsWith("UPDATE JOBS SET STATE = 'PENDING'")) {
-        const j = tables.jobs.get(params[0]);
+      if (qu.startsWith("UPDATE JOBS SET STATE = 'PENDING'") || qu.startsWith("UPDATE JOBS SET STATE = 'QUEUED'")) {
+        const id = params[params.length - 1];
+        const j = tables.jobs.get(id);
         if (j) {
-          j.state = "Pending";
+          j.state = qu.includes("'QUEUED'") ? "QUEUED" : "Pending";
           j.assigned_node_id = null;
           j.lease_expires_at = null;
-          j.retry_count = (j.retry_count || 0) + 1;
+          if (qu.includes("WAIT_REASON = ?")) {
+            j.wait_reason = params[0];
+          }
+          if (qu.startsWith("UPDATE JOBS SET STATE = 'PENDING'")) {
+            j.retry_count = (j.retry_count || 0) + 1;
+          }
         }
         return [];
       }
@@ -507,10 +526,16 @@ function createMinimalFallbackEngine() {
         }
         return [];
       }
-      if (qu.startsWith("UPDATE JOBS SET STATE = ? WHERE ID = ?")) {
-        const [state, id] = params;
+      if (qu.startsWith("UPDATE JOBS SET STATE = ?")) {
+        const state = params[0];
+        const id = params[params.length - 1];
         const j = tables.jobs.get(id);
-        if (j) j.state = state;
+        if (j) {
+          j.state = state;
+          if (qu.includes("NEXT_ACTION = ?")) {
+            j.next_action = params[1];
+          }
+        }
         return [];
       }
       if (qu.startsWith("DELETE FROM JOBS WHERE ID =")) {
@@ -570,7 +595,7 @@ function createMinimalFallbackEngine() {
           return rows.filter(j => j.state === "Running" || j.state === "RUNNING");
         }
         if (qu.includes("AND STATE IN")) {
-          return rows.filter(j => ["ASSIGNED", "LEASED", "DISPATCHED", "ACKNOWLEDGED", "RUNNING", "Running"].includes(j.state) && (!j.lease_expires_at || j.lease_expires_at > Date.now()));
+          return rows.filter(j => ["ASSIGNED", "LEASED", "DISPATCHED", "ACKNOWLEDGED", "RUNNING", "OFFERED"].includes((j.state || "").toUpperCase()) && (!j.lease_expires_at || j.lease_expires_at > Date.now()));
         }
         return rows;
       }
@@ -589,14 +614,17 @@ function createMinimalFallbackEngine() {
 
       // JOB_TRANSITIONS
       if (qu.startsWith("INSERT INTO JOB_TRANSITIONS")) {
-        let id, job_id, from_state, to_state, reason, timestamp, metadata;
-        if (params.length === 6) {
+        let id, job_id, from_state, to_state, reason, next_action, timestamp, metadata;
+        if (params.length === 7) {
+          [job_id, from_state, to_state, reason, next_action, metadata, timestamp] = params;
+          id = `trans_${tables.job_transitions.size + 1}_${Math.random().toString(36).substring(2, 7)}`;
+        } else if (params.length === 6) {
           [job_id, from_state, to_state, reason, metadata, timestamp] = params;
-          id = `trans_${tables.job_transitions.size + 1}`;
+          id = `trans_${tables.job_transitions.size + 1}_${Math.random().toString(36).substring(2, 7)}`;
         } else {
           [id, job_id, from_state, to_state, reason, timestamp, metadata] = params;
         }
-        tables.job_transitions.set(id, { id, job_id, from_state, to_state, reason, timestamp, metadata });
+        tables.job_transitions.set(id, { id, job_id, from_state, to_state, reason, next_action, timestamp, metadata });
         return [];
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM JOB_TRANSITIONS WHERE JOB_ID =")) {

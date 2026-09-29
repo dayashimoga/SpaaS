@@ -4,7 +4,9 @@ import dev.spaas.node.history.LocalJobHistoryEntry
 import dev.spaas.node.history.LocalJobHistoryRepository
 import dev.spaas.node.monitor.DeviceTelemetryData
 import dev.spaas.node.policy.ProviderSafetyPolicy
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -487,6 +489,19 @@ object ComputeWorkerClient {
                             if (cancelJobId.isNotBlank()) {
                                 cancelledJobIds.add(cancelJobId)
                             }
+                        } else if (action == "offer_job") {
+                            val offerJobId = cmdObj.optString("job_id")
+                            val offerWorkloadName = cmdObj.optString("workload_name", "Edge Compute Workload")
+                            val estCredits = cmdObj.optDouble("estimated_credits", 10.0)
+                            onJobOffered?.invoke(offerJobId, offerWorkloadName, estCredits, {
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    sendOfferAccept(nodeId, offerJobId)
+                                }
+                            }, {
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    sendOfferDecline(nodeId, offerJobId)
+                                }
+                            })
                         }
                     }
                     val policyObj = respObj.optJSONObject("policy")
@@ -514,6 +529,114 @@ object ComputeWorkerClient {
 
     var onJobLifecycleUpdate: ((state: String, details: String) -> Unit)? = null
     var onPolicyUpdated: ((JSONObject) -> Unit)? = null
+    var onJobOffered: ((jobId: String, workloadName: String, estimatedCredits: Double, onAccept: () -> Unit, onDecline: () -> Unit) -> Unit)? = null
+
+    suspend fun sendDeviceReject(
+        nodeId: String,
+        jobId: String,
+        leaseId: String,
+        fencingToken: String,
+        reason: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("$serverBaseUrl/api/v1/nodes/reject")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json")
+                authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+                connectTimeout = 4000
+                readTimeout = 4000
+                doOutput = true
+            }
+            val body = JSONObject().apply {
+                put("node_id", nodeId)
+                put("job_id", jobId)
+                put("lease_id", leaseId)
+                put("fencing_token", fencingToken)
+                put("reason", reason)
+            }
+            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+            conn.responseCode in 200..299
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun sendDeviceProgress(
+        nodeId: String,
+        jobId: String,
+        progressPct: Int,
+        stage: String,
+        details: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("$serverBaseUrl/api/v1/nodes/progress")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json")
+                authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+                connectTimeout = 4000
+                readTimeout = 4000
+                doOutput = true
+            }
+            val body = JSONObject().apply {
+                put("node_id", nodeId)
+                put("job_id", jobId)
+                put("progress_pct", progressPct)
+                put("stage", stage)
+                put("details", details)
+            }
+            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+            conn.responseCode in 200..299
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun sendOfferAccept(nodeId: String, jobId: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("$serverBaseUrl/api/v1/nodes/offer/accept")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json")
+                authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+                connectTimeout = 4000
+                readTimeout = 4000
+                doOutput = true
+            }
+            val body = JSONObject().apply {
+                put("node_id", nodeId)
+                put("job_id", jobId)
+            }
+            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+            conn.responseCode in 200..299
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun sendOfferDecline(nodeId: String, jobId: String, reason: String = "Declined by user"): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("$serverBaseUrl/api/v1/nodes/offer/decline")
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json")
+                authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+                connectTimeout = 4000
+                readTimeout = 4000
+                doOutput = true
+            }
+            val body = JSONObject().apply {
+                put("node_id", nodeId)
+                put("job_id", jobId)
+                put("reason", reason)
+            }
+            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+            conn.responseCode in 200..299
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     suspend fun sendDeviceAck(
         nodeId: String,
@@ -577,17 +700,20 @@ object ComputeWorkerClient {
 
     suspend fun executeJobPayload(jobObj: JSONObject): DispatchedJobExecution? = withContext(Dispatchers.IO) {
         val nodeId = pairedNodeId ?: return@withContext null
+        val jobId = jobObj.optString("job_id")
+        val leaseId = jobObj.optString("lease_id", "lease_$jobId")
+        val fencingToken = jobObj.optString("fencing_token", leaseId)
+        val correlationId = jobObj.optString("correlation_id", jobId)
+
         try {
-            val jobId = jobObj.getString("job_id")
-            val correlationId = jobObj.optString("correlation_id", jobId)
-            val leaseId = jobObj.optString("lease_id", "lease_$jobId")
-            val fencingToken = jobObj.optString("fencing_token", leaseId)
             val specObj = jobObj.getJSONObject("spec")
-            val workloadName = specObj.optString("name", "Cryptographic Challenge")
+            val workloadName = specObj.optString("name", "Edge Compute Workload")
 
             onJobLifecycleUpdate?.invoke("ASSIGNED", "Receiving workload: $workloadName")
+            sendDeviceProgress(nodeId, jobId, 10, "DOWNLOADING", "Receiving workload artifact")
 
             if (cancelledJobIds.remove(jobId)) {
+                sendDeviceReject(nodeId, jobId, leaseId, fencingToken, "Job was cancelled by operator")
                 return@withContext null
             }
 
@@ -660,15 +786,20 @@ object ComputeWorkerClient {
                     expectedHash.equals(computedArtifactHash, ignoreCase = true)
 
             if (!isHashValid) {
-                throw IllegalStateException("Artifact SHA-256 verification failed: expected $expectedHash, got $computedArtifactHash")
+                val rejectMsg = "Artifact SHA-256 verification failed: expected $expectedHash, got $computedArtifactHash"
+                sendDeviceReject(nodeId, jobId, leaseId, fencingToken, rejectMsg)
+                onJobLifecycleUpdate?.invoke("FAILED", "Artifact checksum mismatch")
+                throw IllegalStateException(rejectMsg)
             }
 
             // Explicit Device ACK (DISPATCHED -> ACKNOWLEDGED)
             sendDeviceAck(nodeId, jobId, leaseId, fencingToken, computedArtifactHash)
+            sendDeviceProgress(nodeId, jobId, 30, "ACKNOWLEDGED", "Workload artifact verified")
             onJobLifecycleUpdate?.invoke("ACKNOWLEDGED", "Workload acknowledged to control plane")
 
             // Explicit Device START (ACKNOWLEDGED -> RUNNING)
             sendDeviceStart(nodeId, jobId, leaseId, fencingToken)
+            sendDeviceProgress(nodeId, jobId, 50, "EXECUTING", "Running $workloadName in WASM sandbox")
             onJobLifecycleUpdate?.invoke("RUNNING", "Running $workloadName in sandboxed WASM...")
 
             val startTime = System.currentTimeMillis()
@@ -719,6 +850,7 @@ object ComputeWorkerClient {
                 }
             }
 
+            sendDeviceProgress(nodeId, jobId, 85, "UPLOADING", "Uploading signed execution receipt")
             onJobLifecycleUpdate?.invoke("SUBMITTING_RESULT", "Submitting signed result receipt...")
             val nodeSig = signDigest(execResult.resultDigest)
 
@@ -785,6 +917,12 @@ object ComputeWorkerClient {
             )
         } catch (e: Exception) {
             android.util.Log.e("ComputeWorkerClient", "Error executing job payload", e)
+            try {
+                if (jobId.isNotBlank()) {
+                    sendDeviceReject(nodeId, jobId, leaseId, fencingToken, "Device execution failure: ${e.message}")
+                }
+            } catch (_: Throwable) {}
+            onJobLifecycleUpdate?.invoke("FAILED", "Failed: ${e.message}")
             null
         }
     }
