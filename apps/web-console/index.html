@@ -68,6 +68,9 @@
             <p id="tab-subtitle">Real-time distributed edge compute metrics and node fleet health</p>
           </div>
           <div class="top-actions">
+            <button id="btn-emergency-stop" class="btn btn-outline-rose" style="border-color: #ef4444; color: #fca5a5;" title="Emergency Stop active fabric work" onclick="window.spaasTriggerEmergencyStop()">
+              <span class="icon">🛑</span> Emergency Stop
+            </button>
             <button id="btn-add-device" class="btn btn-outline-cyan" title="Enroll Smartphone or Edge Worker">
               <span class="icon">+</span> Add Compute Device
             </button>
@@ -591,6 +594,70 @@
                 <div class="catalog-meta"><span>Fuel: 25M</span> <span>Memory: 16MB</span></div>
                 <button class="btn btn-xs btn-primary btn-load-catalog" data-template="matrix">Load &amp; Run &rarr;</button>
               </div>
+
+              <div class="catalog-card" data-template="compress">
+                <div class="catalog-icon">📦</div>
+                <h4>Lossless Compression</h4>
+                <p>Real-time telemetry log compression with RLE/Deflate byte streaming.</p>
+                <div class="catalog-meta"><span>Fuel: 12M</span> <span>Memory: 12MB</span></div>
+                <button class="btn btn-xs btn-primary btn-load-catalog" data-template="compress">Load &amp; Run &rarr;</button>
+              </div>
+
+              <div class="catalog-card" data-template="json">
+                <div class="catalog-icon">🔄</div>
+                <h4>JSON Transform</h4>
+                <p>Structured document streaming, schema projection, and record filtering.</p>
+                <div class="catalog-meta"><span>Fuel: 8M</span> <span>Memory: 8MB</span></div>
+                <button class="btn btn-xs btn-primary btn-load-catalog" data-template="json">Load &amp; Run &rarr;</button>
+              </div>
+
+              <div class="catalog-card" data-template="image">
+                <div class="catalog-icon">🖼️</div>
+                <h4>2D Image Matrix Filter</h4>
+                <p>Spatial convolution kernel for edge detection &amp; Gaussian blurring.</p>
+                <div class="catalog-meta"><span>Fuel: 16M</span> <span>Memory: 16MB</span></div>
+                <button class="btn btn-xs btn-primary btn-load-catalog" data-template="image">Load &amp; Run &rarr;</button>
+              </div>
+
+              <div class="catalog-card" data-template="analytics">
+                <div class="catalog-icon">📊</div>
+                <h4>Text Corpus Analytics</h4>
+                <p>Token frequency distribution, distinct vocabulary, and quantile latency.</p>
+                <div class="catalog-meta"><span>Fuel: 10M</span> <span>Memory: 8MB</span></div>
+                <button class="btn btn-xs btn-primary btn-load-catalog" data-template="analytics">Load &amp; Run &rarr;</button>
+              </div>
+
+              <div class="catalog-card" data-template="wasm_lint">
+                <div class="catalog-icon">🛡️</div>
+                <h4>WASM AST Linter</h4>
+                <p>In-flight bytecode section verification and recursion depth validation.</p>
+                <div class="catalog-meta"><span>Fuel: 14M</span> <span>Memory: 12MB</span></div>
+                <button class="btn btn-xs btn-primary btn-load-catalog" data-template="wasm_lint">Load &amp; Run &rarr;</button>
+              </div>
+
+              <div class="catalog-card" data-template="ai_inference">
+                <div class="catalog-icon">🧠</div>
+                <h4>AI Tensor Inference</h4>
+                <p>Quantized dot-product tensor vector similarity &amp; embeddings model.</p>
+                <div class="catalog-meta"><span>Fuel: 20M</span> <span>Memory: 16MB</span></div>
+                <button class="btn btn-xs btn-primary btn-load-catalog" data-template="ai_inference">Load &amp; Run &rarr;</button>
+              </div>
+
+              <div class="catalog-card" data-template="unverified_gpu" style="border-color: rgba(245, 158, 11, 0.4);">
+                <div class="catalog-icon">⚡</div>
+                <h4>GPU/NPU Media Compute</h4>
+                <p><span class="badge badge-simulated" style="color: #f59e0b; border-color: #f59e0b; font-size: 0.65rem;">UNVERIFIED [HW-REQ]</span> Experimental Vulkan acceleration harness.</p>
+                <div class="catalog-meta"><span>Fuel: 30M</span> <span>Memory: 32MB</span></div>
+                <button class="btn btn-xs btn-outline-cyan btn-load-catalog" data-template="unverified_gpu">Load &amp; Run &rarr;</button>
+              </div>
+
+              <div class="catalog-card" style="border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.05);">
+                <div class="catalog-icon">🌐</div>
+                <h4>Sharded Multi-Worker DAG</h4>
+                <p>Splits compute into parallel shards across distinct edge nodes, then aggregates.</p>
+                <div class="catalog-meta"><span>Fuel: Parallel</span> <span>Multi-Node</span></div>
+                <button class="btn btn-xs btn-primary" onclick="window.spaasRunShardedDemo()">Run Sharded DAG &rarr;</button>
+              </div>
             </div>
           </div>
 
@@ -630,6 +697,13 @@
                     <option value="sha256">SHA-256 Hasher</option>
                     <option value="primes">Prime Sieve Compute</option>
                     <option value="matrix">Matrix Multiplication</option>
+                    <option value="compress">Telemetry Compressor (Deflate/RLE)</option>
+                    <option value="json">JSON Transform Stream</option>
+                    <option value="image">2D Image Matrix Filter</option>
+                    <option value="analytics">Text Corpus Analytics</option>
+                    <option value="wasm_lint">WASM AST Linter</option>
+                    <option value="ai_inference">AI Tensor Inference</option>
+                    <option value="unverified_gpu">GPU/NPU Media Compute (UNVERIFIED)</option>
                   </select>
                 </div>
                 <div class="form-group">

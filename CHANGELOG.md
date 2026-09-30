@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.0] - 2026-09-29
+
+### Added & Hardened — Production Workload Platform, Capability Vector, Sharded DAG & Emergency Stop
+- **Authoritative System Health & Zero-Contradiction Reconciliation (`coordinator.js`, `main.js`):** Removed shadowing fast-path `/health` handler in `coordinator.js`. Reconciled `/api/v1/system/health` live SQLite aggregates with `cachedNodes` in Web Console to permanently eliminate contradictory states (e.g. READY device vs 0 fleet/jobs).
+- **Multi-Dimensional Capability Vector (`coordinator.js`, `main.js`):** Replaced opaque scalar scores with measured CPU single/multi-thread scores, WASM ops/sec, RAM bandwidth, storage capacity, network RTT/downlink, sustained thermals, energy efficiency, and empirical reliability. Exposed via `GET /api/v1/nodes/:id/capabilities`.
+- **Workload Compatibility & Placement Rationale (`coordinator.js`, `main.js`):** Implemented `POST /api/v1/workloads/compatibility` evaluating hard constraints, estimated runtime/fuel/credits, and explainable selection rationale ("Can this device run this?", "Why this device?").
+- **10-Category Production WASM Catalog (`main.js`, `index.html`):** Expanded starter catalog with pre-compiled FIPS/WASI WebAssembly bytecodes for lossless telemetry compression, JSON stream transform & projection, 2D convolution image filter, text corpus analytics, WASM AST linter, and quantized AI tensor inference. Honestly marked GPU/NPU workloads as `UNVERIFIED [HARDWARE-REQUIRED]`.
+- **Multi-Worker Parallel DAG Sharding (`coordinator.js`, `main.js`):** Implemented `POST /api/v1/jobs/sharded` splitting large tasks across distinct workers, executing in parallel, verifying results, and measuring empirical speedup factor against single-node baseline. Added one-click demo trigger in Web Console (`window.spaasRunShardedDemo()`).
+- **Fabric-wide & Node-Level Emergency Stop (`coordinator.js`, `main.js`, `index.html`):** Added `POST /api/v1/fabric/emergency-stop` and `POST /api/v1/nodes/:id/emergency-stop` pausing active workers, revoking leases, and aborting running work. Added prominent top-bar button in Web Console.
+- **SQLite Bridge Support for Bulk & Lifecycle Updates (`sqlite-bridge.js`):** Supported parameterless bulk node pause updates, job wait reasons, 8-parameter node insert, and dual-entry ledger filters.
+- **Automated Test Suite Expansion (`coordinator.test.js`):** Added Subtests 24 and 25 covering live health aggregates, capability vectors, compatibility endpoints, DAG sharding, emergency stop, and scheduler disqualification filters. Achieved 25/25 passing tests (100%) and 91.68% overall line coverage.
+
+---
+
+## [0.3.3] - 2026-09-29
+
+### Added & Documented — SPaaS Edge Compute Fabric Architecture
+- **Unified Architecture Model (`docs/ARCHITECTURE.md`, `README.md`):** Integrated the authoritative SPaaS Edge Compute Fabric architectural diagram, Mermaid topology, and subsystem definitions:
+  - Consumer / Developer API & Web UI ingress vs. Device Provider (Android, PC, iOS) edge participation.
+  - Cloudflare Global Control Plane coordinating enrollment, identity, fleet telemetry, 12-state job queue DAG, double-entry ledger, dynamic capabilities, provider safety policies, Pareto multi-objective scheduler, and cryptographic verification.
+  - Multi-tiered compute workers: CPU/WASM sandboxes (smartphones/laptops) and accelerated workers (GPU/NPU/media).
+  - Cryptographically signed execution receipts driving idempotent test credits.
+  - Google Cloud Run / Rust disaster recovery control plane standby (`minScale: 0`) synchronized via monotonic epoch fencing tokens.
+
+---
+
 ## [0.3.2] - 2026-09-29
 
 ### Fixed & Implemented — 12-State Distributed Machine, Pareto Explainability & UX Overhaul

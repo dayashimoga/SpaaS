@@ -184,7 +184,13 @@ function createMinimalFallbackEngine() {
         let policy = null;
         let telemetry = null;
 
-        if (qu.includes("QUALIFICATION") && params.length >= 9) {
+        if (qu.includes("QUALIFICATION") && params.length === 8) {
+          capabilities = params[3] || null;
+          qualification = params[4] || null;
+          telemetry = params[5] || null;
+          last_heartbeat = params[6] || Date.now();
+          created_at = params[7] || Date.now();
+        } else if (qu.includes("QUALIFICATION") && params.length >= 9) {
           auth_token = params[2] || "spaas_auth_test";
           capabilities = params[3] || null;
           qualification = params[4] || null;
@@ -266,10 +272,18 @@ function createMinimalFallbackEngine() {
         return [];
       }
       if (qu.startsWith("UPDATE NODES SET STATE =")) {
+        if (params.length === 0) {
+          const bulkState = qu.includes("'PAUSED'") ? "Paused" : qu.includes("'READY'") ? "Ready" : "Ready";
+          for (const n of tables.nodes.values()) {
+            if (qu.includes("STATE != 'REVOKED'") && n.state === "Revoked") continue;
+            n.state = bulkState;
+          }
+          return [];
+        }
         let state, id;
         if (params.length === 1) {
           id = params[0];
-          state = qu.includes("'OFFLINE'") ? "Offline" : qu.includes("'READY'") ? "Ready" : qu.includes("'REVOKED'") ? "Revoked" : qu.includes("'RUNNING'") ? "Running" : qu.includes("'BUSY'") ? "Busy" : qu.includes("'PAUSED'") ? "Paused" : "Ready";
+          state = qu.includes("'OFFLINE'") ? "Offline" : qu.includes("'READY'") ? "Ready" : qu.includes("'REVOKED'") ? "Revoked" : qu.includes("'RUNNING'") ? "Running" : qu.includes("'BUSY'") ? "Busy" : qu.includes("'PAUSED'") ? "Paused" : qu.includes("'RESERVED'") ? "Reserved" : "Ready";
         } else {
           [state, id] = params;
         }
@@ -538,6 +552,14 @@ function createMinimalFallbackEngine() {
         }
         return [];
       }
+      if (qu.startsWith("UPDATE JOBS SET WAIT_REASON =")) {
+        const [wait_reason, id] = params;
+        const j = tables.jobs.get(id);
+        if (j) {
+          j.wait_reason = wait_reason;
+        }
+        return [];
+      }
       if (qu.startsWith("DELETE FROM JOBS WHERE ID =")) {
         tables.jobs.delete(params[0]);
         return [];
@@ -753,6 +775,11 @@ function createMinimalFallbackEngine() {
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM LEDGER")) {
         let entries = Array.from(tables.ledger.values());
+        if (qu.includes("WHERE ENTRY_TYPE = 'CREDIT'") || qu.includes('WHERE ENTRY_TYPE = "CREDIT"')) {
+          entries = entries.filter(e => (e.entry_type || "").toUpperCase() === "CREDIT");
+        } else if (qu.includes("WHERE ENTRY_TYPE = 'DEBIT'") || qu.includes('WHERE ENTRY_TYPE = "DEBIT"')) {
+          entries = entries.filter(e => (e.entry_type || "").toUpperCase() === "DEBIT");
+        }
         if (qu.includes("WHERE JOB_ID =")) {
           const jobId = params[0] || q.match(/WHERE job_id = '([^']+)'/i)?.[1];
           entries = entries.filter(e => e.job_id === jobId);
