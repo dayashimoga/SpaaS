@@ -1,24 +1,69 @@
 # SPaaS Comprehensive Test Script (PowerShell)
+param (
+    [switch]$Containerized,
+    [switch]$Podman
+)
+
 $ErrorActionPreference = "Stop"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host " Running SPaaS Comprehensive Test Suite" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-Write-Host ">>> [1/2] Running Unit & Integration Tests (100% Pass Target)..." -ForegroundColor Yellow
-cargo test --workspace -- --nocapture
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Test suite failed!" -ForegroundColor Red
-    exit 1
+$usePodman = $Containerized -or $Podman
+if (-not $usePodman) {
+    $hasCargo = Get-Command cargo -ErrorAction SilentlyContinue
+    if (-not $hasCargo) {
+        Write-Host ">>> Local 'cargo' not detected. Auto-switching to Podman container execution..." -ForegroundColor Yellow
+        $usePodman = $true
+    }
 }
 
-Write-Host ">>> [2/2] Running Security & Adversarial Tests..." -ForegroundColor Yellow
-cargo test -p spaas-integration-tests --test adversarial_security -- --nocapture
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Security adversarial tests failed!" -ForegroundColor Red
-    exit 1
+if ($usePodman) {
+    Write-Host ">>> Executing tests via Podman container technology (Zero host installs)..." -ForegroundColor Green
+    
+    # 1. Cloudflare Control Plane 29-test suite in Node container
+    Write-Host "`n>>> [1/3] Running Cloudflare Control Plane Tests (Node 20 Container)..." -ForegroundColor Yellow
+    $cpMount = "${PWD}/apps/cloudflare-control-plane:/app:Z"
+    podman run --rm -v $cpMount -w /app docker.io/library/node:20-slim npm test
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Control plane container tests failed!" -ForegroundColor Red
+        exit 1
+    }
+
+    # 2. Rust Workspace Unit & Integration Tests in Rust Container
+    Write-Host "`n>>> [2/3] Running Rust Workspace Tests (Rust 1.77 Container)..." -ForegroundColor Yellow
+    $wsMount = "${PWD}:/workspace:Z"
+    podman run --rm -v $wsMount -w /workspace docker.io/library/rust:1.77-slim cargo test --workspace -- --nocapture
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Rust container test suite failed!" -ForegroundColor Red
+        exit 1
+    }
+
+    # 3. Web Console Container Verification
+    Write-Host "`n>>> [3/3] Verifying Web Console Container Build..." -ForegroundColor Yellow
+    podman build -t spaas-web-console -f containers/Containerfile.web-console .
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Web console container build failed!" -ForegroundColor Red
+        exit 1
+    }
+
+} else {
+    Write-Host ">>> [1/2] Running Unit & Integration Tests (Local Cargo)..." -ForegroundColor Yellow
+    cargo test --workspace -- --nocapture
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Test suite failed!" -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host ">>> [2/2] Running Security & Adversarial Tests..." -ForegroundColor Yellow
+    cargo test -p spaas-integration-tests --test adversarial_security -- --nocapture
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Security adversarial tests failed!" -ForegroundColor Red
+        exit 1
+    }
 }
 
-Write-Host "==========================================================" -ForegroundColor Green
+Write-Host "`n==========================================================" -ForegroundColor Green
 Write-Host " All Tests Passed Successfully (100% Pass Rate)" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green

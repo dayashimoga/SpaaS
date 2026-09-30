@@ -1,0 +1,8 @@
+node_modules
+apps/web-console/node_modules
+apps/cloudflare-control-plane/node_modules
+target
+.git
+.gradle
+.kotlin
+dist

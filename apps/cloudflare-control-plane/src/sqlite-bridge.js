@@ -190,7 +190,24 @@ function createMinimalFallbackEngine() {
           telemetry = params[5] || null;
           last_heartbeat = params[6] || Date.now();
           created_at = params[7] || Date.now();
-        } else if (qu.includes("QUALIFICATION") && params.length >= 9) {
+        } else if (params.length >= 10) {
+          public_key = params[3] || "ed25519_pk";
+          auth_token = params[4] || "spaas_auth_test";
+          if (params.length >= 11) {
+            capabilities = params[5] || null;
+            qualification = params[6] || null;
+            policy = params[7] || null;
+            telemetry = params[8] || null;
+            last_heartbeat = params[9] || Date.now();
+            created_at = params[10] || Date.now();
+          } else {
+            capabilities = params[5] || null;
+            policy = params[6] || null;
+            telemetry = params[7] || null;
+            last_heartbeat = params[8] || Date.now();
+            created_at = params[9] || Date.now();
+          }
+        } else if (qu.includes("QUALIFICATION") && params.length === 9) {
           auth_token = params[2] || "spaas_auth_test";
           capabilities = params[3] || null;
           qualification = params[4] || null;
@@ -198,14 +215,6 @@ function createMinimalFallbackEngine() {
           telemetry = params[6] || null;
           last_heartbeat = params[7] || Date.now();
           created_at = params[8] || Date.now();
-        } else if (params.length >= 10) {
-          public_key = params[3] || "ed25519_pk";
-          auth_token = params[4] || "spaas_auth_test";
-          capabilities = params[5] || null;
-          policy = params[6] || null;
-          telemetry = params[7] || null;
-          last_heartbeat = params[8] || Date.now();
-          created_at = params[9] || Date.now();
         } else if (qu.includes("POLICY") && params.length === 9) {
           auth_token = params[3] || "spaas_auth_test";
           capabilities = params[4] || null;
@@ -247,12 +256,9 @@ function createMinimalFallbackEngine() {
         return [];
       }
       if (qu.startsWith("UPDATE NODES SET LAST_HEARTBEAT")) {
-        let last_heartbeat, telemetry = null, id;
-        if (params.length === 2) {
-          [last_heartbeat, id] = params;
-        } else {
-          [last_heartbeat, telemetry, id] = params;
-        }
+        const id = params[params.length - 1];
+        const last_heartbeat = params[0];
+        const telemetry = params.length >= 3 ? params[1] : null;
         const n = tables.nodes.get(id);
         if (n) {
           n.last_heartbeat = last_heartbeat;
@@ -553,10 +559,22 @@ function createMinimalFallbackEngine() {
         return [];
       }
       if (qu.startsWith("UPDATE JOBS SET WAIT_REASON =")) {
-        const [wait_reason, id] = params;
+        const id = params[params.length - 1];
         const j = tables.jobs.get(id);
         if (j) {
-          j.wait_reason = wait_reason;
+          if (qu.includes("WAIT_REASON = NULL")) {
+            j.wait_reason = null;
+            j.stage_details = null;
+            j.queue_status = null;
+          } else {
+            j.wait_reason = params[0];
+            if (qu.includes("STAGE_DETAILS = ?") && params.length >= 2) {
+              j.stage_details = params[1];
+            }
+            if (qu.includes("QUEUE_STATUS = ?") && params.length >= 3) {
+              j.queue_status = params[2];
+            }
+          }
         }
         return [];
       }
@@ -627,7 +645,10 @@ function createMinimalFallbackEngine() {
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM JOBS WHERE ID =")) {
         const id = params[0] || q.match(/WHERE id = '([^']+)'/i)?.[1] || q.match(/WHERE id = "([^"]+)"/i)?.[1];
-        const j = tables.jobs.get(id);
+        let j = tables.jobs.get(id);
+        if (!j) {
+          j = Array.from(tables.jobs.values()).find(x => x.id === id || x.correlation_id === id);
+        }
         return j ? [j] : [];
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM JOBS")) {
@@ -780,9 +801,10 @@ function createMinimalFallbackEngine() {
         } else if (qu.includes("WHERE ENTRY_TYPE = 'DEBIT'") || qu.includes('WHERE ENTRY_TYPE = "DEBIT"')) {
           entries = entries.filter(e => (e.entry_type || "").toUpperCase() === "DEBIT");
         }
-        if (qu.includes("WHERE JOB_ID =")) {
-          const jobId = params[0] || q.match(/WHERE job_id = '([^']+)'/i)?.[1];
-          entries = entries.filter(e => e.job_id === jobId);
+        if (qu.includes("WHERE JOB_ID =") || qu.includes("CORRELATION_ID =")) {
+          const key1 = params[0] || q.match(/WHERE job_id = '([^']+)'/i)?.[1];
+          const key2 = params[1] || key1;
+          entries = entries.filter(e => e.job_id === key1 || e.correlation_id === key1 || e.job_id === key2 || e.correlation_id === key2);
         }
         if (qu.includes("WHERE ACCOUNT =")) {
           const acc = params[0];

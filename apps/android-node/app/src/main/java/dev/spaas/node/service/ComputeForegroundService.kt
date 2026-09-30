@@ -37,6 +37,7 @@ class ComputeForegroundService : Service() {
         var currentNodeState = "IDLE"
         var currentActiveJob: String? = null
         val activePolicy = ProviderSafetyPolicy()
+        val safetyPolicy: ProviderSafetyPolicy get() = activePolicy
     }
 
     private val serviceJob = Job()

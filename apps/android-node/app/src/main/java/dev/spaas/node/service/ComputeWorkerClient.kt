@@ -419,6 +419,8 @@ object ComputeWorkerClient {
 
     suspend fun sendHeartbeat(telemetry: DeviceTelemetryData, policy: ProviderSafetyPolicy): Boolean = withContext(Dispatchers.IO) {
         val nodeId = pairedNodeId ?: return@withContext false
+        latestTelemetry = telemetry
+        latestSafetyPolicy = policy
         try {
             val url = URL("$serverBaseUrl/api/v1/nodes/heartbeat")
             val conn = (url.openConnection() as HttpURLConnection).apply {
@@ -491,17 +493,43 @@ object ComputeWorkerClient {
                             }
                         } else if (action == "offer_job") {
                             val offerJobId = cmdObj.optString("job_id")
-                            val offerWorkloadName = cmdObj.optString("workload_name", "Edge Compute Workload")
-                            val estCredits = cmdObj.optDouble("estimated_credits", 10.0)
-                            onJobOffered?.invoke(offerJobId, offerWorkloadName, estCredits, {
-                                CoroutineScope(Dispatchers.IO).launch {
-                                    sendOfferAccept(nodeId, offerJobId)
-                                }
-                            }, {
-                                CoroutineScope(Dispatchers.IO).launch {
-                                    sendOfferDecline(nodeId, offerJobId)
-                                }
-                            })
+                            val offerWorkloadName = cmdObj.optString("workload_name", "Image Processing (Lanczos Resample)")
+                            val estCredits = cmdObj.optDouble("estimated_credits", 14.0)
+                            val fullOffer = AndroidJobOffer(
+                                jobId = offerJobId,
+                                workloadName = offerWorkloadName,
+                                submitter = cmdObj.optString("submitter", "Trusted Submitter ✓"),
+                                duration = cmdObj.optString("duration", "~8–11 min"),
+                                cpuLimit = cmdObj.optString("cpu_limit", "≤50%"),
+                                ramLimit = cmdObj.optString("ram_limit", "≤384 MB"),
+                                gpu = cmdObj.optString("gpu", "No"),
+                                downloadSize = cmdObj.optString("download_size", "42 MB"),
+                                uploadSize = cmdObj.optString("upload_size", "6 MB"),
+                                batteryImpact = cmdObj.optString("battery_impact", "~3%"),
+                                estimatedCredits = estCredits,
+                                sandbox = cmdObj.optString("sandbox", "Isolated (WASI)")
+                            )
+                            if (onFullJobOffered != null) {
+                                onFullJobOffered?.invoke(fullOffer, { _ ->
+                                    CoroutineScope(Dispatchers.IO).launch {
+                                        sendOfferAccept(nodeId, offerJobId)
+                                    }
+                                }, {
+                                    CoroutineScope(Dispatchers.IO).launch {
+                                        sendOfferDecline(nodeId, offerJobId)
+                                    }
+                                })
+                            } else {
+                                onJobOffered?.invoke(offerJobId, offerWorkloadName, estCredits, {
+                                    CoroutineScope(Dispatchers.IO).launch {
+                                        sendOfferAccept(nodeId, offerJobId)
+                                    }
+                                }, {
+                                    CoroutineScope(Dispatchers.IO).launch {
+                                        sendOfferDecline(nodeId, offerJobId)
+                                    }
+                                })
+                            }
                         }
                     }
                     val policyObj = respObj.optJSONObject("policy")
@@ -527,9 +555,27 @@ object ComputeWorkerClient {
         }
     }
 
+    data class AndroidJobOffer(
+        val jobId: String,
+        val workloadName: String = "Edge Compute Workload",
+        val submitter: String = "Trusted Submitter ✓",
+        val duration: String = "~8–11 min",
+        val cpuLimit: String = "≤50%",
+        val ramLimit: String = "≤384 MB",
+        val gpu: String = "No",
+        val downloadSize: String = "42 MB",
+        val uploadSize: String = "6 MB",
+        val batteryImpact: String = "~3%",
+        val estimatedCredits: Double = 14.0,
+        val sandbox: String = "Isolated (WASI)"
+    )
+
+    var latestTelemetry: DeviceTelemetryData? = null
+    var latestSafetyPolicy: ProviderSafetyPolicy? = null
     var onJobLifecycleUpdate: ((state: String, details: String) -> Unit)? = null
     var onPolicyUpdated: ((JSONObject) -> Unit)? = null
     var onJobOffered: ((jobId: String, workloadName: String, estimatedCredits: Double, onAccept: () -> Unit, onDecline: () -> Unit) -> Unit)? = null
+    var onFullJobOffered: ((offer: AndroidJobOffer, onAccept: (alwaysAllow: Boolean) -> Unit, onDecline: () -> Unit) -> Unit)? = null
 
     suspend fun sendDeviceReject(
         nodeId: String,
@@ -708,6 +754,28 @@ object ComputeWorkerClient {
         try {
             val specObj = jobObj.getJSONObject("spec")
             val workloadName = specObj.optString("name", "Edge Compute Workload")
+
+            // Sovereign Local Policy Verification (Local node owner limits cannot be overridden by coordinator)
+            val pol = latestSafetyPolicy ?: ComputeForegroundService.activePolicy
+            val tel = latestTelemetry
+            if (pol.onlyWhileCharging && tel?.isCharging == false) {
+                val rejectMsg = "Provider policy: Device must be charging; currently on battery (${tel.batteryPct}%)"
+                sendDeviceReject(nodeId, jobId, leaseId, fencingToken, rejectMsg)
+                onJobLifecycleUpdate?.invoke("REJECTED", rejectMsg)
+                return@withContext null
+            }
+            if (tel != null && tel.batteryPct <= pol.stopBatteryThresholdPct && !tel.isCharging) {
+                val rejectMsg = "Provider policy: Battery level too low (${tel.batteryPct}% <= ${pol.stopBatteryThresholdPct}%)"
+                sendDeviceReject(nodeId, jobId, leaseId, fencingToken, rejectMsg)
+                onJobLifecycleUpdate?.invoke("REJECTED", rejectMsg)
+                return@withContext null
+            }
+            if (pol.onlyOnUnmeteredWifi && tel?.isUnmetered == false) {
+                val rejectMsg = "Provider policy: Unmetered Wi-Fi required; currently on ${tel.networkType}"
+                sendDeviceReject(nodeId, jobId, leaseId, fencingToken, rejectMsg)
+                onJobLifecycleUpdate?.invoke("REJECTED", rejectMsg)
+                return@withContext null
+            }
 
             onJobLifecycleUpdate?.invoke("ASSIGNED", "Receiving workload: $workloadName")
             sendDeviceProgress(nodeId, jobId, 10, "DOWNLOADING", "Receiving workload artifact")

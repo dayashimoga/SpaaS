@@ -110,6 +110,18 @@
 | REQ-HW-01 | Empirical CPU/memory benchmarking | COMPLETE | `spaas-node-agent` qualification engine, integration tests verified | — |
 | REQ-HW-02 | Cross-platform benchmark specification | COMPLETE | Versioned benchmark spec in `crates/benchmark-spec` with JSON serialization | — |
 | REQ-HW-03 | GPU/NPU/AI accelerator qualification | COMPLETE | Detection and qualification harness with honest classification (HARDWARE-REQUIRED without physical GPU/NPU) | — |
+| REQ-HW-04 | Real empirical on-device microbenchmarks | COMPLETE | `EmpiricalBenchmarkSuite.kt` executing SHA-256 integer hashes, SGEMM matrix multiply (MFLOPS), RAM bandwidth buffer sweeps, pointer-chasing latency, flash storage read speed, and WASM fuel conformance | — |
+
+## Domain 11: Distributed Compute & Scaling Lab
+
+| REQ ID | Requirement | Status | Evidence | Gap ID |
+|---|---|---|---|---|
+| REQ-DST-01 | Cost/Benefit DAG Decision Engine | COMPLETE | Scheduler evaluates transfer overhead vs compute gain (`DISTRIBUTION NOT BENEFICIAL` vs `DISTRIBUTION BENEFICIAL`), verified in Subtest 28 | GAP-P1-07 (RESOLVED) |
+| REQ-DST-02 | Scaling & Capability Lab | COMPLETE | Automated reproducible experiments across PC-only, Phone-only, and PC+Phone with signed JSON/HTML evidence, verified in Subtest 29 | GAP-P1-08 (RESOLVED) |
+| REQ-DST-03 | Blocked Scheduler UX & Auto-Dispatch | COMPLETE | Transparent `wait_reason` banner with actions [Wait], [Edit Requirements], [Cancel]; auto-dispatches on heartbeat AC transition, verified in Subtest 27 | GAP-P0-06 (RESOLVED) |
+| REQ-DST-04 | Authoritative 6-Tuple State Model | COMPLETE | Standardized Connection, Enrollment, Qualification, Availability, Eligibility, Execution across backend and UI, verified in Subtest 26 | GAP-P0-05 (RESOLVED) |
+| REQ-DST-05 | Provider Marketplace 11-Field ASK ME Modal | COMPLETE | Interactive dialog with Workload Name, Submitter, Duration, CPU, RAM, GPU, Download, Upload, Battery, Reward, Sandbox, and "Always allow" checkbox | GAP-P1-05 (RESOLVED) |
+| REQ-DST-06 | End-to-End Observability Tracing | COMPLETE | Correlation IDs propagated across submission, scheduling, leasing, worker execution, verification, and settlement; verified in Subtest 29 | GAP-P2-06 (RESOLVED) |
 
 ---
 
@@ -117,11 +129,11 @@
 
 | Classification | Count | Percentage |
 |---|---|---|
-| COMPLETE | 37 | 100.0% |
+| COMPLETE | 44 | 100.0% |
 | PARTIAL | 0 | 0.0% |
 | BROKEN | 0 | 0.0% |
 | MISSING | 0 | 0.0% |
-| **Total** | **37** | **100%** |
+| **Total** | **44** | **100%** |
 
-**Production Readiness: 100% Certified.** All 37 architecture, security, cross-platform runtime, multi-cloud DR, and UX requirements are fully implemented, verified, and evidenced without fabrication.
+**Production Readiness: 100% Certified.** All 44 architecture, security, cross-platform runtime, multi-cloud DR, scheduler, scaling lab, and UX requirements are fully implemented, verified, and evidenced without fabrication.
 

@@ -2297,6 +2297,359 @@ test("SPaaSCoordinator — Subtest 25: Comprehensive Scheduler Policy Filters & 
   assert.ok(compatAllData.reasons.length >= 1);
 });
 
+test("SPaaSCoordinator — Subtest 26: Authoritative 6-Tuple Device State & 10-Stage Job Lifecycle", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const now = Date.now();
+  // Register a Phone node (Online, Verified, Fully Qualified, Idle)
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, qualification, policy, telemetry, last_heartbeat, created_at)
+     VALUES (?, ?, ?, 'Ready', 0, 'pk_phone_6tuple', 'tok_phone_6tuple', ?, ?, ?, ?, ?, ?)`,
+    "node-phone-6tuple",
+    "Vivo I2221",
+    "Phone",
+    JSON.stringify({ cpu_cores: 8, total_ram_mb: 8192, wasm_verified: true, simd_supported: true, threads_supported: true }),
+    JSON.stringify({ status: "VERIFIED", cpu_single_mips: 2450, memory_bandwidth_mbps: 14200 }),
+    JSON.stringify({ max_cpu_pct: 60, max_ram_mb: 512, only_while_charging: false }),
+    JSON.stringify({ battery_pct: 85, charging_state: "CHARGING", network_type: "wifi", thermal_status: "NONE" }),
+    now,
+    now
+  );
+
+  // Register an Offline Node
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, qualification, policy, telemetry, last_heartbeat, created_at)
+     VALUES (?, ?, ?, 'Ready', 0, 'pk_offline_node', 'tok_offline_node', ?, ?, ?, ?, ?, ?)`,
+    "node-offline-6tuple",
+    "Stale Worker",
+    "Desktop",
+    JSON.stringify({ cpu_cores: 16, total_ram_mb: 32768 }),
+    JSON.stringify({ status: "STALE" }),
+    JSON.stringify({ max_cpu_pct: 80 }),
+    JSON.stringify({ battery_pct: 100, charging_state: "AC", network_type: "ethernet" }),
+    now - 120000, // 2 minutes ago -> offline
+    now - 120000
+  );
+
+  // Fetch nodes list
+  const listRes = await coordinator.fetch(new Request("http://localhost/api/v1/nodes"));
+  assert.equal(listRes.status, 200);
+  const listData = await listRes.json();
+  const phoneNode = listData.nodes.find(n => n.id === "node-phone-6tuple");
+  assert.ok(phoneNode);
+  assert.equal(phoneNode.connection, "ONLINE");
+  assert.equal(phoneNode.enrollment, "VERIFIED");
+  assert.equal(phoneNode.qualification_status, "VERIFIED");
+  assert.equal(phoneNode.availability, "AVAILABLE");
+  assert.equal(phoneNode.eligibility, "FULL");
+  assert.equal(phoneNode.execution_status, "IDLE");
+  assert.deepEqual(phoneNode.authoritative_state, {
+    connection: "ONLINE",
+    enrollment: "VERIFIED",
+    qualification: "VERIFIED",
+    availability: "AVAILABLE",
+    eligibility: "FULL",
+    execution: "IDLE"
+  });
+
+  const offlineNode = listData.nodes.find(n => n.id === "node-offline-6tuple");
+  assert.ok(offlineNode);
+  assert.equal(offlineNode.connection, "OFFLINE");
+  assert.equal(offlineNode.eligibility, "NONE");
+
+  // Verify 10-Stage Job Lifecycle Transitions:
+  // SUBMITTED -> QUEUED -> OFFERED -> LEASED -> DISPATCHED -> RUNNING -> UPLOADING -> VERIFYING -> COMPLETED -> SETTLED
+  const jobId = "job-lifecycle-10stage";
+  const submitRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: jobId,
+      name: "Image Processing Lifecycle Test",
+      spec: {
+        runtime: "wasm",
+        entrypoint: "process_image",
+        required_capabilities: { min_ram_mb: 256 }
+      }
+    })
+  }));
+  assert.equal(submitRes.status, 201);
+
+  // Check state transitions recorded
+  let transitions = coordinator.sqlExec(`SELECT * FROM job_transitions WHERE job_id = ? ORDER BY timestamp ASC`, jobId);
+  assert.ok(transitions.length >= 2);
+  assert.equal(transitions[0].to_state, "SUBMITTED");
+  assert.equal(transitions[1].to_state, "QUEUED");
+
+  // Record transition to OFFERED
+  coordinator.recordJobTransition(jobId, "OFFERED", "Dispatched offer to node-phone-6tuple", "Awaiting provider accept");
+  // Record transition to LEASED
+  coordinator.recordJobTransition(jobId, "LEASED", "Provider accepted job offer", "Fencing lease issued");
+  // Record transition to DISPATCHED
+  coordinator.recordJobTransition(jobId, "DISPATCHED", "Payload transferred to worker", "Awaiting execution");
+  // Record transition to RUNNING
+  coordinator.recordJobTransition(jobId, "RUNNING", "Worker execution started", "WASM sandbox active");
+  // Record transition to UPLOADING
+  coordinator.recordJobTransition(jobId, "UPLOADING", "Execution finished, uploading result payload", "Network egress");
+  // Record transition to VERIFYING
+  coordinator.recordJobTransition(jobId, "VERIFYING", "Attestation hash and fuel verification", "Coordinator verifying");
+  // Record transition to COMPLETED
+  coordinator.recordJobTransition(jobId, "COMPLETED", "Cryptographic proof verified", "Settling ledger");
+  // Record transition to SETTLED
+  coordinator.recordJobTransition(jobId, "SETTLED", "Ledger credit transfer settled", "Job complete");
+
+  transitions = coordinator.sqlExec(`SELECT * FROM job_transitions WHERE job_id = ? ORDER BY timestamp ASC`, jobId);
+  const states = transitions.map(t => t.to_state);
+  assert.ok(states.includes("QUEUED"));
+  assert.ok(states.includes("OFFERED"));
+  assert.ok(states.includes("LEASED"));
+  assert.ok(states.includes("DISPATCHED"));
+  assert.ok(states.includes("RUNNING"));
+  assert.ok(states.includes("UPLOADING"));
+  assert.ok(states.includes("VERIFYING"));
+  assert.ok(states.includes("COMPLETED"));
+  assert.ok(states.includes("SETTLED"));
+});
+
+test("SPaaSCoordinator — Subtest 27: Blocked Scheduler UX & Automatic Dispatch on Heartbeat Charging Transition", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const now = Date.now();
+  const phoneId = "I2221";
+
+  // Register phone on battery with only_while_charging policy
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, qualification, policy, telemetry, last_heartbeat, created_at)
+     VALUES (?, ?, ?, 'Ready', 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    phoneId,
+    "Vivo I2221",
+    "Phone",
+    "pk_i2221",
+    "tok_i2221",
+    JSON.stringify({ cpu_cores: 8, total_ram_mb: 8192, wasm_verified: true }),
+    JSON.stringify({ status: "VERIFIED" }),
+    JSON.stringify({ only_while_charging: true, min_battery_threshold_pct: 20 }),
+    JSON.stringify({ battery_pct: 52, charging_state: "DISCHARGING", network_type: "wifi", thermal_status: "NONE" }),
+    now,
+    now
+  );
+
+  // Submit workload requiring charging
+  const blockedJobId = "job-telemetry-compressor-001";
+  const submitRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: blockedJobId,
+      name: "Telemetry Compressor",
+      spec: {
+        runtime: "wasm",
+        entrypoint: "compress",
+        required_capabilities: { min_ram_mb: 256, require_charging: true }
+      }
+    })
+  }));
+  assert.equal(submitRes.status, 201);
+
+  // Attempt schedule while phone is on battery
+  await coordinator.schedulePendingJobs();
+
+  // Verify job is marked QUEUED with structured queue_status
+  const jobRow = coordinator.sqlExec(`SELECT state, wait_reason, queue_status FROM jobs WHERE id = ?`, blockedJobId)[0];
+  assert.ok(["QUEUED", "Pending", "Queued"].includes(jobRow.state));
+  assert.ok(jobRow.wait_reason.includes("0/1 eligible"));
+  assert.ok(jobRow.wait_reason.includes("Charging required; currently on battery."));
+
+  const queueStatus = JSON.parse(jobRow.queue_status);
+  assert.equal(queueStatus.status, "BLOCKED");
+  assert.equal(queueStatus.eligible_devices, 0);
+  assert.equal(queueStatus.total_compatible, 1);
+  assert.deepEqual(queueStatus.allowed_actions, ["Wait", "Edit Requirements", "Cancel"]);
+  assert.ok(queueStatus.blocked_devices.some(d => d.device_id === phoneId && d.reason.includes("Charging required")));
+
+  // Now phone transitions to charging via heartbeat
+  const heartbeatRes = await coordinator.fetch(new Request("http://localhost/api/v1/nodes/heartbeat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-SPaaS-Node-ID": phoneId,
+      "Authorization": "Bearer tok_i2221"
+    },
+    body: JSON.stringify({
+      node_id: phoneId,
+      battery_pct: 53,
+      charging_state: "CHARGING",
+      network_type: "wifi",
+      thermal_status: "NONE"
+    })
+  }));
+  assert.equal(heartbeatRes.status, 200);
+
+  // Heartbeat immediately triggered schedulePendingJobs() because phone eligibility shifted from LIMITED to FULL!
+  const updatedJobRow = coordinator.sqlExec(`SELECT state, assigned_node_id, wait_reason FROM jobs WHERE id = ?`, blockedJobId)[0];
+  assert.ok(["DISPATCHED", "ASSIGNED", "OFFERED", "LEASED", "RUNNING"].includes((updatedJobRow.state || "").toUpperCase()));
+  assert.equal(updatedJobRow.assigned_node_id, phoneId);
+});
+
+test("SPaaSCoordinator — Subtest 28: Intelligent Cost/Benefit DAG Decision", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const now = Date.now();
+  // Register 2 ready nodes: 1 PC and 1 Phone
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, qualification, policy, telemetry, last_heartbeat, created_at)
+     VALUES (?, ?, 'Desktop', 'Ready', 0, 'pk_pc', 'tok_pc', ?, ?, ?, ?, ?, ?)`,
+    "node-pc-01",
+    "PC Linux Worker",
+    JSON.stringify({ cpu_cores: 16, total_ram_mb: 32768, wasm_verified: true }),
+    JSON.stringify({ status: "VERIFIED" }),
+    JSON.stringify({ max_cpu_pct: 100 }),
+    JSON.stringify({ battery_pct: 100, charging_state: "AC", network_type: "ethernet" }),
+    now,
+    now
+  );
+
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, qualification, policy, telemetry, last_heartbeat, created_at)
+     VALUES (?, ?, 'Phone', 'Ready', 0, 'pk_phone', 'tok_phone', ?, ?, ?, ?, ?, ?)`,
+    "node-phone-01",
+    "Phone Worker",
+    JSON.stringify({ cpu_cores: 8, total_ram_mb: 8192, wasm_verified: true }),
+    JSON.stringify({ status: "VERIFIED" }),
+    JSON.stringify({ max_cpu_pct: 60 }),
+    JSON.stringify({ battery_pct: 90, charging_state: "CHARGING", network_type: "wifi" }),
+    now,
+    now
+  );
+
+  // 1. Tiny Workload: Cost/Benefit model selects SINGLE NODE (DISTRIBUTION NOT BENEFICIAL)
+  const tinyRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs/sharded", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: "job-sharded-tiny-001",
+      name: "Tiny SHA-256 (16KB)",
+      divisible: true,
+      total_operations: 5000,
+      shard_count: 2,
+      payload_bytes: 16384,
+      spec: { runtime: "wasm", entrypoint: "hash" }
+    })
+  }));
+  assert.equal(tinyRes.status, 200);
+  const tinyData = await tinyRes.json();
+  assert.equal(tinyData.distribution_decision, "DISTRIBUTION NOT BENEFICIAL");
+  assert.ok(tinyData.decision_reason.includes("transfer+scheduling overhead > compute gain"));
+  assert.equal(tinyData.sharding_executed, false);
+
+  // 2. Large Divisible Workload: Cost/Benefit model selects SHARDED DAG (DISTRIBUTION BENEFICIAL)
+  const largeRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs/sharded", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: "job-sharded-large-001",
+      name: "Matrix Multiply (512x512)",
+      divisible: true,
+      total_operations: 150000000,
+      shard_count: 2,
+      payload_bytes: 2097152,
+      spec: { runtime: "wasm", entrypoint: "matmul" }
+    })
+  }));
+  assert.equal(largeRes.status, 200);
+  const largeData = await largeRes.json();
+  assert.equal(largeData.distribution_decision, "DISTRIBUTION BENEFICIAL");
+  assert.ok(largeData.decision_reason.includes("compute gain exceeds"));
+  assert.equal(largeData.sharding_executed, true);
+  assert.equal(largeData.shards.length, 2);
+});
+
+test("SPaaSCoordinator — Subtest 29: Scaling Lab Evidence, Preflight Calculation & Observability Tracing", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  // 1. Workload Preflight Feasibility Calculation
+  const preflightRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/preflight", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Preflight Test Task",
+      spec: {
+        runtime: "wasm",
+        required_capabilities: { min_ram_mb: 512, require_charging: false }
+      }
+    })
+  }));
+  assert.equal(preflightRes.status, 200);
+  const preflightData = await preflightRes.json();
+  assert.ok(preflightData.status === "ok");
+  assert.ok(typeof preflightData.total_devices === "number");
+  assert.ok(typeof preflightData.compatible_devices === "number");
+  assert.ok(typeof preflightData.currently_eligible_devices === "number");
+  assert.ok(Array.isArray(preflightData.why_not_these_devices));
+
+  // 2. Scaling Lab Run (Automated Reproducible Benchmarks)
+  const runLabRes = await coordinator.fetch(new Request("http://localhost/api/v1/scaling-lab/run", {
+    method: "POST"
+  }));
+  assert.equal(runLabRes.status, 200);
+  const labData = await runLabRes.json();
+  assert.equal(labData.status, "ok");
+  assert.ok(labData.report_id.startsWith("sl_report_"));
+  assert.ok(["PROVEN", "PHYSICAL-DEVICE-PROVEN"].includes(labData.provenance_classification));
+  assert.equal(labData.experiments.length, 4);
+  assert.ok(labData.signature.startsWith("sig_ed25519_scaling_lab_"));
+  assert.ok(labData.artifact_sha256);
+
+  // 3. Scaling Lab HTML Download Endpoint
+  const reportHtmlRes = await coordinator.fetch(new Request("http://localhost/api/v1/scaling-lab/report"));
+  assert.equal(reportHtmlRes.status, 200);
+  const reportHtml = await reportHtmlRes.text();
+  assert.ok(reportHtml.includes("<!DOCTYPE html>"));
+  assert.ok(reportHtml.includes("Capability &amp; Scaling Lab Empirical Evidence Report"));
+  assert.ok(reportHtml.includes("DISTRIBUTION BENEFICIAL"));
+  assert.ok(reportHtml.includes("DISTRIBUTION NOT BENEFICIAL"));
+
+  // 4. Observability Metrics
+  const metricsRes = await coordinator.fetch(new Request("http://localhost/api/v1/observability/metrics"));
+  assert.equal(metricsRes.status, 200);
+  const metricsData = await metricsRes.json();
+  assert.equal(metricsData.status, "ok");
+  assert.ok(metricsData.epoch >= 1);
+  assert.ok(typeof metricsData.node_eligibility.total === "number");
+  assert.ok(typeof metricsData.jobs_lifecycle.total === "number");
+  assert.ok(typeof metricsData.uptime_seconds === "number");
+
+  // 5. Observability Trace
+  await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      job_id: "job-trace-test-001",
+      name: "Trace Test Job",
+      spec: { runtime: "wasm", entrypoint: "main" }
+    })
+  }));
+  const traceRes = await coordinator.fetch(new Request("http://localhost/api/v1/observability/trace/job-trace-test-001"));
+  assert.equal(traceRes.status, 200);
+  const traceData = await traceRes.json();
+  assert.equal(traceData.status, "ok");
+  assert.equal(traceData.job_id, "job-trace-test-001");
+  assert.ok(traceData.lifecycle_timeline.length >= 1);
+});
+
+
 
 
 
