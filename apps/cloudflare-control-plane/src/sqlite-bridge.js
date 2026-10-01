@@ -83,7 +83,28 @@ function createMinimalFallbackEngine() {
     ledger: new Map(),
     node_commands: new Map(),
     audit_log: [],
-    meta: new Map([["role", "PRIMARY"], ["epoch", "1"], ["fabric_status", "ACTIVE"]])
+    meta: new Map([["role", "PRIMARY"], ["epoch", "1"], ["fabric_status", "ACTIVE"]]),
+    tenants: new Map([
+      ["tenant_spaas_system", { id: "tenant_spaas_system", name: "SPaaS Global System", plan: "enterprise", balance_credits: 1000000.0, currency_balance: 10000.0, status: "ACTIVE" }],
+      ["tenant_enterprise_customer", { id: "tenant_enterprise_customer", name: "Acme Distributed AI Labs", plan: "enterprise", balance_credits: 5000.0, currency_balance: 50.0, status: "ACTIVE" }],
+      ["tenant_community_providers", { id: "tenant_community_providers", name: "Community Compute Providers", plan: "starter", balance_credits: 250.0, currency_balance: 2.5, status: "ACTIVE" }]
+    ]),
+    users: new Map([
+      ["usr_admin", { id: "usr_admin", tenant_id: "tenant_spaas_system", email: "admin@spaas.dev", role: "SUPER_ADMIN", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_cust_admin", { id: "usr_cust_admin", tenant_id: "tenant_enterprise_customer", email: "customer_admin@acme.ai", role: "CUSTOMER_ADMIN", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_cust_dev", { id: "usr_cust_dev", tenant_id: "tenant_enterprise_customer", email: "developer@acme.ai", role: "CUSTOMER", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_provider", { id: "usr_provider", tenant_id: "tenant_community_providers", email: "provider@edge.net", role: "PROVIDER", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_ops", { id: "usr_ops", tenant_id: "tenant_spaas_system", email: "ops@spaas.dev", role: "OPS", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_security", { id: "usr_security", tenant_id: "tenant_spaas_system", email: "security@spaas.dev", role: "SECURITY", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_finance", { id: "usr_finance", tenant_id: "tenant_spaas_system", email: "finance@spaas.dev", role: "FINANCE", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_support", { id: "usr_support", tenant_id: "tenant_spaas_system", email: "support@spaas.dev", role: "SUPPORT", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_auditor", { id: "usr_auditor", tenant_id: "tenant_spaas_system", email: "auditor@spaas.dev", role: "AUDITOR", status: "ACTIVE", mfa_enabled: 0 }]
+    ]),
+    api_keys: new Map(),
+    sessions: new Map(),
+    invoices: new Map(),
+    provider_payouts: new Map(),
+    billing_config: new Map([["platform_fee_pct", "15.0"], ["min_withdrawal_credits", "50.0"], ["credit_to_usd_rate", "0.01"]])
   };
 
   return {
@@ -428,7 +449,21 @@ function createMinimalFallbackEngine() {
         let fencing_token = null;
         let scheduler_decision = null;
 
-        if (params.length === 4) {
+        // Check if id is inlined or query has OFFERED
+        const inlinedMatch = q.match(/VALUES\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']+)'/i);
+        if (inlinedMatch) {
+          id = inlinedMatch[1];
+          workload_id = inlinedMatch[2];
+          state = inlinedMatch[3];
+          assigned_node_id = params[0];
+          created_at = params[1] || Date.now();
+        } else if (params.length === 4 && (qu.includes("'OFFERED'") || qu.includes("OFFERED"))) {
+          id = params[0];
+          workload_id = params[1];
+          state = "OFFERED";
+          assigned_node_id = params[2];
+          created_at = params[3];
+        } else if (params.length === 4) {
           correlation_id = params[2];
           created_at = params[3];
         } else if (params.length === 13) {
@@ -627,6 +662,10 @@ function createMinimalFallbackEngine() {
       }
       if (qu.startsWith("SELECT * FROM JOBS WHERE STATE = 'PENDING'") || qu.startsWith("SELECT * FROM JOBS WHERE STATE = 'QUEUED'") || qu.startsWith("SELECT * FROM JOBS WHERE STATE IN")) {
         return Array.from(tables.jobs.values()).filter(j => j.state === "Pending" || j.state === "Queued" || j.state === "QUEUED");
+      }
+      if (qu.includes("FROM JOBS") && qu.includes("ASSIGNED_NODE_ID =") && (qu.includes("STATE = 'OFFERED'") || qu.includes('STATE = "OFFERED"'))) {
+        const nodeId = params[0];
+        return Array.from(tables.jobs.values()).filter(j => j.assigned_node_id === nodeId && (j.state || "").toUpperCase() === "OFFERED");
       }
       if (qu.startsWith("SELECT * FROM JOBS WHERE ASSIGNED_NODE_ID = ?")) {
         const nodeId = params[0];
@@ -847,6 +886,147 @@ function createMinimalFallbackEngine() {
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM AUDIT_LOG")) {
         return [...tables.audit_log].reverse().slice(0, 100);
+      }
+
+      // BILLING_CONFIG
+      if (qu.includes("FROM BILLING_CONFIG WHERE KEY =")) {
+        const keyMatch = q.match(/WHERE\s+key\s*=\s*'([^']+)'/i);
+        const key = params[0] || (keyMatch ? keyMatch[1] : 'platform_fee_pct');
+        const val = tables.billing_config.get(key) || tables.billing_config.get(key.toLowerCase());
+        return val !== undefined ? [{ value: val }] : [];
+      }
+      if (qu.startsWith("SELECT VALUE FROM BILLING_CONFIG") || (qu.startsWith("SELECT") && qu.includes("FROM BILLING_CONFIG"))) {
+        const key = params[0];
+        if (key) {
+          const val = tables.billing_config.get(key) || tables.billing_config.get(key.toLowerCase());
+          return val !== undefined ? [{ value: val }] : [];
+        }
+        return Array.from(tables.billing_config.entries()).map(([key, value]) => ({ key, value }));
+      }
+      if (qu.includes("INTO BILLING_CONFIG") || qu.startsWith("INSERT OR REPLACE INTO BILLING_CONFIG") || qu.startsWith("INSERT OR IGNORE INTO BILLING_CONFIG")) {
+        let k, v;
+        if (params.length === 2) {
+          [k, v] = params;
+        } else if (params.length === 1) {
+          const keyMatch = q.match(/VALUES\s*\(\s*'([^']+)'/i);
+          k = keyMatch ? keyMatch[1] : 'platform_fee_pct';
+          v = params[0];
+        } else {
+          const m = q.match(/VALUES\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*\)/i);
+          if (m) {
+            k = m[1];
+            v = m[2];
+          }
+        }
+        if (k) tables.billing_config.set(k, String(v));
+        return [];
+      }
+      if (qu.startsWith("UPDATE BILLING_CONFIG SET VALUE =")) {
+        const [val, key] = params;
+        tables.billing_config.set(key, String(val));
+        return [];
+      }
+
+      // USERS
+      if (qu.startsWith("INSERT INTO USERS") || qu.startsWith("INSERT OR IGNORE INTO USERS")) {
+        const [id, tenant_id, email, password_hash, role, status, mfa_enabled, created_at] = params;
+        tables.users.set(id, { id, tenant_id, email, password_hash, role, status: status || 'ACTIVE', mfa_enabled: mfa_enabled || 0, created_at: created_at || Date.now() });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM USERS WHERE EMAIL =")) {
+        const email = params[0];
+        const match = Array.from(tables.users.values()).find(u => u.email === email);
+        return match ? [match] : [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM USERS WHERE ID =")) {
+        const id = params[0];
+        const match = tables.users.get(id);
+        return match ? [match] : [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM USERS")) {
+        return Array.from(tables.users.values());
+      }
+
+      // SESSIONS
+      if (qu.startsWith("INSERT INTO SESSIONS")) {
+        const [token, tenant_id, user_id, role, expires_at, created_at] = params;
+        tables.sessions.set(token, { token, tenant_id, user_id, role, expires_at, created_at });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM SESSIONS WHERE TOKEN =")) {
+        const token = params[0];
+        const sess = tables.sessions.get(token);
+        return sess ? [sess] : [];
+      }
+      if (qu.startsWith("DELETE FROM SESSIONS WHERE TOKEN =")) {
+        tables.sessions.delete(params[0]);
+        return [];
+      }
+
+      // API KEYS
+      if (qu.startsWith("INSERT INTO API_KEYS")) {
+        let id, tenant_id, user_id, name, key_hash, prefix, role, scopes, status, created_at;
+        if (params.length === 9) {
+          [id, tenant_id, user_id, name, key_hash, prefix, role, scopes, created_at] = params;
+          status = 'ACTIVE';
+        } else {
+          [id, tenant_id, user_id, name, key_hash, prefix, role, scopes, status, created_at] = params;
+        }
+        tables.api_keys.set(id, { id, tenant_id, user_id, name, key_hash, prefix, role, scopes, status: status || 'ACTIVE', created_at: created_at || Date.now(), last_used_at: null, expires_at: null });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM API_KEYS WHERE TENANT_ID =")) {
+        const tenant_id = params[0];
+        return Array.from(tables.api_keys.values()).filter(k => k.tenant_id === tenant_id && k.status === 'ACTIVE');
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM API_KEYS WHERE")) {
+        const token = params[0];
+        const match = tables.api_keys.get(token) || Array.from(tables.api_keys.values()).find(k => k.id === token || k.key_hash === token);
+        return match ? [match] : [];
+      }
+      if (qu.startsWith("UPDATE API_KEYS SET STATUS = 'REVOKED'")) {
+        const id = params[0];
+        const k = tables.api_keys.get(id);
+        if (k) k.status = 'REVOKED';
+        return [];
+      }
+      if (qu.startsWith("UPDATE API_KEYS SET LAST_USED_AT =")) {
+        const [last_used, id] = params;
+        const k = tables.api_keys.get(id);
+        if (k) k.last_used_at = last_used;
+        return [];
+      }
+
+      // TENANTS
+      if (qu.startsWith("SELECT * FROM TENANTS WHERE ID =")) {
+        const id = params[0];
+        const t = tables.tenants.get(id);
+        return t ? [t] : [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM TENANTS")) {
+        return Array.from(tables.tenants.values());
+      }
+
+      // INVOICES
+      if (qu.startsWith("INSERT INTO INVOICES")) {
+        const [id, tenant_id, amount_credits, amount_fiat, status, paid_at, created_at] = params;
+        tables.invoices.set(id, { id, tenant_id, amount_credits, amount_fiat, status, paid_at, created_at });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM INVOICES")) {
+        const tenant_id = params[0];
+        const invs = Array.from(tables.invoices.values());
+        return tenant_id ? invs.filter(i => i.tenant_id === tenant_id) : invs;
+      }
+
+      // PROVIDER PAYOUTS
+      if (qu.startsWith("INSERT INTO PROVIDER_PAYOUTS")) {
+        const [id, provider_id, amount_credits, amount_fiat, status, method, created_at] = params;
+        tables.provider_payouts.set(id, { id, provider_id, amount_credits, amount_fiat, status, method, created_at });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM PROVIDER_PAYOUTS")) {
+        return Array.from(tables.provider_payouts.values());
       }
 
       return [];

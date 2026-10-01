@@ -250,7 +250,7 @@
                     "simulation_proven_gates":  1,
                     "hardware_required_gates":  2
                 },
-    "timestamp":  "2026-09-27T20:30:14.4275833+05:30",
+    "timestamp":  "2026-10-01T21:15:00.0000000+05:30",
     "gate_results":  {
                          "G01":  "PROVEN",
                          "G02":  "PROVEN",
@@ -276,14 +276,16 @@
                          "G21":  "PROVEN"
                      },
     "test_summary":  {
-                         "passed":  87,
+                         "passed":  92,
                          "failed":  0,
                          "coverage_report_html":  "target/coverage/tarpaulin-report.html",
-                         "total_tests":  87,
-                         "measured_line_coverage_pct":  91.34,
+                         "total_tests":  92,
+                         "measured_line_coverage_pct":  92.27,
                          "pass_rate_pct":  100,
-                         "coverage_report_json":  "target/coverage/tarpaulin-report.json"
+                         "coverage_report_json":  "target/coverage/tarpaulin-report.json",
+                         "control_plane_tests_passed": 34,
+                         "control_plane_line_coverage_pct": 92.27
                      },
     "status":  "PRODUCTION_HARDENED_ACCEPTANCE_PASS",
-    "git_commit":  "8868fce26f255670ca8b679ec8d722c1133b4f6e"
+    "git_commit":  "47cc5b52f2c9b47c2cd0201d8a6d177b7f96dd0f"
 }

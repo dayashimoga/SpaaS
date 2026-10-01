@@ -2649,6 +2649,271 @@ test("SPaaSCoordinator — Subtest 29: Scaling Lab Evidence, Preflight Calculati
   assert.ok(traceData.lifecycle_timeline.length >= 1);
 });
 
+test("SPaaSCoordinator — Subtest 30: Identity, Tenant Isolation, Sessions, Scoped API Keys & 9-Role RBAC Authorization", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET,
+    SPAAS_REQUIRE_AUTH: "true"
+  });
+
+  // 1. Login as Enterprise Customer
+  const loginRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "developer@acme.ai", role: "CUSTOMER" })
+  }));
+  assert.equal(loginRes.status, 200);
+  const loginData = await loginRes.json();
+  assert.equal(loginData.status, "ok");
+  assert.ok(loginData.token.startsWith("sess_"));
+  assert.equal(loginData.user.role, "CUSTOMER");
+  assert.equal(loginData.tenant.id, "tenant_enterprise_customer");
+  assert.equal(loginData.permissions.can_submit_jobs, true);
+  assert.equal(loginData.permissions.can_access_admin, false);
+
+  // 2. Validate session via /api/v1/auth/me
+  const meRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/me", {
+    method: "GET",
+    headers: { "Authorization": `Bearer ${loginData.token}` }
+  }));
+  assert.equal(meRes.status, 200);
+  const meData = await meRes.json();
+  assert.equal(meData.role, "CUSTOMER");
+  assert.equal(meData.tenant.name, "Acme Distributed AI Labs");
+
+  // 3. Customer is forbidden from accessing Admin DR endpoint
+  const adminForbiddenRes = await coordinator.fetch(new Request("http://localhost/api/v1/dr/checkpoint", {
+    method: "GET",
+    headers: { "Authorization": `Bearer ${loginData.token}` }
+  }));
+  assert.equal(adminForbiddenRes.status, 401);
+
+  // 4. Create Scoped API Key as Customer Admin
+  const custAdminLogin = await coordinator.fetch(new Request("http://localhost/api/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "customer_admin@acme.ai", role: "CUSTOMER_ADMIN" })
+  }));
+  const custAdminData = await custAdminLogin.json();
+
+  const createKeyRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/api-keys", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${custAdminData.token}` },
+    body: JSON.stringify({ name: "CI Matrix Runner", scopes: ["jobs:create", "jobs:read"] })
+  }));
+  assert.equal(createKeyRes.status, 201);
+  const keyData = await createKeyRes.json();
+  assert.ok(keyData.api_key.startsWith("spaas_key_"));
+
+  // 5. Query keys
+  const listKeysRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/api-keys", {
+    method: "GET",
+    headers: { "Authorization": `Bearer ${custAdminData.token}` }
+  }));
+  assert.equal(listKeysRes.status, 200);
+  const listKeysData = await listKeysRes.json();
+  assert.ok(listKeysData.keys.length >= 1);
+
+  // 6. Revoke key
+  const revokeKeyRes = await coordinator.fetch(new Request(`http://localhost/api/v1/auth/api-keys/${keyData.key_id}`, {
+    method: "DELETE",
+    headers: { "Authorization": `Bearer ${custAdminData.token}` }
+  }));
+  assert.equal(revokeKeyRes.status, 200);
+
+  // 7. Verify Super Admin Access
+  const adminMeRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/me", {
+    method: "GET",
+    headers: { "Authorization": `Bearer ${TEST_ADMIN_SECRET}` }
+  }));
+  assert.equal(adminMeRes.status, 200);
+  const adminMeData = await adminMeRes.json();
+  assert.equal(adminMeData.role, "SUPER_ADMIN");
+  assert.equal(adminMeData.permissions.can_access_admin, true);
+});
+
+test("SPaaSCoordinator — Subtest 31: Outcome Planner (Local vs Single Node vs Cluster Cost/Benefit Analysis & Explainability)", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const now = Date.now();
+  // Register active phone and desktop workers
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, last_heartbeat, created_at)
+     VALUES ('phone_planner_01', 'Vivo I2221', 'Phone', 'Ready', 0, 'pk_phone', 'tok_phone', '{"cpu_cores":8}', ?, ?)`,
+    now, now
+  );
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, last_heartbeat, created_at)
+     VALUES ('desktop_planner_01', 'Workstation PC', 'Desktop', 'Ready', 0, 'pk_pc', 'tok_pc', '{"cpu_cores":16}', ?, ?)`,
+    now, now
+  );
+
+  // 1. Analyze Large Workload: Planner evaluates Local vs Single vs Cluster
+  const planRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Matrix Multiply (512x512)",
+      workload_type: "matrix",
+      payload_bytes: 2097152,
+      total_operations: 150000000,
+      optimization_goal: "Fastest"
+    })
+  }));
+  assert.equal(planRes.status, 200);
+  const planData = await planRes.json();
+  assert.equal(planData.status, "ok");
+  assert.equal(planData.distribution_decision, "DISTRIBUTION BENEFICIAL");
+  assert.equal(planData.recommended_mode, "CLUSTER");
+  assert.ok(planData.plans.local.total_wall_time_ms > 0);
+  assert.ok(planData.plans.single_node.total_wall_time_ms > 0);
+  assert.ok(planData.plans.cluster.total_wall_time_ms > 0);
+  assert.ok(planData.plans.cluster.speedup_factor_vs_single.includes("x"));
+  assert.ok(planData.plans.single_node.why_this_device.length > 0);
+  assert.ok(planData.plans.cluster.why_distribute.length > 0);
+
+  // 2. Analyze Small Workload: Planner explains why NOT to distribute
+  const smallPlanRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Tiny SHA-256",
+      workload_type: "hash",
+      payload_bytes: 4096,
+      total_operations: 10000,
+      optimization_goal: "Fastest"
+    })
+  }));
+  assert.equal(smallPlanRes.status, 200);
+  const smallPlanData = await smallPlanRes.json();
+  assert.equal(smallPlanData.distribution_decision, "DISTRIBUTION NOT BENEFICIAL");
+  assert.equal(smallPlanData.recommended_mode, "SINGLE_NODE");
+  assert.ok(smallPlanData.recommendation_reason.includes("exceed"));
+});
+
+test("SPaaSCoordinator — Subtest 32: Marketplace Billing, Configurable Platform Fees, Provider Payouts & Triple-Entry Balanced Financial Reconciliation", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  // 1. Query billing config
+  const cfgRes = await coordinator.fetch(new Request("http://localhost/api/v1/billing/config"));
+  assert.equal(cfgRes.status, 200);
+  const cfgData = await cfgRes.json();
+  assert.equal(cfgData.platform_fee_pct, 15.0);
+
+  // 2. Update platform fee to 20%
+  const updateCfgRes = await coordinator.fetch(new Request("http://localhost/api/v1/billing/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${TEST_ADMIN_SECRET}` },
+    body: JSON.stringify({ platform_fee_pct: 20.0 })
+  }));
+  assert.equal(updateCfgRes.status, 200);
+
+  const newCfgRes = await coordinator.fetch(new Request("http://localhost/api/v1/billing/config"));
+  const newCfgData = await newCfgRes.json();
+  assert.equal(newCfgData.platform_fee_pct, 20.0);
+
+  // 3. Provider requests payout
+  const payoutRes = await coordinator.fetch(new Request("http://localhost/api/v1/billing/payout-request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer token_provider" },
+    body: JSON.stringify({ amount_credits: 75.0 })
+  }));
+  assert.equal(payoutRes.status, 201);
+  const payoutData = await payoutRes.json();
+  assert.equal(payoutData.status, "PENDING");
+  assert.equal(payoutData.amount_credits, 75.0);
+  assert.equal(payoutData.amount_usd, 0.75);
+
+  // 4. Query financial reconciliation report (as Auditor)
+  const reconRes = await coordinator.fetch(new Request("http://localhost/api/v1/billing/reconciliation", {
+    headers: { "Authorization": "Bearer token_auditor" }
+  }));
+  assert.equal(reconRes.status, 200);
+  const reconData = await reconRes.json();
+  assert.equal(reconData.status, "ok");
+  assert.equal(reconData.reconciliation_status, "BALANCED");
+  assert.equal(reconData.discrepancy_credits, 0.0000);
+  assert.equal(reconData.evidence_label, "PROVEN");
+});
+
+test("SPaaSCoordinator — Subtest 33: Provider ASK ME Job Offers Lifecycle & Monotonic State Sync", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const now = Date.now();
+  const nodeId = "node-ask-me-01";
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, policy, last_heartbeat, created_at)
+     VALUES (?, 'Provider Phone', 'Phone', 'Ready', 0, 'pk_ask', 'tok_ask', '{"mode":"ASK_ME"}', ?, ?)`,
+    nodeId, now, now
+  );
+
+  // Insert an offered job
+  coordinator.sqlExec(
+    `INSERT INTO jobs (id, workload_id, state, assigned_node_id, version_id, created_at)
+     VALUES (?, ?, 'OFFERED', ?, 1, ?)`,
+    "job-offer-99", "matrix_multiply", nodeId, now
+  );
+
+  // 1. Provider polls for offers
+  const offersRes = await coordinator.fetch(new Request(`http://localhost/api/v1/nodes/${nodeId}/offers`, {
+    headers: { "Authorization": "Bearer tok_ask" }
+  }));
+  assert.equal(offersRes.status, 200);
+  const offersData = await offersRes.json();
+  assert.equal(offersData.offers.length, 1);
+  assert.equal(offersData.offers[0].job_id, "job-offer-99");
+
+  // 2. Provider responds with ACCEPT
+  const acceptRes = await coordinator.fetch(new Request(`http://localhost/api/v1/nodes/${nodeId}/offers/job-offer-99/respond`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer tok_ask" },
+    body: JSON.stringify({ action: "ACCEPT" })
+  }));
+  assert.equal(acceptRes.status, 200);
+  const acceptData = await acceptRes.json();
+  assert.equal(acceptData.state, "LEASED");
+
+  // 3. Monotonic State Sync
+  const syncRes = await coordinator.fetch(new Request("http://localhost/api/v1/state/sync?since_version=0"));
+  assert.equal(syncRes.status, 200);
+  const syncData = await syncRes.json();
+  assert.ok(syncData.current_version >= 1);
+  assert.ok(syncData.jobs.length >= 1);
+});
+
+test("SPaaSCoordinator — Subtest 34: Real Sharded DAG Fault Recovery with Injected Worker Failure, Rescheduling & Identical Verified Digest", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const recoveryRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs/sharded/fail-and-recover", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${TEST_ADMIN_SECRET}` }
+  }));
+  assert.equal(recoveryRes.status, 200);
+  const recoveryData = await recoveryRes.json();
+  assert.equal(recoveryData.status, "ok");
+  assert.equal(recoveryData.recovery_demonstrated, true);
+  assert.equal(recoveryData.fault_injected, "Worker-01 disconnection mid-flight");
+  assert.equal(recoveryData.shard_1_status, "COMPLETED_ON_BACKUP");
+  assert.equal(recoveryData.shard_2_status, "COMPLETED");
+  assert.equal(recoveryData.output_verified, true);
+  assert.ok(recoveryData.deterministic_result_digest);
+  assert.equal(recoveryData.exactly_once_billing_verified, true);
+  assert.equal(recoveryData.classification, "PROVEN");
+});
+
+
 
 
 

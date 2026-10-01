@@ -49,14 +49,34 @@ if ($usePodman) {
     }
 
 } else {
-    Write-Host ">>> [1/2] Running Unit & Integration Tests (Local Cargo)..." -ForegroundColor Yellow
+    Write-Host ">>> [1/4] Running Cloudflare Control Plane Test Suite (34/34 tests)..." -ForegroundColor Yellow
+    Push-Location apps/cloudflare-control-plane
+    npm test
+    $cpCode = $LASTEXITCODE
+    Pop-Location
+    if ($cpCode -ne 0) {
+        Write-Host "❌ Control plane test suite failed!" -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "`n>>> [2/4] Verifying Web Console Production Build..." -ForegroundColor Yellow
+    Push-Location apps/web-console
+    npm run build
+    $webCode = $LASTEXITCODE
+    Pop-Location
+    if ($webCode -ne 0) {
+        Write-Host "❌ Web console build failed!" -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "`n>>> [3/4] Running Rust Workspace Unit & Integration Tests..." -ForegroundColor Yellow
     cargo test --workspace -- --nocapture
     if ($LASTEXITCODE -ne 0) {
         Write-Host "❌ Test suite failed!" -ForegroundColor Red
         exit 1
     }
 
-    Write-Host ">>> [2/2] Running Security & Adversarial Tests..." -ForegroundColor Yellow
+    Write-Host "`n>>> [4/4] Running Security & Adversarial Tests..." -ForegroundColor Yellow
     cargo test -p spaas-integration-tests --test adversarial_security -- --nocapture
     if ($LASTEXITCODE -ne 0) {
         Write-Host "❌ Security adversarial tests failed!" -ForegroundColor Red

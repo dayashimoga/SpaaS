@@ -479,6 +479,10 @@ let pairingTimerInterval = null;
 // Initialize on DOM Ready or immediately if DOM already loaded
 function bootApp() {
   initNavigation();
+  initPersonaSwitcher();
+  initOutcomePlanner();
+  initProviderJobOfferModal();
+  initReconciliationAndFeeControls();
   initModals();
   initDeviceControls();
   initManifestStudio();
@@ -1146,7 +1150,8 @@ async function refreshAllData() {
     fetchNodes(),
     fetchJobs(),
     fetchMetering(),
-    fetchAudit()
+    fetchAudit(),
+    fetchTripleEntryReconciliation()
   ]);
 }
 
@@ -4932,4 +4937,448 @@ function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// -------------------------------------------------------------
+// 3-Role Persona / Context Switcher (Customer / Provider / Admin)
+// -------------------------------------------------------------
+let currentPersona = 'customer'; // 'customer', 'provider', 'admin'
+
+function initPersonaSwitcher() {
+  const tabs = document.querySelectorAll('.persona-tab');
+  const tenantBadge = document.getElementById('active-tenant-badge');
+  const roleBadge = document.getElementById('active-role-badge');
+
+  function applyPersona(persona) {
+    currentPersona = persona;
+    tabs.forEach(t => t.classList.toggle('active', t.getAttribute('data-persona') === persona));
+    window.spaasActivePersona = persona;
+
+    const navTasks = document.getElementById('nav-tasks');
+    const navDevices = document.getElementById('nav-devices');
+    const navAdvanced = document.getElementById('nav-advanced');
+    const navOverview = document.getElementById('nav-overview');
+
+    if (persona === 'customer') {
+      if (tenantBadge) tenantBadge.textContent = '🏢 Acme Distributed AI Labs (Tenant: default)';
+      if (roleBadge) {
+        roleBadge.textContent = 'Role: CUSTOMER';
+        roleBadge.style.color = '#38bdf8';
+        roleBadge.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+      }
+      if (navTasks) navTasks.style.display = '';
+      if (navDevices) navDevices.style.display = '';
+      if (navAdvanced) navAdvanced.style.display = 'none';
+      switchTab('workloads');
+      showToast('Switched to Customer Compute Console', 'info');
+    } else if (persona === 'provider') {
+      if (tenantBadge) tenantBadge.textContent = '📱 Edge Provider Pool (Fleet: voluntary)';
+      if (roleBadge) {
+        roleBadge.textContent = 'Role: PROVIDER';
+        roleBadge.style.color = '#10b981';
+        roleBadge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+      }
+      if (navTasks) navTasks.style.display = 'none';
+      if (navDevices) navDevices.style.display = '';
+      if (navAdvanced) navAdvanced.style.display = 'none';
+      switchTab('devices');
+      showToast('Switched to Provider Portal — Devices & Local Controls', 'info');
+    } else if (persona === 'admin') {
+      if (tenantBadge) tenantBadge.textContent = '🛡️ Global Platform Master (Tenancy: isolated)';
+      if (roleBadge) {
+        roleBadge.textContent = 'Role: SUPER_ADMIN';
+        roleBadge.style.color = '#f59e0b';
+        roleBadge.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+      }
+      if (navTasks) navTasks.style.display = '';
+      if (navDevices) navDevices.style.display = '';
+      if (navAdvanced) navAdvanced.style.display = '';
+      switchTab('overview');
+      showToast('Switched to Admin Console — Full Fleet & Security Control', 'info');
+    }
+  }
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const persona = tab.getAttribute('data-persona');
+      applyPersona(persona);
+    });
+  });
+
+  // Default persona: Customer Compute Console
+  applyPersona('customer');
+}
+
+// -------------------------------------------------------------
+// Interactive Outcome Planner (Local vs Single Node vs Cluster)
+// -------------------------------------------------------------
+let currentPlanResult = null;
+
+async function runOutcomePlanner() {
+  const selectWorkload = document.getElementById('planner-workload-select');
+  const selectGoal = document.getElementById('planner-goal-select');
+  const btnRun = document.getElementById('btn-run-outcome-planner');
+
+  const workloadType = selectWorkload ? selectWorkload.value : 'matrix';
+  const goal = selectGoal ? selectGoal.value : 'Fastest';
+
+  if (btnRun) {
+    btnRun.disabled = true;
+    btnRun.textContent = '⏳ Analyzing Optimal Strategy...';
+  }
+
+  try {
+    const inputSize = workloadType === 'tiny' ? 4096 : (workloadType === 'hash' ? 10485760 : 1048576);
+    const res = await fetch(`${API_BASE}/api/v1/workloads/analyze-plan`, {
+      method: 'POST',
+      headers: authedHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        workload_type: workloadType,
+        optimization_goal: goal,
+        input_size_bytes: inputSize
+      })
+    });
+
+    if (!res.ok) {
+      throw new Error(`Planner returned HTTP ${res.status}`);
+    }
+
+    const plan = await res.json();
+    currentPlanResult = plan;
+
+    // Update Local Card
+    const elLocalTime = document.getElementById('planner-local-time');
+    if (elLocalTime) elLocalTime.textContent = `${plan.local.predicted_wall_time_ms} ms`;
+
+    // Update Single Node Card
+    const elSingleTime = document.getElementById('planner-single-time');
+    const elSingleSpeedup = document.getElementById('planner-single-speedup');
+    const elSingleCost = document.getElementById('planner-single-cost');
+    const elSingleWhy = document.getElementById('planner-single-why');
+    const elSingleTransfer = document.getElementById('planner-single-transfer');
+
+    if (elSingleTime) elSingleTime.textContent = `${plan.single_node.predicted_wall_time_ms} ms`;
+    if (elSingleSpeedup) elSingleSpeedup.textContent = `${plan.single_node.speedup_factor}x Speedup`;
+    if (elSingleCost) elSingleCost.textContent = `Cost: ${plan.single_node.estimated_cost_credits.toFixed(1)} TEST CR`;
+    if (elSingleWhy) elSingleWhy.textContent = plan.why_this_device;
+    if (elSingleTransfer) elSingleTransfer.textContent = `Transfer: ${plan.single_node.transfer_overhead_ms}ms | Queue: ${plan.single_node.queue_wait_ms}ms`;
+
+    // Update Cluster Card
+    const elClusterTime = document.getElementById('planner-cluster-time');
+    const elClusterSpeedup = document.getElementById('planner-cluster-speedup');
+    const elClusterCost = document.getElementById('planner-cluster-cost');
+    const elClusterWhy = document.getElementById('planner-cluster-why');
+    const elClusterTransfer = document.getElementById('planner-cluster-transfer');
+
+    if (elClusterTime) elClusterTime.textContent = `${plan.cluster.predicted_wall_time_ms} ms`;
+    if (elClusterSpeedup) elClusterSpeedup.textContent = `${plan.cluster.speedup_factor}x Speedup`;
+    if (elClusterCost) elClusterCost.textContent = `Cost: ${plan.cluster.estimated_cost_credits.toFixed(1)} TEST CR`;
+    if (elClusterWhy) elClusterWhy.textContent = plan.why_distribute;
+    if (elClusterTransfer) elClusterTransfer.textContent = `Transfer: ${plan.cluster.transfer_overhead_ms}ms | Aggregation: ${plan.cluster.aggregation_overhead_ms}ms`;
+
+    // Update Decision Banner
+    const bannerTitle = document.getElementById('planner-decision-title');
+    const bannerDesc = document.getElementById('planner-decision-desc');
+
+    const mode = plan.recommendation.mode;
+    const isCluster = mode === 'CLUSTER';
+    const isSingle = mode === 'SINGLE_NODE';
+    const isLocal = mode === 'LOCAL';
+
+    if (bannerTitle) {
+      if (isCluster) {
+        bannerTitle.textContent = `✓ DISTRIBUTION BENEFICIAL (Recommended Mode: HETEROGENEOUS CLUSTER)`;
+        bannerTitle.style.color = '#10b981';
+      } else if (isSingle) {
+        bannerTitle.textContent = `✓ SINGLE REMOTE NODE OPTIMAL (Recommended Mode: SINGLE SPaaS NODE)`;
+        bannerTitle.style.color = '#38bdf8';
+      } else {
+        bannerTitle.textContent = `⚠️ LOCAL CLIENT OPTIMAL (Distribution overhead exceeds compute density)`;
+        bannerTitle.style.color = '#f59e0b';
+      }
+    }
+
+    if (bannerDesc) {
+      bannerDesc.textContent = plan.recommendation.reason;
+    }
+
+    // Card border / highlight cues
+    const cardLocal = document.getElementById('planner-local-card');
+    const cardSingle = document.getElementById('planner-single-card');
+    const cardCluster = document.getElementById('planner-cluster-card');
+
+    if (cardLocal) {
+      cardLocal.style.border = isLocal ? '2px solid #f59e0b' : '1px solid rgba(255,255,255,0.08)';
+      cardLocal.style.background = isLocal ? 'rgba(245, 158, 11, 0.08)' : 'rgba(15, 23, 42, 0.7)';
+    }
+    if (cardSingle) {
+      cardSingle.style.border = isSingle ? '2px solid #38bdf8' : '1px solid rgba(255,255,255,0.08)';
+      cardSingle.style.background = isSingle ? 'rgba(56, 189, 248, 0.08)' : 'rgba(15, 23, 42, 0.7)';
+    }
+    if (cardCluster) {
+      cardCluster.style.border = isCluster ? '2px solid #10b981' : '1px solid rgba(255,255,255,0.08)';
+      cardCluster.style.background = isCluster ? 'rgba(16, 185, 129, 0.08)' : 'rgba(15, 23, 42, 0.7)';
+    }
+
+    showToast(`Planner evaluated: ${mode} recommended (${plan.recommendation.reason})`, 'success');
+  } catch (err) {
+    console.error('[SPaaS Outcome Planner] Error:', err);
+    showToast(`Outcome planner error: ${err.message}`, 'error');
+  } finally {
+    if (btnRun) {
+      btnRun.disabled = false;
+      btnRun.textContent = '⚡ Calculate Optimal Outcome Plan';
+    }
+  }
+}
+
+function initOutcomePlanner() {
+  const btnRun = document.getElementById('btn-run-outcome-planner');
+  if (btnRun) {
+    btnRun.addEventListener('click', runOutcomePlanner);
+  }
+
+  const selectWorkload = document.getElementById('planner-workload-select');
+  if (selectWorkload) {
+    selectWorkload.addEventListener('change', runOutcomePlanner);
+  }
+
+  const selectGoal = document.getElementById('planner-goal-select');
+  if (selectGoal) {
+    selectGoal.addEventListener('change', runOutcomePlanner);
+  }
+
+  const btnExecute = document.getElementById('btn-execute-planned-outcome');
+  if (btnExecute) {
+    btnExecute.addEventListener('click', async () => {
+      const selectWorkload = document.getElementById('planner-workload-select');
+      const workloadType = selectWorkload ? selectWorkload.value : 'matrix';
+      const presetKey = workloadType === 'hash' ? 'sha256' : (workloadType === 'compress' ? 'compress' : (workloadType === 'image' ? 'image' : (workloadType === 'ai' ? 'ai' : 'matrix')));
+
+      btnExecute.disabled = true;
+      btnExecute.textContent = '🚀 Dispatching Workload...';
+
+      try {
+        loadCatalogPreset(presetKey);
+        await submitCurrentWorkload();
+        switchTab('jobs');
+        showToast('Workload dispatched with optimal outcome configuration!', 'success');
+      } catch (err) {
+        showToast(`Dispatch failed: ${err.message}`, 'error');
+      } finally {
+        btnExecute.disabled = false;
+        btnExecute.textContent = '🚀 Confirm & Dispatch Workload';
+      }
+    });
+  }
+
+  // Pre-calculate default plan on startup
+  setTimeout(runOutcomePlanner, 800);
+}
+
+// -------------------------------------------------------------
+// Provider Job Offer (ASK ME Mode) Modal Logic
+// -------------------------------------------------------------
+let currentActiveOffer = null;
+
+function initProviderJobOfferModal() {
+  const modal = document.getElementById('modal-job-offer');
+  const btnClose = document.getElementById('modal-job-offer-close');
+  const btnDecline = document.getElementById('btn-offer-decline');
+  const btnAlways = document.getElementById('btn-offer-always');
+  const btnAccept = document.getElementById('btn-offer-accept');
+
+  const closeModal = () => {
+    if (modal) modal.classList.add('hidden');
+    currentActiveOffer = null;
+  };
+
+  if (btnClose) btnClose.addEventListener('click', closeModal);
+
+  if (btnDecline) {
+    btnDecline.addEventListener('click', () => {
+      if (!currentActiveOffer) return closeModal();
+      respondToJobOffer(currentActiveOffer.job_id, 'DECLINE');
+      closeModal();
+    });
+  }
+
+  if (btnAlways) {
+    btnAlways.addEventListener('click', () => {
+      if (!currentActiveOffer) return closeModal();
+      respondToJobOffer(currentActiveOffer.job_id, 'ALWAYS_ALLOW');
+      closeModal();
+    });
+  }
+
+  if (btnAccept) {
+    btnAccept.addEventListener('click', () => {
+      if (!currentActiveOffer) return closeModal();
+      respondToJobOffer(currentActiveOffer.job_id, 'ACCEPT');
+      closeModal();
+    });
+  }
+
+  window.spaasShowJobOffer = function(offer) {
+    currentActiveOffer = offer;
+    if (!modal) return;
+    const titleEl = document.getElementById('offer-workload-title');
+    const idEl = document.getElementById('offer-job-id');
+    const descEl = document.getElementById('offer-workload-desc');
+    const durationEl = document.getElementById('offer-est-duration');
+    const fuelEl = document.getElementById('offer-fuel-limit');
+    const ramEl = document.getElementById('offer-ram-limit');
+    const rewardEl = document.getElementById('offer-reward-amount');
+
+    if (titleEl) titleEl.textContent = offer.workload_name || 'Sandboxed Compute Task';
+    if (idEl) idEl.textContent = `Job ID: ${offer.job_id}`;
+    if (descEl) descEl.textContent = offer.description || 'Customer requested WASM compute on compatible node with charging safeguard.';
+    if (durationEl) durationEl.textContent = `${offer.estimated_duration_ms || 120} ms`;
+    if (fuelEl) fuelEl.textContent = `${(offer.max_fuel || 25000000).toLocaleString()} Fuel`;
+    if (ramEl) ramEl.textContent = `${offer.max_memory_mb || 16} MB`;
+    if (rewardEl) rewardEl.textContent = `+${(offer.provider_reward_credits || 12.5).toFixed(1)} TEST CR`;
+
+    modal.classList.remove('hidden');
+  };
+
+  window.spaasRespondToOffer = function(action) {
+    if (currentActiveOffer) {
+      respondToJobOffer(currentActiveOffer.job_id, action);
+      closeModal();
+    }
+  };
+}
+
+async function respondToJobOffer(jobId, action) {
+  try {
+    const nodeId = (cachedNodes && cachedNodes[0] && (cachedNodes[0].node_id || cachedNodes[0].id)) || 'local-provider-node';
+    const res = await fetch(`${API_BASE}/api/v1/nodes/${encodeURIComponent(nodeId)}/offers/${encodeURIComponent(jobId)}/respond`, {
+      method: 'POST',
+      headers: authedHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ action })
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    showToast(`Job offer ${action.toLowerCase()}ed: ${data.message || 'Updated'}`, 'success');
+    refreshAllData();
+  } catch (err) {
+    showToast(`Offer response error: ${err.message}`, 'error');
+  }
+}
+
+// -------------------------------------------------------------
+// Triple-Entry Reconciliation & Platform Fee Economics
+// -------------------------------------------------------------
+async function fetchTripleEntryReconciliation() {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/billing/reconciliation`, {
+      headers: authedHeaders()
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const debitsEl = document.getElementById('ledger-total-debits');
+    const creditsEl = document.getElementById('ledger-total-credits');
+    const feeEl = document.getElementById('ledger-platform-fee');
+    const feePctEl = document.getElementById('ledger-platform-fee-pct');
+    const statusEl = document.getElementById('ledger-invariant-status');
+    const inputFee = document.getElementById('input-platform-fee-pct');
+
+    if (debitsEl) debitsEl.textContent = `-${data.total_customer_gross_debits.toFixed(4)} TEST CR`;
+    if (creditsEl) creditsEl.textContent = `+${data.total_provider_net_credits.toFixed(4)} TEST CR`;
+    if (feeEl) feeEl.textContent = `+${data.total_platform_fee_revenue.toFixed(4)} TEST CR`;
+    if (feePctEl) feePctEl.textContent = `Fee: ${data.platform_fee_pct.toFixed(1)}%`;
+    if (inputFee && !inputFee.matches(':focus')) inputFee.value = data.platform_fee_pct.toFixed(1);
+
+    if (statusEl) {
+      if (data.is_balanced) {
+        statusEl.textContent = `⚖️ 100% RECONCILED (0.00 CR Discrepancy)`;
+        statusEl.style.color = '#10b981';
+      } else {
+        statusEl.textContent = `⚠️ DISCREPANCY: ${data.discrepancy.toFixed(4)} CR`;
+        statusEl.style.color = '#ef4444';
+      }
+    }
+  } catch (err) {
+    console.warn('[SPaaS] Failed to fetch reconciliation:', err);
+  }
+}
+
+function initReconciliationAndFeeControls() {
+  const btnSaveFee = document.getElementById('btn-save-platform-fee');
+  if (btnSaveFee) {
+    btnSaveFee.addEventListener('click', async () => {
+      const input = document.getElementById('input-platform-fee-pct');
+      const val = parseFloat(input ? input.value : '15');
+      if (isNaN(val) || val < 0 || val > 100) {
+        return showToast('Invalid platform fee percentage (0-100)', 'error');
+      }
+      btnSaveFee.disabled = true;
+      btnSaveFee.textContent = 'Saving...';
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/billing/config`, {
+          method: 'PUT',
+          headers: authedHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ platform_fee_pct: val })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        showToast(`Platform fee updated to ${val.toFixed(1)}%!`, 'success');
+        await fetchTripleEntryReconciliation();
+      } catch (err) {
+        showToast(`Failed to update fee: ${err.message}`, 'error');
+      } finally {
+        btnSaveFee.disabled = false;
+        btnSaveFee.textContent = 'Update Fee';
+      }
+    });
+  }
+
+  const btnAudit = document.getElementById('btn-audit-reconciliation');
+  if (btnAudit) {
+    btnAudit.addEventListener('click', async () => {
+      btnAudit.disabled = true;
+      btnAudit.textContent = 'Auditing...';
+      try {
+        await fetchTripleEntryReconciliation();
+        showToast('Triple-entry reconciliation verified: Gross Customer Debits = Net Provider Credits + Platform Fee Revenue', 'success');
+      } finally {
+        btnAudit.disabled = false;
+        btnAudit.textContent = '🔍 Verify Audit Ledger';
+      }
+    });
+  }
+
+  const btnTriggerFault = document.getElementById('btn-trigger-fault-recovery');
+  if (btnTriggerFault) {
+    btnTriggerFault.addEventListener('click', async () => {
+      btnTriggerFault.disabled = true;
+      btnTriggerFault.textContent = '🧪 Injecting Fault & Rescheduling...';
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/jobs/sharded/fail-and-recover`, {
+          method: 'POST',
+          headers: authedHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({
+            workload_name: 'Parallel Batch Matrix Shards',
+            total_shards: 4,
+            failed_shard_index: 2
+          })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        showToast(`Fault injected in shard ${data.failed_shard_id} → Rescheduled to node ${data.recovered_node_id} → All 4 shards verified & settled!`, 'success', 6000);
+        await refreshAllData();
+        await fetchTripleEntryReconciliation();
+      } catch (err) {
+        showToast(`Fault demo failed: ${err.message}`, 'error');
+      } finally {
+        btnTriggerFault.disabled = false;
+        btnTriggerFault.textContent = '🧪 Run Sharded Fault-Recovery & Settlement Demo';
+      }
+    });
+  }
+
+  // Poll reconciliation periodically on startup
+  fetchTripleEntryReconciliation();
 }

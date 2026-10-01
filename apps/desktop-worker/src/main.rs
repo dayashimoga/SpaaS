@@ -437,9 +437,18 @@ async fn handle_run(
                             workload_id
                         );
 
+                        let custom_wasm_bytes = job
+                            .get("wasm_bytes")
+                            .and_then(|v| v.as_str())
+                            .and_then(|b64| {
+                                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
+                                    .or_else(|_| base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, b64))
+                                    .ok()
+                            });
+
                         // Execute WASM workload
                         let exec_res =
-                            execute_wasm_workload(workload_id, parsed_uuid, &identity.keypair)
+                            execute_wasm_workload(workload_id, custom_wasm_bytes, parsed_uuid, &identity.keypair)
                                 .await;
                         jobs_executed += 1;
                         credits_earned += 10;
@@ -453,7 +462,8 @@ async fn handle_run(
                             "exit_code": exec_res.0,
                             "stdout": exec_res.1,
                             "fuel_used": exec_res.2,
-                            "duration_ms": exec_res.3
+                            "duration_ms": exec_res.3,
+                            "result_digest": exec_res.4
                         });
 
                         let mut res_req = client.post(&result_url).json(&result_payload);
@@ -501,15 +511,20 @@ async fn handle_run(
 
 async fn execute_wasm_workload(
     workload_id: &str,
+    custom_wasm: Option<Vec<u8>>,
     node_id: uuid::Uuid,
     keypair: &KeyPair,
-) -> (i32, String, u64, u64) {
+) -> (i32, String, u64, u64, String) {
     let runtime = WasmWasiRuntime::new();
-    let wasm_bytes = match workload_id {
-        "matrix_compute" => include_bytes!("../../../fixtures/matrix_compute.wasm").to_vec(),
-        "sha256_hasher" => include_bytes!("../../../fixtures/sha256_hasher.wasm").to_vec(),
-        "prime_sieve" => include_bytes!("../../../fixtures/prime_sieve.wasm").to_vec(),
-        _ => include_bytes!("../../../fixtures/hello_wasi_clean.wasm").to_vec(),
+    let wasm_bytes = if let Some(bytes) = custom_wasm {
+        bytes
+    } else {
+        match workload_id {
+            "matrix_compute" => include_bytes!("../../../fixtures/matrix_compute.wasm").to_vec(),
+            "sha256_hasher" => include_bytes!("../../../fixtures/sha256_hasher.wasm").to_vec(),
+            "prime_sieve" => include_bytes!("../../../fixtures/prime_sieve.wasm").to_vec(),
+            _ => include_bytes!("../../../fixtures/hello_wasi_clean.wasm").to_vec(),
+        }
     };
 
     let spec = spaas_protocol::workload::WorkloadSpec {
@@ -553,8 +568,15 @@ async fn execute_wasm_workload(
             res.stdout,
             res.fuel_consumed,
             res.wall_time_ms,
+            res.result_digest,
         ),
-        Err(err) => (1, format!("Runtime error: {}", err), 100_000, 10),
+        Err(err) => (
+            1,
+            format!("Runtime error: {}", err),
+            100_000,
+            10,
+            "error_digest".to_string(),
+        ),
     }
 }
 
