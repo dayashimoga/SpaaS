@@ -79,6 +79,7 @@ function createMinimalFallbackEngine() {
     jobs: new Map(),
     job_transitions: new Map(),
     leases: new Map(),
+    idempotency_keys: new Map(),
     device_sessions: new Map(),
     ledger: new Map(),
     node_commands: new Map(),
@@ -194,8 +195,16 @@ function createMinimalFallbackEngine() {
 
       // NODES
       if (qu.startsWith("INSERT OR REPLACE INTO NODES") || qu.startsWith("INSERT INTO NODES")) {
-        const id = params[0];
-        const isSimulated = (qu.includes("'READY', 1") || qu.includes(", 1,") || qu.includes(", 1 ,")) ? 1 : 0;
+        let id = params[0];
+        let name = params[1] || "Node";
+        let device_type = params[2] || "android";
+        let nodeState = "Ready";
+        if (qu.includes("'REVOKED'")) nodeState = "Revoked";
+        else if (qu.includes("'BUSY'")) nodeState = "Busy";
+        else if (qu.includes("'PAUSED'")) nodeState = "Paused";
+        else if (qu.includes("'OFFLINE'")) nodeState = "Offline";
+
+        let isSimulated = (qu.includes("'READY', 1") || qu.includes(", 1,") || qu.includes(", 1 ,")) ? 1 : 0;
         let last_heartbeat = Date.now();
         let created_at = Date.now();
         let public_key = "ed25519_pk";
@@ -204,6 +213,60 @@ function createMinimalFallbackEngine() {
         let qualification = null;
         let policy = null;
         let telemetry = null;
+
+        const colMatch = q.match(/INSERT\s+(?:OR\s+REPLACE\s+)?INTO\s+nodes\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
+        if (colMatch) {
+          const cols = colMatch[1].split(",").map(c => c.trim().toLowerCase());
+          const valTokens = colMatch[2].split(",").map(v => v.trim());
+          let pIdx = 0;
+          const row = {};
+          for (let i = 0; i < cols.length; i++) {
+            const col = cols[i];
+            const vToken = valTokens[i];
+            if (vToken === "?") {
+              row[col] = params[pIdx++];
+            } else if (vToken.toUpperCase() === "NULL") {
+              row[col] = null;
+            } else if (vToken.startsWith("'") && vToken.endsWith("'")) {
+              row[col] = vToken.slice(1, -1);
+            } else if (!isNaN(Number(vToken))) {
+              row[col] = Number(vToken);
+            } else {
+              row[col] = vToken;
+            }
+          }
+          if (row.id !== undefined) id = row.id;
+          if (row.name !== undefined) name = row.name;
+          if (row.device_type !== undefined) device_type = row.device_type;
+          if (row.state !== undefined) nodeState = row.state;
+          if (row.is_simulated !== undefined) isSimulated = row.is_simulated;
+          if (row.last_heartbeat !== undefined) last_heartbeat = row.last_heartbeat;
+          if (row.created_at !== undefined) created_at = row.created_at;
+          if (row.public_key !== undefined) public_key = row.public_key;
+          if (row.auth_token !== undefined) auth_token = row.auth_token;
+          if (row.capabilities !== undefined) capabilities = row.capabilities;
+          if (row.qualification !== undefined) qualification = row.qualification;
+          if (row.policy !== undefined) policy = row.policy;
+          if (row.telemetry !== undefined) telemetry = row.telemetry;
+
+          tables.nodes.set(id, {
+            id,
+            name,
+            device_type,
+            public_key,
+            auth_token,
+            state: nodeState,
+            capabilities,
+            qualification,
+            policy,
+            telemetry,
+            is_simulated: isSimulated,
+            version_id: 1,
+            last_heartbeat,
+            created_at
+          });
+          return [];
+        }
 
         if (qu.includes("QUALIFICATION") && params.length === 8) {
           capabilities = params[3] || null;
@@ -253,7 +316,7 @@ function createMinimalFallbackEngine() {
           created_at = params[6] || Date.now();
         }
 
-        let nodeState = "Ready";
+        nodeState = "Ready";
         if (qu.includes("'REVOKED'")) nodeState = "Revoked";
         else if (qu.includes("'BUSY'")) nodeState = "Busy";
         else if (qu.includes("'PAUSED'")) nodeState = "Paused";
@@ -271,6 +334,7 @@ function createMinimalFallbackEngine() {
           policy,
           telemetry,
           is_simulated: isSimulated,
+          version_id: 1,
           last_heartbeat,
           created_at
         });
@@ -315,7 +379,11 @@ function createMinimalFallbackEngine() {
           [state, id] = params;
         }
         const n = tables.nodes.get(id);
-        if (n) n.state = state;
+        if (n) {
+          if (qu.includes("STATE != 'REVOKED'") && n.state === "Revoked") return [];
+          n.state = state;
+          if (qu.includes("VERSION_ID =")) n.version_id = (n.version_id || 1) + 1;
+        }
         return [];
       }
       if (qu.startsWith("UPDATE NODES SET NAME =")) {
@@ -331,9 +399,21 @@ function createMinimalFallbackEngine() {
         return [];
       }
       if (qu.startsWith("UPDATE NODES SET POLICY =")) {
-        const [policy, id] = params;
-        const n = tables.nodes.get(id);
-        if (n) n.policy = policy;
+        if (qu.includes("VERSION_ID =")) {
+          const [policy, version_id, id] = params;
+          const n = tables.nodes.get(id);
+          if (n) {
+            n.policy = policy;
+            n.version_id = version_id;
+          }
+        } else {
+          const [policy, id] = params;
+          const n = tables.nodes.get(id);
+          if (n) {
+            n.policy = policy;
+            n.version_id = (n.version_id || 1) + 1;
+          }
+        }
         return [];
       }
       if (qu.startsWith("UPDATE NODES SET TELEMETRY =")) {
@@ -410,6 +490,80 @@ function createMinimalFallbackEngine() {
 
       // JOBS
       if (qu.startsWith("INSERT INTO JOBS")) {
+        let id = params[0];
+        let workload_id = params[1] || "workload";
+        let state = qu.includes("'RUNNING'") ? "Running" : qu.includes("'COMPLETED'") ? "Completed" : "Pending";
+        let assigned_node_id = null;
+        let lease_term = 1;
+        let lease_expires_at = null;
+        let epoch = 1;
+        let fencing_token = null;
+        let retry_count = 0;
+        let max_retries = 3;
+        let scheduler_decision = null;
+        let correlation_id = null;
+        let version_id = 1;
+        let created_at = Date.now();
+        let completed_at = null;
+
+        const colMatch = q.match(/INSERT\s+(?:OR\s+REPLACE\s+)?INTO\s+jobs\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
+        if (colMatch) {
+          const cols = colMatch[1].split(",").map(c => c.trim().toLowerCase());
+          const valTokens = colMatch[2].split(",").map(v => v.trim());
+          let pIdx = 0;
+          const row = {};
+          for (let i = 0; i < cols.length; i++) {
+            const col = cols[i];
+            const vToken = valTokens[i];
+            if (vToken === "?") {
+              row[col] = params[pIdx++];
+            } else if (vToken.toUpperCase() === "NULL") {
+              row[col] = null;
+            } else if (vToken.startsWith("'") && vToken.endsWith("'")) {
+              row[col] = vToken.slice(1, -1);
+            } else if (!isNaN(Number(vToken))) {
+              row[col] = Number(vToken);
+            } else {
+              row[col] = vToken;
+            }
+          }
+          if (row.id !== undefined) id = row.id;
+          if (row.workload_id !== undefined) workload_id = row.workload_id;
+          if (row.state !== undefined) state = row.state;
+          if (row.assigned_node_id !== undefined) assigned_node_id = row.assigned_node_id;
+          if (row.lease_term !== undefined) lease_term = row.lease_term;
+          if (row.lease_expires_at !== undefined) lease_expires_at = row.lease_expires_at;
+          if (row.epoch !== undefined) epoch = row.epoch;
+          if (row.fencing_token !== undefined) fencing_token = row.fencing_token;
+          if (row.retry_count !== undefined) retry_count = row.retry_count;
+          if (row.max_retries !== undefined) max_retries = row.max_retries;
+          if (row.scheduler_decision !== undefined) scheduler_decision = row.scheduler_decision;
+          if (row.correlation_id !== undefined) correlation_id = row.correlation_id;
+          if (row.version_id !== undefined) version_id = row.version_id;
+          if (row.created_at !== undefined) created_at = row.created_at;
+          if (row.completed_at !== undefined) completed_at = row.completed_at;
+
+          tables.jobs.set(id, {
+            id,
+            workload_id,
+            state,
+            assigned_node_id,
+            lease_term,
+            lease_expires_at,
+            epoch,
+            fencing_token,
+            retry_count,
+            max_retries,
+            result: null,
+            scheduler_decision,
+            correlation_id,
+            version_id: version_id || 1,
+            created_at: created_at || Date.now(),
+            completed_at
+          });
+          return [];
+        }
+
         if (qu.includes("FENCING_TOKEN") && params.length >= 8) {
           let jId, wId, jState, aNodeId, lTerm = 1, lExpires, ep = 1, fToken, rCount = 0, mRetries = 3, sDecision = null, corrId = null, cAt;
           if (params.length === 13) {
@@ -431,23 +585,12 @@ function createMinimalFallbackEngine() {
             result: null,
             scheduler_decision: sDecision,
             correlation_id: corrId,
+            version_id: 1,
             created_at: cAt || Date.now(),
             completed_at: null
           });
           return [];
         }
-        let id = params[0];
-        let workload_id = params[1] || "workload";
-        let state = qu.includes("'RUNNING'") ? "Running" : qu.includes("'COMPLETED'") ? "Completed" : "Pending";
-        let assigned_node_id = null;
-        let lease_expires_at = null;
-        let retry_count = 0;
-        let max_retries = 3;
-        let correlation_id = null;
-        let created_at = Date.now();
-
-        let fencing_token = null;
-        let scheduler_decision = null;
 
         // Check if id is inlined or query has OFFERED
         const inlinedMatch = q.match(/VALUES\s*\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']+)'/i);
@@ -514,6 +657,7 @@ function createMinimalFallbackEngine() {
           result: null,
           scheduler_decision,
           correlation_id,
+          version_id: 1,
           created_at,
           completed_at: null
         });
@@ -536,12 +680,16 @@ function createMinimalFallbackEngine() {
         return [];
       }
       if (qu.startsWith("UPDATE JOBS SET STATE = 'COMPLETED'")) {
-        const [result, completed_at, id] = params;
+        const id = params[params.length - 1];
         const j = tables.jobs.get(id);
         if (j) {
           j.state = "COMPLETED";
-          j.result = result;
-          j.completed_at = completed_at;
+          if (qu.includes("RESULT = ?")) {
+            j.result = params[0];
+          }
+          if (qu.includes("COMPLETED_AT = ?")) {
+            j.completed_at = params[1] || Date.now();
+          }
         }
         return [];
       }
@@ -587,8 +735,14 @@ function createMinimalFallbackEngine() {
         const j = tables.jobs.get(id);
         if (j) {
           j.state = state;
+          if (qu.includes("ASSIGNED_NODE_ID = ?") && params.length >= 3) {
+            j.assigned_node_id = params[1];
+          }
           if (qu.includes("NEXT_ACTION = ?")) {
             j.next_action = params[1];
+          }
+          if (qu.includes("VERSION_ID =")) {
+            j.version_id = (j.version_id || 1) + 1;
           }
         }
         return [];
@@ -721,21 +875,111 @@ function createMinimalFallbackEngine() {
 
       // LEASES
       if (qu.startsWith("INSERT OR REPLACE INTO LEASES") || qu.startsWith("INSERT INTO LEASES")) {
-        const [lease_id, job_id, node_id, fencing_token, epoch, expires_at, state, created_at] = params;
-        tables.leases.set(lease_id, { lease_id, job_id, node_id, fencing_token, epoch: epoch || 1, expires_at, state: state || "ACTIVE", created_at: created_at || Date.now() });
+        let lease_id = params[0];
+        let job_id = params[1];
+        let node_id = params[2];
+        let fencing_token = params[3];
+        let epoch = 1;
+        let expires_at = Date.now() + 60000;
+        let state = "ACTIVE";
+        let created_at = Date.now();
+
+        const colMatch = q.match(/INSERT\s+(?:OR\s+REPLACE\s+)?INTO\s+leases\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/i);
+        if (colMatch) {
+          const cols = colMatch[1].split(",").map(c => c.trim().toLowerCase());
+          const valTokens = colMatch[2].split(",").map(v => v.trim());
+          let pIdx = 0;
+          const row = {};
+          for (let i = 0; i < cols.length; i++) {
+            const col = cols[i];
+            const vToken = valTokens[i];
+            if (vToken === "?") {
+              row[col] = params[pIdx++];
+            } else if (vToken.toUpperCase() === "NULL") {
+              row[col] = null;
+            } else if (vToken.startsWith("'") && vToken.endsWith("'")) {
+              row[col] = vToken.slice(1, -1);
+            } else if (!isNaN(Number(vToken))) {
+              row[col] = Number(vToken);
+            } else {
+              row[col] = vToken;
+            }
+          }
+          if (row.lease_id !== undefined) lease_id = row.lease_id;
+          if (row.job_id !== undefined) job_id = row.job_id;
+          if (row.node_id !== undefined) node_id = row.node_id;
+          if (row.fencing_token !== undefined) fencing_token = row.fencing_token;
+          if (row.epoch !== undefined) epoch = row.epoch;
+          if (row.expires_at !== undefined) expires_at = row.expires_at;
+          if (row.state !== undefined) state = row.state;
+          if (row.created_at !== undefined) created_at = row.created_at;
+        } else if (params.length === 8) {
+          [lease_id, job_id, node_id, fencing_token, epoch, expires_at, state, created_at] = params;
+        } else if (params.length >= 4) {
+          [lease_id, job_id, node_id, fencing_token] = params;
+          if (params[4] !== undefined) expires_at = params[4];
+        }
+
+        tables.leases.set(lease_id, {
+          lease_id,
+          job_id,
+          node_id,
+          fencing_token,
+          epoch: epoch || 1,
+          expires_at,
+          state: state || "ACTIVE",
+          created_at: created_at || Date.now()
+        });
         return [];
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM LEASES WHERE JOB_ID =")) {
         const jobId = params[0];
-        return Array.from(tables.leases.values()).filter(l => l.job_id === jobId);
+        const fencingToken = params[1];
+        let list = Array.from(tables.leases.values()).filter(l => l.job_id === jobId);
+        if (fencingToken && qu.includes("FENCING_TOKEN =")) {
+          list = list.filter(l => l.fencing_token === fencingToken);
+        }
+        if (qu.includes("ORDER BY CREATED_AT DESC")) {
+          list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+        } else if (qu.includes("ORDER BY CREATED_AT ASC")) {
+          list.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+        }
+        if (qu.includes("LIMIT 1")) {
+          return list.slice(0, 1);
+        }
+        return list;
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM LEASES WHERE NODE_ID =")) {
+        const nodeId = params[0];
+        let list = Array.from(tables.leases.values()).filter(l => l.node_id === nodeId);
+        if (qu.includes("STATE = 'ACTIVE'")) {
+          list = list.filter(l => l.state === "ACTIVE");
+        }
+        return list;
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM LEASES WHERE LEASE_ID =")) {
         const leaseId = params[0];
         const l = tables.leases.get(leaseId);
         return l ? [l] : [];
       }
+      if (qu.startsWith("SELECT") && qu.includes("FROM LEASES WHERE STATE = 'ACTIVE'")) {
+        return Array.from(tables.leases.values()).filter(l => l.state === "ACTIVE");
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM LEASES")) {
+        return Array.from(tables.leases.values());
+      }
       if (qu.startsWith("UPDATE LEASES SET STATE =")) {
-        const [st, leaseId] = params;
+        if (qu.includes("WHERE JOB_ID =")) {
+          const st = qu.includes("'EXPIRED'") ? "EXPIRED" : (params[0] || "EXPIRED");
+          const jobId = params[params.length - 1];
+          for (const l of tables.leases.values()) {
+            if (l.job_id === jobId && (qu.includes("STATE = 'ACTIVE'") ? l.state === "ACTIVE" : true)) {
+              l.state = st;
+            }
+          }
+          return [];
+        }
+        const [st, leaseId] = params.length >= 2 ? params : [qu.includes("'EXPIRED'") ? "EXPIRED" : "ACTIVE", params[0]];
         const l = tables.leases.get(leaseId);
         if (l) l.state = st;
         return [];
@@ -779,6 +1023,37 @@ function createMinimalFallbackEngine() {
           s.active_lease_id = null;
           s.active_job_id = null;
           s.updated_at = updated_at;
+        }
+        return [];
+      }
+
+      // IDEMPOTENCY_KEYS
+      if (qu.startsWith("INSERT OR REPLACE INTO IDEMPOTENCY_KEYS") || qu.startsWith("INSERT INTO IDEMPOTENCY_KEYS")) {
+        const [key, endpoint, request_hash, response_status, response_body, created_at, expires_at] = params;
+        tables.idempotency_keys.set(key, {
+          key,
+          endpoint,
+          request_hash,
+          response_status: Number(response_status),
+          response_body,
+          created_at: Number(created_at) || Date.now(),
+          expires_at: Number(expires_at) || Date.now() + 86400000
+        });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM IDEMPOTENCY_KEYS WHERE KEY =")) {
+        const key = params[0];
+        const rec = tables.idempotency_keys.get(key);
+        return rec ? [rec] : [];
+      }
+      if (qu.startsWith("DELETE FROM IDEMPOTENCY_KEYS WHERE KEY =")) {
+        tables.idempotency_keys.delete(params[0]);
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM IDEMPOTENCY_KEYS WHERE EXPIRES_AT <=")) {
+        const thresh = Number(params[0]);
+        for (const [k, v] of tables.idempotency_keys.entries()) {
+          if (v.expires_at <= thresh) tables.idempotency_keys.delete(k);
         }
         return [];
       }

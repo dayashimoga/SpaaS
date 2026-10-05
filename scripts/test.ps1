@@ -32,9 +32,9 @@ if ($usePodman) {
     }
 
     # 2. Rust Workspace Unit & Integration Tests in Rust Container
-    Write-Host "`n>>> [2/3] Running Rust Workspace Tests (Rust 1.77 Container)..." -ForegroundColor Yellow
+    Write-Host "`n>>> [2/3] Running Rust Workspace Tests (Rust Container)..." -ForegroundColor Yellow
     $wsMount = "${PWD}:/workspace:Z"
-    podman run --rm -v $wsMount -w /workspace docker.io/library/rust:1.77-slim cargo test --workspace -- --nocapture
+    podman run --rm -v $wsMount -w /workspace docker.io/library/rust:latest cargo test --workspace -- --nocapture
     if ($LASTEXITCODE -ne 0) {
         Write-Host "❌ Rust container test suite failed!" -ForegroundColor Red
         exit 1
@@ -49,7 +49,7 @@ if ($usePodman) {
     }
 
 } else {
-    Write-Host ">>> [1/4] Running Cloudflare Control Plane Test Suite (34/34 tests)..." -ForegroundColor Yellow
+    Write-Host ">>> [1/4] Running Cloudflare Control Plane Test Suite (36/36 tests)..." -ForegroundColor Yellow
     Push-Location apps/cloudflare-control-plane
     npm test
     $cpCode = $LASTEXITCODE

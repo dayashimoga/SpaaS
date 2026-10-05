@@ -5,11 +5,14 @@ import QRCode from 'qrcode';
 // smartphone-first pairing, dual-mode manifest studio, and unified jobs view.
 
 function getAuthToken() {
-  const token = localStorage.getItem('spaas_admin_token');
-  if (!token) {
-    console.warn('[SPaaS] No admin token configured. Set one in Administration → Settings.');
+  const persona = window.spaasActivePersona || localStorage.getItem('spaas_active_persona') || 'customer';
+  if (persona === 'admin') {
+    return localStorage.getItem('spaas_admin_token') || 'token_super_admin';
+  } else if (persona === 'provider') {
+    return localStorage.getItem('spaas_provider_token') || 'token_provider';
+  } else {
+    return localStorage.getItem('spaas_customer_token') || 'token_customer';
   }
-  return token || '';
 }
 
 function authedHeaders(existingHeaders = {}) {
@@ -4951,6 +4954,7 @@ function initPersonaSwitcher() {
 
   function applyPersona(persona) {
     currentPersona = persona;
+    localStorage.setItem('spaas_active_persona', persona);
     tabs.forEach(t => t.classList.toggle('active', t.getAttribute('data-persona') === persona));
     window.spaasActivePersona = persona;
 
@@ -5014,6 +5018,41 @@ function initPersonaSwitcher() {
 // -------------------------------------------------------------
 let currentPlanResult = null;
 
+function clearPlannerCards(placeholder = '—') {
+  const ids = [
+    'planner-local-time',
+    'planner-single-time',
+    'planner-single-speedup',
+    'planner-single-cost',
+    'planner-single-why',
+    'planner-single-transfer',
+    'planner-cluster-time',
+    'planner-cluster-speedup',
+    'planner-cluster-cost',
+    'planner-cluster-why',
+    'planner-cluster-transfer'
+  ];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = placeholder;
+  });
+  const cardLocal = document.getElementById('planner-local-card');
+  const cardSingle = document.getElementById('planner-single-card');
+  const cardCluster = document.getElementById('planner-cluster-card');
+  if (cardLocal) {
+    cardLocal.style.border = '1px solid rgba(255,255,255,0.08)';
+    cardLocal.style.background = 'rgba(15, 23, 42, 0.7)';
+  }
+  if (cardSingle) {
+    cardSingle.style.border = '1px solid rgba(255,255,255,0.08)';
+    cardSingle.style.background = 'rgba(15, 23, 42, 0.7)';
+  }
+  if (cardCluster) {
+    cardCluster.style.border = '1px solid rgba(255,255,255,0.08)';
+    cardCluster.style.background = 'rgba(15, 23, 42, 0.7)';
+  }
+}
+
 async function runOutcomePlanner() {
   const selectWorkload = document.getElementById('planner-workload-select');
   const selectGoal = document.getElementById('planner-goal-select');
@@ -5026,6 +5065,9 @@ async function runOutcomePlanner() {
     btnRun.disabled = true;
     btnRun.textContent = '⏳ Analyzing Optimal Strategy...';
   }
+
+  // Reset planner card values to calculating state to eliminate stale metrics
+  clearPlannerCards('⏳ Calculating...');
 
   try {
     const inputSize = workloadType === 'tiny' ? 4096 : (workloadType === 'hash' ? 10485760 : 1048576);
@@ -5046,9 +5088,33 @@ async function runOutcomePlanner() {
     const plan = await res.json();
     currentPlanResult = plan;
 
+    // Support canonical typed strategies schema with backward-compatible fallbacks
+    const local = plan.strategies?.local || plan.plans?.local || plan.local || {};
+    const single = plan.strategies?.single_node || plan.plans?.single_node || plan.single_node || {};
+    const cluster = plan.strategies?.cluster || plan.plans?.cluster || plan.cluster || {};
+    const rec = plan.recommendation || {
+      mode: plan.recommended_mode || 'SINGLE_NODE',
+      reason: plan.recommendation_reason || ''
+    };
+
+    const localTime = local.predicted_wall_time_ms ?? local.total_wall_time_ms ?? 0;
+    const singleTime = single.predicted_wall_time_ms ?? single.total_wall_time_ms ?? 0;
+    const singleSpeedup = typeof single.speedup_factor === 'number' ? `${single.speedup_factor.toFixed(2)}x` : (single.speedup_factor || '1.00x');
+    const singleCost = Number(single.cost?.credits ?? single.estimated_cost_credits ?? single.cost_credits ?? 0).toFixed(1);
+    const singleWhy = plan.why_this_device || single.tradeoff_summary || single.why_this_device || 'Verified hardware suitability.';
+    const singleTransfer = single.time_breakdown?.transfer_upload_ms ?? single.transfer_overhead_ms ?? single.transfer_upload_ms ?? 0;
+    const singleQueue = single.time_breakdown?.queue_wait_ms ?? single.queue_wait_ms ?? 0;
+
+    const clusterTime = cluster.predicted_wall_time_ms ?? cluster.total_wall_time_ms ?? 0;
+    const clusterSpeedup = typeof cluster.speedup_factor === 'number' ? `${cluster.speedup_factor.toFixed(2)}x` : (cluster.speedup_factor || `${cluster.speedup_factor_vs_single || '1.00x'}`);
+    const clusterCost = Number(cluster.cost?.credits ?? cluster.estimated_cost_credits ?? cluster.cost_credits ?? 0).toFixed(1);
+    const clusterWhy = plan.why_distribute || cluster.tradeoff_summary || cluster.why_distribute || 'Parallel speedup analysis.';
+    const clusterTransfer = cluster.time_breakdown?.transfer_upload_ms ?? cluster.transfer_overhead_ms ?? cluster.fanout_transfer_ms ?? 0;
+    const clusterAgg = cluster.time_breakdown?.aggregation_ms ?? cluster.aggregation_overhead_ms ?? cluster.aggregation_ms ?? 0;
+
     // Update Local Card
     const elLocalTime = document.getElementById('planner-local-time');
-    if (elLocalTime) elLocalTime.textContent = `${plan.local.predicted_wall_time_ms} ms`;
+    if (elLocalTime) elLocalTime.textContent = `${localTime} ms`;
 
     // Update Single Node Card
     const elSingleTime = document.getElementById('planner-single-time');
@@ -5057,11 +5123,11 @@ async function runOutcomePlanner() {
     const elSingleWhy = document.getElementById('planner-single-why');
     const elSingleTransfer = document.getElementById('planner-single-transfer');
 
-    if (elSingleTime) elSingleTime.textContent = `${plan.single_node.predicted_wall_time_ms} ms`;
-    if (elSingleSpeedup) elSingleSpeedup.textContent = `${plan.single_node.speedup_factor}x Speedup`;
-    if (elSingleCost) elSingleCost.textContent = `Cost: ${plan.single_node.estimated_cost_credits.toFixed(1)} TEST CR`;
-    if (elSingleWhy) elSingleWhy.textContent = plan.why_this_device;
-    if (elSingleTransfer) elSingleTransfer.textContent = `Transfer: ${plan.single_node.transfer_overhead_ms}ms | Queue: ${plan.single_node.queue_wait_ms}ms`;
+    if (elSingleTime) elSingleTime.textContent = `${singleTime} ms`;
+    if (elSingleSpeedup) elSingleSpeedup.textContent = `${singleSpeedup} Speedup`;
+    if (elSingleCost) elSingleCost.textContent = `Cost: ${singleCost} TEST CR`;
+    if (elSingleWhy) elSingleWhy.textContent = singleWhy;
+    if (elSingleTransfer) elSingleTransfer.textContent = `Transfer: ${singleTransfer}ms | Queue: ${singleQueue}ms`;
 
     // Update Cluster Card
     const elClusterTime = document.getElementById('planner-cluster-time');
@@ -5070,20 +5136,20 @@ async function runOutcomePlanner() {
     const elClusterWhy = document.getElementById('planner-cluster-why');
     const elClusterTransfer = document.getElementById('planner-cluster-transfer');
 
-    if (elClusterTime) elClusterTime.textContent = `${plan.cluster.predicted_wall_time_ms} ms`;
-    if (elClusterSpeedup) elClusterSpeedup.textContent = `${plan.cluster.speedup_factor}x Speedup`;
-    if (elClusterCost) elClusterCost.textContent = `Cost: ${plan.cluster.estimated_cost_credits.toFixed(1)} TEST CR`;
-    if (elClusterWhy) elClusterWhy.textContent = plan.why_distribute;
-    if (elClusterTransfer) elClusterTransfer.textContent = `Transfer: ${plan.cluster.transfer_overhead_ms}ms | Aggregation: ${plan.cluster.aggregation_overhead_ms}ms`;
+    if (elClusterTime) elClusterTime.textContent = `${clusterTime} ms`;
+    if (elClusterSpeedup) elClusterSpeedup.textContent = `${clusterSpeedup} Speedup`;
+    if (elClusterCost) elClusterCost.textContent = `Cost: ${clusterCost} TEST CR`;
+    if (elClusterWhy) elClusterWhy.textContent = clusterWhy;
+    if (elClusterTransfer) elClusterTransfer.textContent = `Transfer: ${clusterTransfer}ms | Aggregation: ${clusterAgg}ms`;
 
     // Update Decision Banner
     const bannerTitle = document.getElementById('planner-decision-title');
     const bannerDesc = document.getElementById('planner-decision-desc');
 
-    const mode = plan.recommendation.mode;
+    const mode = rec.mode || plan.recommended_mode || 'SINGLE_NODE';
     const isCluster = mode === 'CLUSTER';
     const isSingle = mode === 'SINGLE_NODE';
-    const isLocal = mode === 'LOCAL';
+    const isLocal = mode === 'LOCAL' || mode === 'LOCAL_BROWSER';
 
     if (bannerTitle) {
       if (isCluster) {
@@ -5099,7 +5165,13 @@ async function runOutcomePlanner() {
     }
 
     if (bannerDesc) {
-      bannerDesc.textContent = plan.recommendation.reason;
+      const prov = plan.provenance || plan.data_provenance || {};
+      const evidence = prov.classification || plan.evidence_source || plan.evidence_label || 'SIMULATION';
+      const isEmpirical = evidence === 'EMPIRICAL' || evidence === 'PHYSICAL' || evidence === 'PROVEN';
+      const provTag = isEmpirical
+        ? '[Provenance: EMPIRICAL - Physical Hardware Qualified]'
+        : '[Provenance: SIMULATION - Simulated Device Telemetry Model]';
+      bannerDesc.textContent = `${rec.reason || plan.recommendation_reason || ''} ${provTag}`;
     }
 
     // Card border / highlight cues
@@ -5120,9 +5192,20 @@ async function runOutcomePlanner() {
       cardCluster.style.background = isCluster ? 'rgba(16, 185, 129, 0.08)' : 'rgba(15, 23, 42, 0.7)';
     }
 
-    showToast(`Planner evaluated: ${mode} recommended (${plan.recommendation.reason})`, 'success');
+    showToast(`Planner evaluated: ${mode} recommended`, 'success');
   } catch (err) {
     console.error('[SPaaS Outcome Planner] Error:', err);
+    currentPlanResult = null;
+    clearPlannerCards('—');
+    const bannerTitle = document.getElementById('planner-decision-title');
+    const bannerDesc = document.getElementById('planner-decision-desc');
+    if (bannerTitle) {
+      bannerTitle.textContent = `⚠️ Planner Evaluation Failed`;
+      bannerTitle.style.color = '#ef4444';
+    }
+    if (bannerDesc) {
+      bannerDesc.textContent = `Error: ${err.message}. Retrying or check connectivity.`;
+    }
     showToast(`Outcome planner error: ${err.message}`, 'error');
   } finally {
     if (btnRun) {

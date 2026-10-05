@@ -2913,6 +2913,786 @@ test("SPaaSCoordinator — Subtest 34: Real Sharded DAG Fault Recovery with Inje
   assert.equal(recoveryData.classification, "PROVEN");
 });
 
+test("SPaaSCoordinator — Subtest 35: Planner Unified Typed Contract, Cross-Layer Field Parity & Evidence Provenance", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET,
+    SPAAS_REQUIRE_AUTH: "true"
+  });
+
+  const now = Date.now();
+  // Register physical qualified desktop worker
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, qualification, last_heartbeat, created_at)
+     VALUES ('desktop_contract_01', 'AMD Ryzen Threadripper', 'Desktop', 'Ready', 0, 'pk_pc', 'tok_pc', '{"cpu_cores":16}', '{"wasm_conformance_passed":true,"measured_fuel_mips":180}', ?, ?)`,
+    now, now
+  );
+
+  // 1. Unified Contract Call (Frontend field compatibility validation)
+  const planRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Contract Parity Test",
+      workload_type: "matrix",
+      input_size_bytes: 1048576,
+      total_operations: 10000000,
+      optimization_goal: "Fastest"
+    })
+  }));
+  assert.equal(planRes.status, 200);
+  const plan = await planRes.json();
+
+  // Root contract
+  assert.equal(plan.status, "ok");
+  assert.ok(plan.recommended_mode);
+  assert.ok(plan.recommendation_reason);
+  assert.ok(plan.distribution_decision);
+
+  // Cross-layer compatibility: both flat and nested objects present
+  assert.ok(plan.plans);
+  assert.ok(plan.plans.local);
+  assert.ok(plan.plans.single_node);
+  assert.ok(plan.plans.cluster);
+  assert.ok(plan.local);
+  assert.ok(plan.single_node);
+  assert.ok(plan.cluster);
+
+  // UI field accessors validation
+  assert.equal(plan.local.predicted_wall_time_ms, plan.plans.local.total_wall_time_ms);
+  assert.equal(plan.single_node.predicted_wall_time_ms, plan.plans.single_node.total_wall_time_ms);
+  assert.equal(plan.cluster.predicted_wall_time_ms, plan.plans.cluster.total_wall_time_ms);
+
+  assert.ok(typeof plan.single_node.transfer_overhead_ms === "number");
+  assert.ok(typeof plan.single_node.queue_wait_ms === "number");
+  assert.ok(typeof plan.single_node.estimated_cost_credits === "number");
+  assert.ok(typeof plan.cluster.transfer_overhead_ms === "number");
+  assert.ok(typeof plan.cluster.aggregation_overhead_ms === "number");
+  assert.ok(typeof plan.cluster.estimated_cost_credits === "number");
+
+  assert.ok(plan.why_this_device.length > 0);
+  assert.ok(plan.why_distribute.length > 0);
+  assert.ok(plan.recommendation.mode);
+  assert.ok(plan.recommendation.reason);
+
+  // Honest Evidence Classification
+  assert.ok(["PROVEN", "SIMULATION", "HEURISTIC", "EMPIRICAL", "PHYSICAL"].includes(plan.evidence_source));
+  assert.equal(plan.evidence_label, plan.evidence_source);
+  assert.ok(plan.data_provenance);
+  assert.ok(plan.data_provenance.evaluated_workers_count >= 1);
+  assert.ok(plan.data_provenance.confidence_pct >= 80);
+});
+
+test("SPaaSCoordinator — Subtest 36: Monotonic Optimistic Concurrency Sequence Tracking on Jobs & Nodes", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const now = Date.now();
+  // 1. Submit job and verify initial version_id
+  const submitRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      job_id: "job-version-test-01",
+      name: "Version Concurrency Test",
+      spec: { runtime: "wasm", entrypoint: "main" }
+    })
+  }));
+  assert.equal(submitRes.status, 201);
+
+  const jobRows1 = coordinator.sqlExec(`SELECT state, version_id FROM jobs WHERE id = ?`, "job-version-test-01");
+  assert.ok(jobRows1.length > 0);
+  const v1 = jobRows1[0].version_id;
+  assert.ok(v1 >= 1);
+
+  // 2. Perform state transition and assert monotonic version increment
+  coordinator.recordJobTransition("job-version-test-01", "RUNNING", "Worker execution started");
+  const jobRows2 = coordinator.sqlExec(`SELECT state, version_id FROM jobs WHERE id = ?`, "job-version-test-01");
+  const v2 = jobRows2[0].version_id;
+  assert.ok(v2 > v1);
+  assert.equal(jobRows2[0].state, "RUNNING");
+
+  // 3. Complete job and assert monotonic increment
+  coordinator.recordJobTransition("job-version-test-01", "COMPLETED", "Execution completed successfully");
+  const jobRows3 = coordinator.sqlExec(`SELECT state, version_id FROM jobs WHERE id = ?`, "job-version-test-01");
+  const v3 = jobRows3[0].version_id;
+  assert.ok(v3 > v2);
+  assert.equal(jobRows3[0].state, "COMPLETED");
+});
+
+test("SPaaSCoordinator — Subtest 37: Planner Typed Contract, Schema Versioning & Complete Strategies Shape", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const res = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      workload_id: "wkld_custom_001",
+      name: "Matrix Multiplication Benchmark",
+      workload_type: "matrix",
+      payload_bytes: 1048576,
+      total_operations: 50000000,
+      optimization_goal: "Fastest"
+    })
+  }));
+  assert.equal(res.status, 200);
+  const data = await res.json();
+
+  // Root contract attributes
+  assert.equal(data.schema_version, "2026-03-29.v1");
+  assert.ok(data.plan_id && data.plan_id.startsWith("plan_"));
+  assert.equal(data.workload_id, "wkld_custom_001");
+  assert.equal(data.workload.name, "Matrix Multiplication Benchmark");
+  assert.equal(data.workload.type, "matrix");
+  assert.ok(typeof data.recommendation.confidence_pct === "number");
+
+  // Canonical strategies structure
+  assert.ok(data.strategies);
+  assert.ok(data.strategies.local);
+  assert.ok(data.strategies.single_node);
+  assert.ok(data.strategies.cluster);
+
+  const loc = data.strategies.local;
+  assert.equal(loc.mode, "LOCAL_BROWSER");
+  assert.equal(loc.worker_count, 1);
+  assert.ok(typeof loc.predicted_wall_time_ms === "number");
+  assert.equal(loc.cost.currency, "TEST_CREDITS");
+  assert.equal(loc.cost.credits, 0);
+  assert.ok(loc.privacy_guarantee.length > 0);
+
+  const single = data.strategies.single_node;
+  assert.equal(single.mode, "SINGLE_NODE");
+  assert.ok(single.selected_node);
+  assert.ok(typeof single.predicted_wall_time_ms === "number");
+  assert.ok(typeof single.time_breakdown.transfer_upload_ms === "number");
+  assert.ok(typeof single.time_breakdown.queue_wait_ms === "number");
+  assert.ok(typeof single.time_breakdown.execution_ms === "number");
+  assert.equal(single.cost.currency, "TEST_CREDITS");
+
+  const clus = data.strategies.cluster;
+  assert.equal(clus.mode, "CLUSTER");
+  assert.ok(clus.worker_count >= 2);
+  assert.ok(typeof clus.time_breakdown.aggregation_ms === "number");
+  assert.ok(typeof clus.speedup_factor === "number");
+  assert.ok(typeof clus.efficiency_pct === "number");
+  assert.equal(clus.cost.currency, "TEST_CREDITS");
+
+  // Provenance block
+  assert.ok(data.provenance);
+  assert.ok(["SIMULATION", "EMPIRICAL", "PHYSICAL"].includes(data.provenance.classification));
+  assert.ok(data.provenance.source_breakdown.disclaimer.includes("simulation"));
+});
+
+test("SPaaSCoordinator — Subtest 38: Planner Truthful Simulation Provenance with Simulated Fleet", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const now = Date.now();
+  // Ensure only simulated node exists
+  coordinator.sqlExec(`DELETE FROM nodes`);
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, last_heartbeat, created_at)
+     VALUES ('sim_worker_01', 'Simulated Worker', 'Desktop', 'Ready', 1, 'pk_sim', 'tok_sim', '{"cpu_cores":4}', ?, ?)`,
+    now, now
+  );
+
+  const res = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workload_type: "hash", optimization_goal: "Balanced" })
+  }));
+  assert.equal(res.status, 200);
+  const data = await res.json();
+
+  assert.equal(data.provenance.classification, "SIMULATION");
+  assert.equal(data.provenance.simulated_workers_count, 1);
+  assert.equal(data.provenance.physical_workers_count, 0);
+  assert.equal(data.provenance.source_breakdown.is_synthetic, true);
+  assert.equal(data.provenance.source_breakdown.calibration_source, "DEFAULT_SIMULATION_MODEL");
+  assert.notEqual(data.provenance.classification, "PROVEN");
+  assert.notEqual(data.provenance.classification, "HEURISTIC");
+});
+
+test("SPaaSCoordinator — Subtest 39: Planner Truthful Empirical Provenance with Physically Qualified Fleet", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const now = Date.now();
+  // Insert physical node with empirical benchmark qualification
+  coordinator.sqlExec(`DELETE FROM nodes`);
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, capabilities, qualification, telemetry, last_heartbeat, created_at)
+     VALUES (?, ?, ?, 'Ready', 0, 'pk_phys', 'tok_phys', ?, ?, ?, ?, ?)`,
+    'phys_worker_01',
+    'Physical Vivo V27',
+    'Phone',
+    JSON.stringify({ architecture: 'aarch64', cpu_cores: 8 }),
+    JSON.stringify({ wasm_conformance_passed: true, measured_fuel_mips: 45.2, qualification_score: 98 }),
+    JSON.stringify({ battery_pct: 100, charging_state: 'CHARGING_AC', network_type: 'Wi-Fi (Unmetered)' }),
+    now,
+    now
+  );
+
+  const res = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workload_type: "matrix", optimization_goal: "Fastest" })
+  }));
+  assert.equal(res.status, 200);
+  const data = await res.json();
+
+  assert.equal(data.provenance.classification, "EMPIRICAL");
+  assert.equal(data.provenance.physical_workers_count, 1);
+  assert.equal(data.provenance.simulated_workers_count, 0);
+  assert.equal(data.provenance.source_breakdown.is_synthetic, false);
+  assert.equal(data.provenance.source_breakdown.calibration_source, "DEVICE_BENCHMARK");
+  assert.equal(data.provenance.confidence_pct, 95);
+});
+
+test("SPaaSCoordinator — Subtest 40: Planner RBAC 401 Unauthorized on Missing or Invalid Credentials", async () => {
+  // Coordinator requiring planner auth
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET,
+    SPAAS_REQUIRE_PLANNER_AUTH: "true"
+  });
+
+  // 1. Missing credentials when required -> 401
+  const missingRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workload_type: "tiny" })
+  }));
+  assert.equal(missingRes.status, 401);
+  const missingData = await missingRes.json();
+  assert.equal(missingData.error, "UNAUTHORIZED");
+
+  // 2. Invalid credentials provided -> 401
+  const badTokenRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer bad_invalid_token_9999"
+    },
+    body: JSON.stringify({ workload_type: "tiny" })
+  }));
+  assert.equal(badTokenRes.status, 401);
+  const badTokenData = await badTokenRes.json();
+  assert.equal(badTokenData.error, "UNAUTHORIZED");
+});
+
+test("SPaaSCoordinator — Subtest 41: Planner RBAC 403 Forbidden for Authenticated Caller Lacking planner:use Permission", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  // Role SECURITY does not have planner:use permission
+  const forbiddenRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer token_security"
+    },
+    body: JSON.stringify({ workload_type: "tiny" })
+  }));
+  assert.equal(forbiddenRes.status, 403);
+  const forbiddenData = await forbiddenRes.json();
+  assert.equal(forbiddenData.error, "FORBIDDEN");
+
+  // Role CUSTOMER does have planner:use permission -> 200
+  const allowedRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer token_customer"
+    },
+    body: JSON.stringify({ workload_type: "tiny" })
+  }));
+  assert.equal(allowedRes.status, 200);
+});
+
+test("SPaaSCoordinator — Subtest 42: Centralized RBAC Matrix: Provider Cannot Submit Workload / Job (jobs:create required)", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const res = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer token_provider"
+    },
+    body: JSON.stringify({
+      job_id: "job-provider-unauthorized-01",
+      workload_id: "matrix_compute"
+    })
+  }));
+  assert.equal(res.status, 403);
+  const data = await res.json();
+  assert.equal(data.error, "FORBIDDEN");
+  assert.equal(data.required_permission, "jobs:create");
+});
+
+test("SPaaSCoordinator — Subtest 43: Centralized RBAC Matrix: Customer Cannot Revoke Node (nodes:revoke required)", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const now = Date.now();
+  coordinator.sqlExec(
+    `INSERT INTO nodes (id, name, device_type, state, is_simulated, public_key, auth_token, last_heartbeat, created_at)
+     VALUES ('test-node-to-revoke', 'Target Node', 'Desktop', 'Ready', 0, 'pk_target', 'tok_target', ?, ?)`,
+    now, now
+  );
+
+  const res = await coordinator.fetch(new Request("http://localhost/api/v1/nodes/test-node-to-revoke", {
+    method: "DELETE",
+    headers: {
+      "Authorization": "Bearer token_customer"
+    }
+  }));
+  assert.equal(res.status, 403);
+  const data = await res.json();
+  assert.equal(data.error, "FORBIDDEN");
+  assert.equal(data.required_permission, "nodes:revoke");
+});
+
+test("SPaaSCoordinator — Subtest 44: Centralized RBAC Matrix: Unauthenticated Request to Protected Route Rejected with 401 Unauthorized", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET,
+    SPAAS_REQUIRE_AUTH: "true"
+  });
+
+  const res = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "GET"
+  }));
+  assert.equal(res.status, 401);
+  const data = await res.json();
+  assert.equal(data.error, "UNAUTHORIZED");
+});
+
+test("SPaaSCoordinator — Subtest 45: Centralized RBAC Matrix: Invalid Bearer Token Rejected with 401 Unauthorized", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const res = await coordinator.fetch(new Request("http://localhost/api/v1/nodes", {
+    method: "GET",
+    headers: {
+      "Authorization": "Bearer totally_bogus_token_xyz_999"
+    }
+  }));
+  assert.equal(res.status, 401);
+  const data = await res.json();
+  assert.equal(data.error, "UNAUTHORIZED");
+});
+
+test("SPaaSCoordinator — Subtest 46: Centralized RBAC: Security Role Can Read Audit Logs but Cannot Manage Billing", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  // 1. Audit read is allowed for SECURITY
+  const auditRes = await coordinator.fetch(new Request("http://localhost/api/v1/audit", {
+    headers: {
+      "Authorization": "Bearer token_security"
+    }
+  }));
+  assert.equal(auditRes.status, 200);
+
+  // 2. Billing read is forbidden for SECURITY
+  const billingRes = await coordinator.fetch(new Request("http://localhost/api/v1/metering", {
+    headers: {
+      "Authorization": "Bearer token_security"
+    }
+  }));
+  assert.equal(billingRes.status, 403);
+  const billingData = await billingRes.json();
+  assert.equal(billingData.error, "FORBIDDEN");
+  assert.equal(billingData.required_permission, "billing:read");
+});
+
+test("SPaaSCoordinator — Subtest 47: Idempotency Key Replay Returns Cached Response with Cache Header", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const idempotencyKey = `idem_test_${Date.now()}`;
+  const workloadBody = {
+    name: "Matrix Multiply Idempotency Test",
+    limits: { max_fuel: 1000000, timeout_ms: 10000 }
+  };
+
+  // First request
+  const res1 = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer token_customer",
+      "Idempotency-Key": idempotencyKey
+    },
+    body: JSON.stringify(workloadBody)
+  }));
+  assert.equal(res1.status, 201);
+  const data1 = await res1.json();
+  assert.ok(data1.job_id);
+
+  // Exact same replay
+  const res2 = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer token_customer",
+      "Idempotency-Key": idempotencyKey
+    },
+    body: JSON.stringify(workloadBody)
+  }));
+  assert.equal(res2.status, 201);
+  assert.equal(res2.headers.get("X-Cache-Lookup"), "HIT-IDEMPOTENT");
+  const data2 = await res2.json();
+  assert.equal(data2.job_id, data1.job_id);
+  assert.equal(data2.idempotent_replay, true);
+});
+
+test("SPaaSCoordinator — Subtest 48: Idempotency Key Reused with Different Payload Returns 409 Conflict", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const idempotencyKey = `idem_conflict_${Date.now()}`;
+
+  // First request
+  const res1 = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer token_customer",
+      "Idempotency-Key": idempotencyKey
+    },
+    body: JSON.stringify({ name: "Workload Alpha", limits: { max_fuel: 500000 } })
+  }));
+  assert.equal(res1.status, 201);
+
+  // Second request with SAME key but DIFFERENT body payload
+  const res2 = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer token_customer",
+      "Idempotency-Key": idempotencyKey
+    },
+    body: JSON.stringify({ name: "Workload Beta (Modified Payload)", limits: { max_fuel: 9999999 } })
+  }));
+  assert.equal(res2.status, 409);
+  const data2 = await res2.json();
+  assert.equal(data2.error, "IDEMPOTENCY_CONFLICT");
+});
+
+test("SPaaSCoordinator — Subtest 49: Optimistic Concurrency Control: Job Version Mismatch Returns 409 Conflict", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const createRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer token_customer"
+    },
+    body: JSON.stringify({ name: "OCC Test Workload" })
+  }));
+  assert.equal(createRes.status, 201);
+  const job = await createRes.json();
+  const jobId = job.job_id;
+
+  // Stale version provided (e.g. expected_version = 999 while current is job.version_id)
+  const updateRes = await coordinator.fetch(new Request(`http://localhost/api/v1/jobs/${jobId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${TEST_ADMIN_SECRET}`
+    },
+    body: JSON.stringify({
+      expected_version: 999,
+      name: "Renamed OCC Job"
+    })
+  }));
+  assert.equal(updateRes.status, 409);
+  const updateData = await updateRes.json();
+  assert.equal(updateData.error, "VERSION_CONFLICT");
+  assert.equal(updateData.expected_version, 999);
+});
+
+test("SPaaSCoordinator — Subtest 50: Optimistic Concurrency Control: Matching Version Succeeds and Monotonically Increments", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const createRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer token_customer"
+    },
+    body: JSON.stringify({ name: "OCC Monotonic Test" })
+  }));
+  const job = await createRes.json();
+  const initialVersion = job.version_id;
+
+  const updateRes = await coordinator.fetch(new Request(`http://localhost/api/v1/jobs/${job.job_id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${TEST_ADMIN_SECRET}`
+    },
+    body: JSON.stringify({
+      expected_version: initialVersion,
+      name: "OCC Updated Name"
+    })
+  }));
+  assert.equal(updateRes.status, 200);
+  const updateData = await updateRes.json();
+  assert.ok(updateData.version_id > initialVersion);
+});
+
+test("SPaaSCoordinator — Subtest 51: Node Policy Optimistic Concurrency Control Enforces expected_version", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const tokenRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/devices/pairing-token", { method: "POST", headers: ADMIN_HEADERS })
+  );
+  const { token } = await tokenRes.json();
+
+  const pairRes = await (await coordinator.fetch(new Request("http://localhost/api/v1/devices/pair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      pairing_token: token,
+      name: "OCC Node 01",
+      device_name: "OCC Node 01",
+      device_type: "android"
+    })
+  }))).json();
+
+  // Mismatched expected_version
+  const failRes = await coordinator.fetch(new Request(`http://localhost/api/v1/nodes/${pairRes.node_id}/policy`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${pairRes.auth_token}`
+    },
+    body: JSON.stringify({
+      expected_version: 999,
+      charging_only: true
+    })
+  }));
+  assert.equal(failRes.status, 409);
+  const failData = await failRes.json();
+  assert.equal(failData.error, "VERSION_CONFLICT");
+
+  // Matching expected_version
+  const nodeGet = await (await coordinator.fetch(new Request(`http://localhost/api/v1/nodes/${pairRes.node_id}`))).json();
+  const okRes = await coordinator.fetch(new Request(`http://localhost/api/v1/nodes/${pairRes.node_id}/policy`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${pairRes.auth_token}`
+    },
+    body: JSON.stringify({
+      expected_version: nodeGet.version_id || 1,
+      charging_only: true
+    })
+  }));
+  assert.equal(okRes.status, 200);
+  const okData = await okRes.json();
+  assert.ok(okData.version_id > (nodeGet.version_id || 1));
+});
+
+test("SPaaSCoordinator — Subtest 52: State Machine Transition Validation: Cannot Transition COMPLETED to RUNNING", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const createRes = await (await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer token_customer" },
+    body: JSON.stringify({ name: "Terminal Transition Test" })
+  }))).json();
+
+  // Complete the job
+  coordinator.sqlExec("UPDATE jobs SET state = 'COMPLETED' WHERE id = ?", createRes.job_id);
+
+  // Attempt invalid transition back to RUNNING via PUT
+  const invalidRes = await coordinator.fetch(new Request(`http://localhost/api/v1/jobs/${createRes.job_id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${TEST_ADMIN_SECRET}` },
+    body: JSON.stringify({ state: "RUNNING" })
+  }));
+  assert.equal(invalidRes.status, 409);
+  const invalidData = await invalidRes.json();
+  assert.equal(invalidData.error, "INVALID_STATE_TRANSITION");
+});
+
+test("SPaaSCoordinator — Subtest 53: Monotonic Fencing Token Generator Produces Ordered Tokens", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const t1 = coordinator.getNextFencingToken();
+  const t2 = coordinator.getNextFencingToken();
+  const t3 = coordinator.getNextFencingToken();
+
+  assert.ok(t1.startsWith("fence_1_"));
+  assert.ok(t2.startsWith("fence_1_"));
+  assert.ok(t3.startsWith("fence_1_"));
+  assert.notEqual(t1, t2);
+  assert.notEqual(t2, t3);
+  // Monotonically increasing sequence suffix
+  const seq1 = parseInt(t1.split("_").pop(), 10);
+  const seq2 = parseInt(t2.split("_").pop(), 10);
+  const seq3 = parseInt(t3.split("_").pop(), 10);
+  assert.ok(seq2 > seq1);
+  assert.ok(seq3 > seq2);
+});
+
+test("SPaaSCoordinator — Subtest 54: Expired or Non-Active Lease Fencing Token Rejection", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  const tokenRes = await coordinator.fetch(
+    new Request("http://localhost/api/v1/devices/pairing-token", { method: "POST", headers: ADMIN_HEADERS })
+  );
+  const { token } = await tokenRes.json();
+
+  const pairRes = await (await coordinator.fetch(new Request("http://localhost/api/v1/devices/pair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      pairing_token: token,
+      name: "Fencing Lease Node",
+      device_name: "Fencing Lease Node",
+      device_type: "android"
+    })
+  }))).json();
+
+  const fencingToken = coordinator.getNextFencingToken();
+  const jobId = "fence-lease-job-001";
+  coordinator.sqlExec(
+    "INSERT INTO jobs (id, workload_id, state, assigned_node_id, fencing_token, created_at) VALUES (?, 'wl_fencing', 'Running', ?, ?, ?)",
+    jobId, pairRes.node_id, fencingToken, Date.now()
+  );
+  // Insert lease with EXPIRED state
+  coordinator.sqlExec(
+    "INSERT INTO leases (lease_id, job_id, node_id, fencing_token, epoch, expires_at, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    `lease_${jobId}`, jobId, pairRes.node_id, fencingToken, 1, Date.now() - 10000, "EXPIRED", Date.now() - 60000
+  );
+
+  const res = await coordinator.handleResultSubmission({
+    job_id: jobId,
+    node_id: pairRes.node_id,
+    fencing_token: fencingToken,
+    exit_code: 0
+  });
+  assert.equal(res.status, "rejected");
+  assert.equal(res.reason, "STALE_FENCING_TOKEN");
+});
+
+test("SPaaSCoordinator — Subtest 55: On-Demand State Reconciliation (/api/v1/reconciliation/run) Heals Fabric", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  // 1. Create a dead node (heartbeat 60s ago)
+  const deadNodeId = "dead_node_test_01";
+  coordinator.sqlExec("INSERT INTO nodes (id, name, device_type, state, last_heartbeat, is_simulated) VALUES (?, 'Dead Node', 'android', 'Ready', ?, 0)", deadNodeId, Date.now() - 60000);
+
+  // 2. Create an expired lease
+  const expiredJobId = "job_expired_lease_01";
+  coordinator.sqlExec("INSERT INTO jobs (id, state, lease_expires_at, retry_count, max_retries) VALUES (?, 'Running', ?, 0, 3)", expiredJobId, Date.now() - 5000);
+  coordinator.sqlExec("INSERT INTO leases (lease_id, job_id, node_id, fencing_token, epoch, expires_at, state, created_at) VALUES ('l_exp_01', ?, ?, 'fence_exp', 1, ?, 'ACTIVE', ?)",
+    expiredJobId, deadNodeId, Date.now() - 5000, Date.now() - 60000
+  );
+
+  // Trigger state reconciliation
+  const reconRes = await coordinator.fetch(new Request("http://localhost/api/v1/reconciliation/run", {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer token_ops"
+    }
+  }));
+  assert.equal(reconRes.status, 200);
+  const reconData = await reconRes.json();
+  assert.equal(reconData.status, "ok");
+  assert.ok(reconData.leases_expired >= 1);
+  assert.ok(reconData.nodes_marked_offline >= 1);
+  assert.ok(reconData.jobs_requeued >= 1);
+
+  // Verify DB state
+  const nodeAfter = coordinator.sqlExec("SELECT state FROM nodes WHERE id = ?", deadNodeId);
+  assert.equal(nodeAfter[0].state, "Offline");
+
+  const jobAfter = coordinator.sqlExec("SELECT state, retry_count FROM jobs WHERE id = ?", expiredJobId);
+  assert.equal(jobAfter[0].state, "Pending");
+  assert.equal(jobAfter[0].retry_count, 1);
+});
+
+test("SPaaSCoordinator — Subtest 56: State Reconciliation RBAC Rejects Unprivileged Roles", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
+
+  // Customer cannot run state reconciliation
+  const custRes = await coordinator.fetch(new Request("http://localhost/api/v1/reconciliation/run", {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer token_customer"
+    }
+  }));
+  assert.equal(custRes.status, 403);
+  const custData = await custRes.json();
+  assert.equal(custData.error, "FORBIDDEN");
+
+  // Ops can run state reconciliation
+  const opsRes = await coordinator.fetch(new Request("http://localhost/api/v1/reconciliation/run", {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer token_ops"
+    }
+  }));
+  assert.equal(opsRes.status, 200);
+});
+
+
+
+
 
 
 
