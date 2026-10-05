@@ -88,18 +88,26 @@ function createMinimalFallbackEngine() {
     tenants: new Map([
       ["tenant_spaas_system", { id: "tenant_spaas_system", name: "SPaaS Global System", plan: "enterprise", balance_credits: 1000000.0, currency_balance: 10000.0, status: "ACTIVE" }],
       ["tenant_enterprise_customer", { id: "tenant_enterprise_customer", name: "Acme Distributed AI Labs", plan: "enterprise", balance_credits: 5000.0, currency_balance: 50.0, status: "ACTIVE" }],
-      ["tenant_community_providers", { id: "tenant_community_providers", name: "Community Compute Providers", plan: "starter", balance_credits: 250.0, currency_balance: 2.5, status: "ACTIVE" }]
+      ["tenant_community_providers", { id: "tenant_community_providers", name: "Community Compute Providers", plan: "starter", balance_credits: 250.0, currency_balance: 2.5, status: "ACTIVE" }],
+      ["tenant_competitor_b", { id: "tenant_competitor_b", name: "Competitor AI Labs", plan: "starter", balance_credits: 500.0, currency_balance: 5.0, status: "ACTIVE" }]
     ]),
     users: new Map([
-      ["usr_admin", { id: "usr_admin", tenant_id: "tenant_spaas_system", email: "admin@spaas.dev", role: "SUPER_ADMIN", status: "ACTIVE", mfa_enabled: 1 }],
-      ["usr_cust_admin", { id: "usr_cust_admin", tenant_id: "tenant_enterprise_customer", email: "customer_admin@acme.ai", role: "CUSTOMER_ADMIN", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_cust_dev", { id: "usr_cust_dev", tenant_id: "tenant_enterprise_customer", email: "developer@acme.ai", role: "CUSTOMER", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_provider", { id: "usr_provider", tenant_id: "tenant_community_providers", email: "provider@edge.net", role: "PROVIDER", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_ops", { id: "usr_ops", tenant_id: "tenant_spaas_system", email: "ops@spaas.dev", role: "OPS", status: "ACTIVE", mfa_enabled: 1 }],
-      ["usr_security", { id: "usr_security", tenant_id: "tenant_spaas_system", email: "security@spaas.dev", role: "SECURITY", status: "ACTIVE", mfa_enabled: 1 }],
-      ["usr_finance", { id: "usr_finance", tenant_id: "tenant_spaas_system", email: "finance@spaas.dev", role: "FINANCE", status: "ACTIVE", mfa_enabled: 1 }],
-      ["usr_support", { id: "usr_support", tenant_id: "tenant_spaas_system", email: "support@spaas.dev", role: "SUPPORT", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_auditor", { id: "usr_auditor", tenant_id: "tenant_spaas_system", email: "auditor@spaas.dev", role: "AUDITOR", status: "ACTIVE", mfa_enabled: 0 }]
+      ["usr_admin", { id: "usr_admin", tenant_id: "tenant_spaas_system", email: "admin@spaas.dev", password_hash: "hash_admin_master", role: "SUPER_ADMIN", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_cust_admin", { id: "usr_cust_admin", tenant_id: "tenant_enterprise_customer", email: "customer_admin@acme.ai", password_hash: "hash_cust_admin", role: "CUSTOMER_ADMIN", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_cust_dev", { id: "usr_cust_dev", tenant_id: "tenant_enterprise_customer", email: "developer@acme.ai", password_hash: "hash_cust_dev", role: "CUSTOMER", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_provider", { id: "usr_provider", tenant_id: "tenant_community_providers", email: "provider@edge.net", password_hash: "hash_provider", role: "PROVIDER", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_ops", { id: "usr_ops", tenant_id: "tenant_spaas_system", email: "ops@spaas.dev", password_hash: "hash_ops", role: "OPS", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_security", { id: "usr_security", tenant_id: "tenant_spaas_system", email: "security@spaas.dev", password_hash: "hash_security", role: "SECURITY", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_finance", { id: "usr_finance", tenant_id: "tenant_spaas_system", email: "finance@spaas.dev", password_hash: "hash_finance", role: "FINANCE", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_support", { id: "usr_support", tenant_id: "tenant_spaas_system", email: "support@spaas.dev", password_hash: "hash_support", role: "SUPPORT", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_auditor", { id: "usr_auditor", tenant_id: "tenant_spaas_system", email: "auditor@spaas.dev", password_hash: "hash_auditor", role: "AUDITOR", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_locked", { id: "usr_locked", tenant_id: "tenant_enterprise_customer", email: "locked@acme.ai", password_hash: "hash_locked", role: "CUSTOMER", status: "LOCKED", mfa_enabled: 0 }],
+      ["usr_competitor_dev", { id: "usr_competitor_dev", tenant_id: "tenant_competitor_b", email: "competitor@external.ai", password_hash: "hash_competitor", role: "CUSTOMER", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_cust_prompt", { id: "usr_cust_prompt", tenant_id: "tenant_enterprise_customer", email: "customer@acme.com", password_hash: "hash_cust_prompt", role: "CUSTOMER", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_cust_admin_prompt", { id: "usr_cust_admin_prompt", tenant_id: "tenant_enterprise_customer", email: "customer_admin@acme.com", password_hash: "hash_cust_admin_prompt", role: "CUSTOMER_ADMIN", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_provider_prompt", { id: "usr_provider_prompt", tenant_id: "tenant_community_providers", email: "provider@phonefarm.io", password_hash: "hash_provider_prompt", role: "PROVIDER", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_superadmin_prompt", { id: "usr_superadmin_prompt", tenant_id: "tenant_spaas_system", email: "superadmin@spaas.internal", password_hash: "hash_superadmin_prompt", role: "SUPER_ADMIN", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_locked_prompt", { id: "usr_locked_prompt", tenant_id: "tenant_enterprise_customer", email: "locked@acme.com", password_hash: "hash_locked_prompt", role: "CUSTOMER", status: "LOCKED", mfa_enabled: 0 }]
     ]),
     api_keys: new Map(),
     sessions: new Map(),
@@ -261,6 +269,7 @@ function createMinimalFallbackEngine() {
             policy,
             telemetry,
             is_simulated: isSimulated,
+            tenant_id: row.tenant_id || "tenant_community_providers",
             version_id: 1,
             last_heartbeat,
             created_at
@@ -353,12 +362,14 @@ function createMinimalFallbackEngine() {
         return [];
       }
       if (qu.startsWith("UPDATE NODES SET STATE = 'REVOKED'")) {
-        const n = tables.nodes.get(params[0]);
+        const id = params[0] || q.match(/WHERE id = '([^']+)'/i)?.[1] || q.match(/WHERE id = "([^"]+)"/i)?.[1];
+        const n = tables.nodes.get(id);
         if (n) n.state = "Revoked";
         return [];
       }
       if (qu.startsWith("UPDATE NODES SET STATE = 'OFFLINE'")) {
-        const n = tables.nodes.get(params[0]);
+        const id = params[0] || q.match(/WHERE id = '([^']+)'/i)?.[1] || q.match(/WHERE id = "([^"]+)"/i)?.[1];
+        const n = tables.nodes.get(id);
         if (n) n.state = "Offline";
         return [];
       }
@@ -445,6 +456,11 @@ function createMinimalFallbackEngine() {
       if (qu.startsWith("SELECT AUTH_TOKEN, STATE FROM NODES WHERE ID =")) {
         const n = tables.nodes.get(params[0]);
         return n ? [{ auth_token: n.auth_token, state: n.state }] : [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM NODES WHERE AUTH_TOKEN =")) {
+        const token = params[0];
+        const match = Array.from(tables.nodes.values()).find(n => n.auth_token === token);
+        return match ? [match] : [];
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM NODES WHERE ID =")) {
         const id = params[0] || q.match(/WHERE id = '([^']+)'/i)?.[1] || q.match(/WHERE id = "([^"]+)"/i)?.[1];
@@ -557,6 +573,8 @@ function createMinimalFallbackEngine() {
             result: null,
             scheduler_decision,
             correlation_id,
+            tenant_id: row.tenant_id || "tenant_enterprise_customer",
+            user_id: row.user_id || "usr_cust_dev",
             version_id: version_id || 1,
             created_at: created_at || Date.now(),
             completed_at
@@ -844,8 +862,14 @@ function createMinimalFallbackEngine() {
         }
         return j ? [j] : [];
       }
+      if (qu.startsWith("SELECT") && qu.includes("FROM JOBS WHERE TENANT_ID =")) {
+        const tenantId = params[0];
+        return Array.from(tables.jobs.values())
+          .filter(j => j.tenant_id === tenantId)
+          .sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+      }
       if (qu.startsWith("SELECT") && qu.includes("FROM JOBS")) {
-        return Array.from(tables.jobs.values());
+        return Array.from(tables.jobs.values()).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
       }
 
       // JOB_TRANSITIONS
@@ -1208,9 +1232,9 @@ function createMinimalFallbackEngine() {
         tables.users.set(id, { id, tenant_id, email, password_hash, role, status: status || 'ACTIVE', mfa_enabled: mfa_enabled || 0, created_at: created_at || Date.now() });
         return [];
       }
-      if (qu.startsWith("SELECT") && qu.includes("FROM USERS WHERE EMAIL =")) {
-        const email = params[0];
-        const match = Array.from(tables.users.values()).find(u => u.email === email);
+      if (qu.startsWith("SELECT") && (qu.includes("FROM USERS WHERE EMAIL =") || qu.includes("FROM USERS WHERE LOWER(EMAIL) ="))) {
+        const email = (params[0] || "").toLowerCase();
+        const match = Array.from(tables.users.values()).find(u => (u.email || "").toLowerCase() === email);
         return match ? [match] : [];
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM USERS WHERE ID =")) {
@@ -1224,14 +1248,24 @@ function createMinimalFallbackEngine() {
 
       // SESSIONS
       if (qu.startsWith("INSERT INTO SESSIONS")) {
-        const [token, tenant_id, user_id, role, expires_at, created_at] = params;
-        tables.sessions.set(token, { token, tenant_id, user_id, role, expires_at, created_at });
+        let token, tenant_id, user_id, role, expires_at, csrf_token, created_at;
+        if (params.length >= 7) {
+          [token, tenant_id, user_id, role, expires_at, csrf_token, created_at] = params;
+        } else {
+          [token, tenant_id, user_id, role, expires_at, created_at] = params;
+        }
+        tables.sessions.set(token, { token, tenant_id, user_id, role, expires_at, csrf_token: csrf_token || null, created_at: created_at || Date.now() });
         return [];
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM SESSIONS WHERE TOKEN =")) {
         const token = params[0];
         const sess = tables.sessions.get(token);
-        return sess ? [sess] : [];
+        if (!sess) return [];
+        if (qu.includes("EXPIRES_AT >") && params.length >= 2) {
+          const now = params[1];
+          if (!sess.expires_at || sess.expires_at <= now) return [];
+        }
+        return [sess];
       }
       if (qu.startsWith("DELETE FROM SESSIONS WHERE TOKEN =")) {
         tables.sessions.delete(params[0]);

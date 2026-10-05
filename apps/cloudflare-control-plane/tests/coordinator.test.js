@@ -999,7 +999,8 @@ test("SPaaSCoordinator — Empirical Qualification & Challenge Dispatch", async 
   // 2. Run Empirical Qualification
   const qualRes = await coordinator.fetch(
     new Request("http://localhost/api/v1/nodes/phone-vivo-qual-01/qualification/run", {
-      method: "POST"
+      method: "POST",
+      headers: { "Authorization": `Bearer ${deviceToken}` }
     })
   );
   assert.equal(qualRes.status, 200);
@@ -1015,7 +1016,8 @@ test("SPaaSCoordinator — Empirical Qualification & Challenge Dispatch", async 
   // 3. Dispatch Challenge Job
   const challengeRes = await coordinator.fetch(
     new Request("http://localhost/api/v1/nodes/phone-vivo-qual-01/dispatch-challenge", {
-      method: "POST"
+      method: "POST",
+      headers: { "Authorization": `Bearer ${deviceToken}` }
     })
   );
   assert.equal(challengeRes.status, 200);
@@ -2030,7 +2032,9 @@ test("SPaaSCoordinator — Generic Workloads, Pareto Explainability, Provider As
   assert.equal(declineData.reason, "Battery too low for heavy computation");
 
   // 8. Verify Execution Trace for Full 12-State Transitions
-  const traceRes = await coordinator.fetch(new Request(`http://localhost/api/v1/jobs/${matrixJobId}/trace`));
+  const traceRes = await coordinator.fetch(new Request(`http://localhost/api/v1/jobs/${matrixJobId}/trace`, {
+    headers: ADMIN_HEADERS
+  }));
   assert.equal(traceRes.status, 200);
   const traceData = await traceRes.json();
   assert.ok(traceData.transitions.length >= 3);
@@ -2686,7 +2690,7 @@ test("SPaaSCoordinator — Subtest 30: Identity, Tenant Isolation, Sessions, Sco
     method: "GET",
     headers: { "Authorization": `Bearer ${loginData.token}` }
   }));
-  assert.equal(adminForbiddenRes.status, 401);
+  assert.ok(adminForbiddenRes.status === 403 || adminForbiddenRes.status === 401);
 
   // 4. Create Scoped API Key as Customer Admin
   const custAdminLogin = await coordinator.fetch(new Request("http://localhost/api/v1/auth/login", {
@@ -2754,7 +2758,7 @@ test("SPaaSCoordinator — Subtest 31: Outcome Planner (Local vs Single Node vs 
   // 1. Analyze Large Workload: Planner evaluates Local vs Single vs Cluster
   const planRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer token_customer" },
     body: JSON.stringify({
       name: "Matrix Multiply (512x512)",
       workload_type: "matrix",
@@ -2778,7 +2782,7 @@ test("SPaaSCoordinator — Subtest 31: Outcome Planner (Local vs Single Node vs 
   // 2. Analyze Small Workload: Planner explains why NOT to distribute
   const smallPlanRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer token_customer" },
     body: JSON.stringify({
       name: "Tiny SHA-256",
       workload_type: "hash",
@@ -2931,7 +2935,7 @@ test("SPaaSCoordinator — Subtest 35: Planner Unified Typed Contract, Cross-Lay
   // 1. Unified Contract Call (Frontend field compatibility validation)
   const planRes = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer token_customer" },
     body: JSON.stringify({
       name: "Contract Parity Test",
       workload_type: "matrix",
@@ -2993,7 +2997,7 @@ test("SPaaSCoordinator — Subtest 36: Monotonic Optimistic Concurrency Sequence
   // 1. Submit job and verify initial version_id
   const submitRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer token_customer" },
     body: JSON.stringify({
       job_id: "job-version-test-01",
       name: "Version Concurrency Test",
@@ -3030,7 +3034,7 @@ test("SPaaSCoordinator — Subtest 37: Planner Typed Contract, Schema Versioning
 
   const res = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer token_customer" },
     body: JSON.stringify({
       workload_id: "wkld_custom_001",
       name: "Matrix Multiplication Benchmark",
@@ -3105,7 +3109,7 @@ test("SPaaSCoordinator — Subtest 38: Planner Truthful Simulation Provenance wi
 
   const res = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer token_customer" },
     body: JSON.stringify({ workload_type: "hash", optimization_goal: "Balanced" })
   }));
   assert.equal(res.status, 200);
@@ -3144,7 +3148,7 @@ test("SPaaSCoordinator — Subtest 39: Planner Truthful Empirical Provenance wit
 
   const res = await coordinator.fetch(new Request("http://localhost/api/v1/workloads/analyze-plan", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer token_customer" },
     body: JSON.stringify({ workload_type: "matrix", optimization_goal: "Fastest" })
   }));
   assert.equal(res.status, 200);

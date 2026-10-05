@@ -61,22 +61,28 @@
 
       <!-- Main Content Area -->
       <main class="main-content">
-        <!-- 3-Role Persona / Context Switcher Bar -->
-        <div class="persona-switcher-bar" id="persona-switcher-bar">
-          <div class="persona-tabs">
-            <button type="button" class="persona-tab active" data-persona="customer" id="btn-persona-customer">
-              <span class="icon">💼</span> Customer Compute Console
-            </button>
-            <button type="button" class="persona-tab" data-persona="provider" id="btn-persona-provider">
-              <span class="icon">📱</span> Provider Portal
-            </button>
-            <button type="button" class="persona-tab" data-persona="admin" id="btn-persona-admin">
-              <span class="icon">🛡️</span> Admin Console
-            </button>
+        <!-- Authoritative Session Identity & Context Bar -->
+        <div class="session-identity-bar" id="session-identity-bar">
+          <div class="session-left">
+            <span class="tenant-badge" id="active-tenant-badge">🏢 Authenticating session...</span>
+            <span class="role-badge" id="active-role-badge">Role: UNAUTHENTICATED</span>
+            <div id="superadmin-view-selector" class="superadmin-view-toggle" style="display: none; align-items: center; gap: 6px; font-size: 0.78rem; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 4px; padding: 2px 8px;">
+              <span style="color: #fbbf24; font-weight: 600;">👁️ UI Preview:</span>
+              <select id="superadmin-view-select" style="background: transparent; border: none; color: #fbbf24; font-size: 0.78rem; outline: none; cursor: pointer;">
+                <option value="admin" style="background: #0f172a; color: #fff;">Admin Console (Full Authority)</option>
+                <option value="customer" style="background: #0f172a; color: #fff;">Customer Console View</option>
+                <option value="provider" style="background: #0f172a; color: #fff;">Provider Portal View</option>
+              </select>
+            </div>
           </div>
-          <div class="persona-context">
-            <span class="tenant-badge" id="active-tenant-badge">🏢 Acme Distributed AI Labs (Tenant: default)</span>
-            <span class="role-badge" id="active-role-badge">Role: CUSTOMER</span>
+          <div class="session-right" id="profile-menu-container" style="display: flex; align-items: center; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="pulse-dot" style="width: 8px; height: 8px; background: #10b981; border-radius: 50%;"></span>
+              <span id="auth-user-email" style="font-size: 0.82rem; color: #cbd5e1; font-family: var(--font-mono);">Not signed in</span>
+            </div>
+            <button type="button" id="btn-logout" class="btn btn-xs btn-outline-rose" title="Terminate current authenticated session" style="display: flex; align-items: center; gap: 4px;">
+              <span>🚪</span> Sign Out
+            </button>
           </div>
         </div>
 
@@ -87,7 +93,7 @@
             <p id="tab-subtitle">Real-time distributed edge compute metrics and node fleet health</p>
           </div>
           <div class="top-actions">
-            <button id="btn-emergency-stop" class="btn btn-outline-rose" style="border-color: #ef4444; color: #fca5a5;" title="Emergency Stop active fabric work" onclick="window.spaasTriggerEmergencyStop()">
+            <button id="btn-emergency-stop" class="btn btn-outline-rose" style="border-color: #ef4444; color: #fca5a5; display: none;" title="Emergency Stop active fabric work" onclick="window.spaasTriggerEmergencyStop()">
               <span class="icon">🛑</span> Emergency Stop
             </button>
             <button id="btn-add-device" class="btn btn-outline-cyan" title="Enroll Smartphone or Edge Worker">
@@ -127,50 +133,211 @@
 
         <!-- Tab 1: Overview -->
         <section id="tab-view-overview" class="tab-pane active">
-          <!-- KPI Summary Cards -->
-          <div class="kpi-grid">
-            <div class="kpi-card" id="card-devices">
-              <div class="kpi-header">
-                <span class="kpi-label">Edge Compute Fleet</span>
-                <span class="kpi-icon">📱</span>
+          <!-- Zero Eligible Device Warning Banner (P0) -->
+          <div id="zero-eligible-banner" class="alert-banner" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; display: none; margin-bottom: 1.25rem;">
+            <span class="alert-icon">⚠️</span>
+            <div class="alert-text">
+              <strong>Cluster execution currently unavailable — connect an eligible provider device.</strong>
+              <div style="font-size: 0.8rem; color: #f87171; margin-top: 2px;">
+                Zero provider nodes are currently enrolled, online, or meet compute execution safeguards (charging, unmetered Wi-Fi, battery &gt; 40%).
               </div>
-              <div class="kpi-value"><span id="metric-active-nodes">0</span> <span class="kpi-sub">/ <span id="metric-idle-nodes">0</span> idle</span></div>
-              <div class="fleet-breakdown-pills mt-2" style="display: flex; gap: 0.35rem; flex-wrap: wrap; font-size: 0.72rem;">
-                <span class="badge" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #10B981;">Physical: <strong id="metric-count-physical">0</strong></span>
-                <span class="badge" style="background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.4); color: #06B6D4;">Emulator: <strong id="metric-count-emulator">0</strong></span>
-                <span class="badge" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #A855F7;">Desktop: <strong id="metric-count-desktop">0</strong></span>
-                <span class="badge" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #F59E0B;">Simulated: <strong id="metric-count-simulated">0</strong></span>
-              </div>
-              <div class="kpi-footer text-emerald mt-1" id="metric-footer-nodes">Edge fleet ready for compute</div>
             </div>
-
-            <div class="kpi-card" id="card-jobs">
-              <div class="kpi-header">
-                <span class="kpi-label">Queued &amp; Running Jobs</span>
-                <span class="kpi-icon">⚡</span>
-              </div>
-              <div class="kpi-value"><span id="metric-queued-jobs">0</span> <span class="kpi-sub">/ <span id="metric-running-jobs">0</span> run</span></div>
-              <div class="kpi-footer text-cyan">Deterministic WASM/WASI runtime</div>
-            </div>
-
-            <div class="kpi-card" id="card-completed">
-              <div class="kpi-header">
-                <span class="kpi-label">Completed / Failed</span>
-                <span class="kpi-icon">✅</span>
-              </div>
-              <div class="kpi-value"><span id="metric-completed-jobs">0</span> <span class="kpi-sub">/ <span id="metric-failed-jobs">0</span> err</span></div>
-              <div class="kpi-footer text-emerald">100% Cryptographic Verification</div>
-            </div>
-
-            <div class="kpi-card" id="card-health">
-              <div class="kpi-header">
-                <span class="kpi-label">System Health &amp; Uptime</span>
-                <span class="kpi-icon">⏱️</span>
-              </div>
-              <div class="kpi-value"><span id="metric-health-status" class="status-badge status-healthy">HEALTHY</span> <span class="kpi-sub" id="metric-uptime">0s up</span></div>
-              <div class="kpi-footer text-cyan">Scheduler latency: <span id="metric-latency">0.8ms</span> p50</div>
+            <div class="alert-actions">
+              <button id="btn-zero-eligible-enroll" class="btn btn-xs btn-primary">📱 Enroll Eligible Device</button>
             </div>
           </div>
+
+          <!-- PROVENANCE TIER 1: LIVE NOW (Real-Time Edge Fabric Telemetry) -->
+          <div class="provenance-tier-section mb-4">
+            <div class="provenance-tier-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid rgba(16, 185, 129, 0.25); padding-bottom: 0.4rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 1.1rem;">🔴</span>
+                <h3 style="font-size: 0.95rem; font-weight: 700; color: #10b981; margin: 0; text-transform: uppercase; letter-spacing: 0.05em;">LIVE NOW (Active Edge Fabric)</h3>
+              </div>
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <span class="badge" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #10b981; font-family: var(--font-mono); font-size: 0.72rem;">source = LIVE</span>
+                <span class="badge" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; font-family: var(--font-mono); font-size: 0.72rem;" id="live-measured-at">measured_at = real-time heartbeat</span>
+              </div>
+            </div>
+
+            <div class="kpi-grid">
+              <!-- Live Nodes Summary -->
+              <div class="kpi-card" id="card-devices">
+                <div class="kpi-header">
+                  <span class="kpi-label">Edge Compute Fleet</span>
+                  <span class="kpi-icon">📱</span>
+                </div>
+                <div class="kpi-value"><span id="metric-active-nodes">0</span> <span class="kpi-sub">/ <span id="metric-idle-nodes">0</span> idle</span></div>
+                <div class="fleet-breakdown-pills mt-2" style="display: flex; gap: 0.35rem; flex-wrap: wrap; font-size: 0.72rem;">
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #10B981;">Physical: <strong id="metric-count-physical">0</strong></span>
+                  <span class="badge" style="background: rgba(6, 182, 212, 0.15); border: 1px solid rgba(6, 182, 212, 0.4); color: #06B6D4;">Emulator: <strong id="metric-count-emulator">0</strong></span>
+                  <span class="badge" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #A855F7;">Desktop: <strong id="metric-count-desktop">0</strong></span>
+                </div>
+                <div class="kpi-footer text-emerald mt-1" id="metric-footer-nodes">Edge fleet live state</div>
+              </div>
+
+              <!-- Online & Eligible Nodes -->
+              <div class="kpi-card" id="card-live-eligibility">
+                <div class="kpi-header">
+                  <span class="kpi-label">Node Readiness &amp; Eligibility</span>
+                  <span class="kpi-icon">⚡</span>
+                </div>
+                <div class="kpi-value"><span id="metric-eligible-nodes">0</span> <span class="kpi-sub">eligible</span></div>
+                <div class="fleet-breakdown-pills mt-2" style="display: flex; gap: 0.35rem; flex-wrap: wrap; font-size: 0.72rem;">
+                  <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Online: <strong id="metric-online-nodes">0</strong></span>
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">Qualified: <strong id="metric-qualified-nodes">0</strong></span>
+                </div>
+                <div class="kpi-footer text-cyan mt-1">Charging &amp; Wi-Fi safeguards checked</div>
+              </div>
+
+              <!-- Live Dispatched / Leased Jobs -->
+              <div class="kpi-card" id="card-jobs">
+                <div class="kpi-header">
+                  <span class="kpi-label">Queued &amp; Running Jobs</span>
+                  <span class="kpi-icon">⏱️</span>
+                </div>
+                <div class="kpi-value"><span id="metric-running-jobs">0</span> <span class="kpi-sub">run / <span id="metric-queued-jobs">0</span> queue</span></div>
+                <div class="kpi-footer text-cyan">Active 30s heartbeat leases</div>
+              </div>
+
+              <!-- Combined Capacity & Channel -->
+              <div class="kpi-card" id="card-capacity">
+                <div class="kpi-header">
+                  <span class="kpi-label">Fleet Capacity &amp; Channel</span>
+                  <span class="kpi-icon">🌐</span>
+                </div>
+                <div class="kpi-value"><span id="metric-fleet-cores">0</span> <span class="kpi-sub">cores / <span id="metric-fleet-ram">0</span> GB</span></div>
+                <div class="fleet-breakdown-pills mt-2" style="display: flex; gap: 0.35rem; flex-wrap: wrap; font-size: 0.72rem;">
+                  <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;"><span id="metric-dispatch-rate">0.0</span> jobs/s</span>
+                  <span class="badge font-mono" style="background: rgba(16, 185, 129, 0.15); color: #10b981;" id="metric-worker-channel">STANDBY</span>
+                </div>
+                <div class="kpi-footer text-emerald mt-1">Outbound TLS/WSS edge workers</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PROVENANCE TIER 2: HISTORICAL (Authoritative Transactional Ledger) -->
+          <div class="provenance-tier-section mb-4">
+            <div class="provenance-tier-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid rgba(59, 130, 246, 0.25); padding-bottom: 0.4rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 1.1rem;">📜</span>
+                <h3 style="font-size: 0.95rem; font-weight: 700; color: #60a5fa; margin: 0; text-transform: uppercase; letter-spacing: 0.05em;">HISTORICAL (Transactional Ledger)</h3>
+              </div>
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <span class="badge" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #60a5fa; font-family: var(--font-mono); font-size: 0.72rem;">source = HISTORICAL</span>
+                <span class="badge" style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc; font-family: var(--font-mono); font-size: 0.72rem;">measured_at = transactional ledger</span>
+              </div>
+            </div>
+
+            <div class="kpi-grid">
+              <!-- Completed Jobs -->
+              <div class="kpi-card" id="card-completed">
+                <div class="kpi-header">
+                  <span class="kpi-label">Completed / Failed Tasks</span>
+                  <span class="kpi-icon">✅</span>
+                </div>
+                <div class="kpi-value"><span id="metric-completed-jobs">0</span> <span class="kpi-sub">/ <span id="metric-failed-jobs">0</span> err</span></div>
+                <div class="kpi-footer text-emerald">100% Cryptographic Verification</div>
+              </div>
+
+              <!-- Settled Ledger Credits -->
+              <div class="kpi-card" id="card-credits">
+                <div class="kpi-header">
+                  <span class="kpi-label">Settled Dual-Entry Credits</span>
+                  <span class="kpi-icon">💳</span>
+                </div>
+                <div class="kpi-value"><span id="metric-total-credits">0</span> <span class="unit">CR</span></div>
+                <div class="kpi-footer text-emerald">Audited non-repudiable balance</div>
+              </div>
+
+              <!-- Measured Speedup -->
+              <div class="kpi-card" id="card-measured-speedup">
+                <div class="kpi-header">
+                  <span class="kpi-label">Measured Parallel Speedup</span>
+                  <span class="kpi-icon">🚀</span>
+                </div>
+                <div class="kpi-value"><span id="metric-measured-speedup">--</span></div>
+                <div class="kpi-footer text-cyan">Empirical vs single-node baseline</div>
+              </div>
+
+              <!-- Health and Uptime -->
+              <div class="kpi-card" id="card-health">
+                <div class="kpi-header">
+                  <span class="kpi-label">System Health &amp; Uptime</span>
+                  <span class="kpi-icon">🛡️</span>
+                </div>
+                <div class="kpi-value"><span id="metric-health-status" class="status-badge status-healthy">HEALTHY</span> <span class="kpi-sub" id="metric-uptime">0s up</span></div>
+                <div class="kpi-footer text-cyan">Scheduler latency: <span id="metric-latency">0.8ms</span> p50</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PROVENANCE TIER 3: SIMULATION / LAB (Isolated Theoretical Heuristics) -->
+          <div class="provenance-tier-section mb-4">
+            <div class="provenance-tier-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid rgba(245, 158, 11, 0.25); padding-bottom: 0.4rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 1.1rem;">🧪</span>
+                <h3 style="font-size: 0.95rem; font-weight: 700; color: #fbbf24; margin: 0; text-transform: uppercase; letter-spacing: 0.05em;">SIMULATION &amp; LAB (Theoretical Heuristic)</h3>
+              </div>
+              <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <span class="badge" style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); color: #fbbf24; font-family: var(--font-mono); font-size: 0.72rem;">source = SIMULATION</span>
+                <span class="badge" style="background: rgba(148, 163, 184, 0.15); border: 1px solid rgba(148, 163, 184, 0.4); color: #94a3b8; font-family: var(--font-mono); font-size: 0.72rem;">model = Pareto Front Scaling</span>
+              </div>
+            </div>
+
+            <div class="kpi-grid">
+              <div class="kpi-card" id="card-sim-speedup">
+                <div class="kpi-header">
+                  <span class="kpi-label">Theoretical Scaling Ceiling</span>
+                  <span class="kpi-icon">📐</span>
+                </div>
+                <div class="kpi-value"><span id="metric-sim-speedup">1.35x</span> <span class="kpi-sub">(Pareto Model)</span></div>
+                <div class="kpi-footer text-muted" style="color: #fbbf24;">Isolated heuristic projection</div>
+              </div>
+
+              <div class="kpi-card" id="card-sim-nodes">
+                <div class="kpi-header">
+                  <span class="kpi-label">Synthetic Test Fleet</span>
+                  <span class="kpi-icon">🤖</span>
+                </div>
+                <div class="kpi-value"><span id="metric-count-simulated">0</span> <span class="kpi-sub">synthetic nodes</span></div>
+                <div class="kpi-footer text-muted">Excluded from ledger settlement</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Collapsible Drawer: Advanced Diagnostics & Engine Internals -->
+          <details class="card p-3 mb-3" style="background: rgba(15, 23, 42, 0.75); border: 1px solid var(--border-color);">
+            <summary style="cursor: pointer; font-weight: 600; color: #94a3b8; display: flex; align-items: center; justify-content: space-between; user-select: none;">
+              <span style="display: flex; align-items: center; gap: 0.5rem;">
+                <span>🔧</span>
+                <span>Advanced Diagnostics &amp; Engine Internals (PARETO, SQLite DO, WSS, CRC32, Epoch)</span>
+              </span>
+              <span class="badge" style="font-size: 0.7rem; background: rgba(255,255,255,0.06);">Click to expand</span>
+            </summary>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid rgba(255,255,255,0.06);">
+              <div style="background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 6px;">
+                <span style="font-size: 0.75rem; color: #94a3b8; display: block;">PARETO SCALING</span>
+                <span id="diag-pareto-status" class="font-mono text-emerald" style="font-size: 0.85rem; font-weight: 600;">STANDBY</span>
+              </div>
+              <div style="background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 6px;">
+                <span style="font-size: 0.75rem; color: #94a3b8; display: block;">PERSISTENCE ENGINE</span>
+                <span id="diag-sqlite-status" class="font-mono text-cyan" style="font-size: 0.85rem; font-weight: 600;">DURABLE_SQLITE_PRIMARY</span>
+              </div>
+              <div style="background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 6px;">
+                <span style="font-size: 0.75rem; color: #94a3b8; display: block;">WSS CHANNEL</span>
+                <span id="diag-wss-status" class="font-mono text-emerald" style="font-size: 0.85rem; font-weight: 600;">ACTIVE_LISTEN</span>
+              </div>
+              <div style="background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 6px;">
+                <span style="font-size: 0.75rem; color: #94a3b8; display: block;">CRC32 INTEGRITY</span>
+                <span id="diag-crc32-status" class="font-mono text-emerald" style="font-size: 0.85rem; font-weight: 600;">0x4A8C91B2 (VALID)</span>
+              </div>
+              <div style="background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 6px;">
+                <span style="font-size: 0.75rem; color: #94a3b8; display: block;">CONTROL EPOCH</span>
+                <span id="diag-epoch-status" class="font-mono text-cyan" style="font-size: 0.85rem; font-weight: 600;">Epoch 1 (Authoritative)</span>
+              </div>
+            </div>
+          </details>
 
           <!-- Six Core Edge Fabric Questions Answer Grid (Requirement #9) -->
           <div class="card p-3 mb-3" style="background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 100%); border: 1px solid rgba(56, 189, 248, 0.25);">
@@ -281,29 +448,7 @@
             </div>
           </div>
 
-          <!-- Secondary Metrics Grid -->
-          <div class="metrics-subgrid">
-            <div class="card subcard">
-              <h4>Total Fleet Capacity</h4>
-              <div class="subcard-stat"><span id="metric-fleet-cores">0</span> <span class="unit">cores</span> / <span id="metric-fleet-ram">0</span> <span class="unit">GB RAM</span></div>
-              <p class="text-muted">Combined edge CPU &amp; memory capacity</p>
-            </div>
-            <div class="card subcard">
-              <h4>Scheduler Dispatch Rate</h4>
-              <div class="subcard-stat"><span id="metric-dispatch-rate">0.0</span> <span class="unit">jobs/sec</span></div>
-              <p class="text-muted">Weighted scoring: battery, thermals, latency, network</p>
-            </div>
-            <div class="card subcard">
-              <h4>Worker Channel Status</h4>
-              <div class="subcard-stat font-mono text-emerald" id="metric-worker-channel">STANDBY</div>
-              <p class="text-muted">Outbound TLS/WSS authenticated worker sessions</p>
-            </div>
-            <div class="card subcard">
-              <h4>Idempotent Dual-Entry Credits</h4>
-              <div class="subcard-stat"><span id="metric-total-credits">0</span> <span class="unit">CR</span></div>
-              <p class="text-muted">Audited settlement ledger preventing double-spend</p>
-            </div>
-          </div>
+
 
           <!-- Recent Activity & Cluster Snapshot -->
           <div class="card">
@@ -2135,6 +2280,60 @@
           <div style="display: flex; gap: 8px;">
             <button type="button" id="btn-offer-always" class="btn btn-outline-cyan">⚡ Always Allow Workload</button>
             <button type="button" id="btn-offer-accept" class="btn btn-primary">✓ Accept &amp; Run</button>
+          </div>
+        </div>
+      </div>
+    <!-- Modal: Authoritative Authentication Boundary (P0) -->
+    <div id="modal-login" class="modal-overlay">
+      <div class="modal-box" style="max-width: 480px; width: 95%;">
+        <div class="modal-header" style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.15) 0%, rgba(15, 23, 42, 0.95) 100%);">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span style="font-size: 1.6rem;">🔐</span>
+            <div>
+              <h2 style="margin: 0; font-size: 1.25rem; color: #38bdf8;">SPaaS Edge Fabric Sign In</h2>
+              <span class="text-sub" style="font-size: 0.8rem;">Authoritative Zero-Trust Authentication Boundary</span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-scroll-body" style="padding: 1.5rem;">
+          <form id="form-login">
+            <div class="form-group mb-3">
+              <label for="login-email" style="display: block; font-size: 0.85rem; font-weight: 600; color: #cbd5e1; margin-bottom: 6px;">Email / User Account</label>
+              <input type="email" id="login-email" class="form-input" style="width: 100%; box-sizing: border-box;" placeholder="customer@acme.com" required autocomplete="username" />
+            </div>
+            <div class="form-group mb-3">
+              <label for="login-password" style="display: block; font-size: 0.85rem; font-weight: 600; color: #cbd5e1; margin-bottom: 6px;">Password</label>
+              <input type="password" id="login-password" class="form-input" style="width: 100%; box-sizing: border-box;" placeholder="••••••••••••" required autocomplete="current-password" />
+            </div>
+            <button type="submit" id="btn-login-submit" class="btn btn-primary" style="width: 100%; padding: 10px; font-weight: 600; justify-content: center; display: flex; align-items: center; gap: 6px;">
+              <span>🔐</span> Sign In
+            </button>
+            <div id="login-error-msg" class="alert-banner" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; display: none; margin-top: 1rem; padding: 10px 14px; font-size: 0.85rem; border-radius: 6px;">
+            </div>
+          </form>
+
+          <div class="dev-presets-section mt-4 pt-3" style="border-top: 1px solid rgba(255,255,255,0.08);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 0.72rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">DEV Quick-Fill (Pre-seeded Accounts)</span>
+              <span class="badge" style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Dev Only</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.78rem;">
+              <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer@acme.com" data-pass="CustomerSecret123!" style="justify-content: flex-start;">
+                💼 Customer
+              </button>
+              <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer_admin@acme.com" data-pass="CustAdminSecret123!" style="justify-content: flex-start;">
+                🏢 Customer Admin
+              </button>
+              <button type="button" class="btn btn-xs btn-outline-emerald btn-dev-fill" data-email="provider@phonefarm.io" data-pass="ProviderSecret123!" style="justify-content: flex-start;">
+                📱 Provider
+              </button>
+              <button type="button" class="btn btn-xs btn-outline-amber btn-dev-fill" data-email="superadmin@spaas.internal" data-pass="SuperAdminRootKey999!" style="justify-content: flex-start;">
+                🛡️ Super Admin
+              </button>
+              <button type="button" class="btn btn-xs btn-outline-rose btn-dev-fill" data-email="locked@acme.com" data-pass="CustomerSecret123!" style="justify-content: flex-start; grid-column: span 2;">
+                🔒 Locked Account (Test 403)
+              </button>
+            </div>
           </div>
         </div>
       </div>

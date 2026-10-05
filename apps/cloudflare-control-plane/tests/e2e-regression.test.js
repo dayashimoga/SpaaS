@@ -102,12 +102,12 @@ test("E2E Integration — Centralized RBAC Interception & Route Security", async
   }));
   assert.equal(badTokenRes.status, 401);
 
-  // 3. Customer accessing Super-Admin route -> 401
+  // 3. Customer accessing Super-Admin route -> 403
   const adminRes = await coordinator.fetch(new Request("http://localhost/api/v1/fabric/emergency-stop", {
     method: "POST",
     headers: { "Authorization": "Bearer token_customer" }
   }));
-  assert.equal(adminRes.status, 401);
+  assert.equal(adminRes.status, 403);
 
   // 4. Provider attempting customer job creation (lacks jobs:create) -> 403
   const provRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
@@ -413,4 +413,195 @@ test("E2E Integration — Authoritative Fabric State Reconciliation", async () =
   const jobAfter = coordinator.sqlExec("SELECT state, retry_count FROM jobs WHERE id = ?", expiredJobId);
   assert.equal(jobAfter[0].state, "Pending");
   assert.equal(jobAfter[0].retry_count, 1);
+});
+
+test("E2E Integration — Mandatory 14-Attack-Vector RBAC & Security Boundaries Matrix", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET,
+    SPAAS_REQUIRE_AUTH: "true"
+  });
+
+  // Setup seed jobs and nodes for cross-tenant and device-binding tests
+  const jobTenantB = "job_tenant_b_secret_01";
+  coordinator.sqlExec(
+    "INSERT INTO jobs (id, tenant_id, user_id, workload_id, state, assigned_node_id, fencing_token, created_at) VALUES (?, 'tenant_competitor_b', 'usr_competitor_dev', 'wl_secret', 'RUNNING', 'dev_node_b', 'fence_b_1', ?)",
+    jobTenantB, Date.now()
+  );
+
+  const devTokenA = "spaas_auth_device_a_secret";
+  const devTokenB = "spaas_auth_device_b_secret";
+  coordinator.sqlExec(
+    `INSERT OR REPLACE INTO nodes (id, name, device_type, public_key, auth_token, state, capabilities, policy, telemetry, is_simulated, tenant_id, last_heartbeat, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    "dev_node_a", "Device A", "android", "ed25519_pk_a", devTokenA, "Ready", null, null, null, 0, "tenant_community_providers", Date.now(), Date.now()
+  );
+  coordinator.sqlExec(
+    `INSERT OR REPLACE INTO nodes (id, name, device_type, public_key, auth_token, state, capabilities, policy, telemetry, is_simulated, tenant_id, last_heartbeat, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    "dev_node_b", "Device B", "android", "ed25519_pk_b", devTokenB, "Ready", null, null, null, 0, "tenant_community_providers", Date.now(), Date.now()
+  );
+
+  // Attack 1: Anonymous -> Admin route = 401
+  const a1 = await coordinator.fetch(new Request("http://localhost/api/v1/fabric/emergency-stop", { method: "POST" }));
+  assert.equal(a1.status, 401, "Attack 1: Anonymous to admin endpoint must return 401");
+
+  // Attack 2: Customer -> Emergency Stop = 403
+  const a2 = await coordinator.fetch(new Request("http://localhost/api/v1/fabric/emergency-stop", {
+    method: "POST",
+    headers: { "Authorization": "Bearer token_customer" }
+  }));
+  assert.equal(a2.status, 403, "Attack 2: Customer accessing emergency-stop must return 403");
+
+  // Attack 3: Customer -> Admin Diagnostics = 403
+  const a3 = await coordinator.fetch(new Request("http://localhost/api/v1/admin/diagnostics", {
+    method: "GET",
+    headers: { "Authorization": "Bearer token_customer" }
+  }));
+  assert.equal(a3.status, 403, "Attack 3: Customer accessing admin diagnostics must return 403");
+
+  // Attack 4: Customer -> Delete Node = 403
+  const a4 = await coordinator.fetch(new Request("http://localhost/api/v1/nodes/dev_node_a", {
+    method: "DELETE",
+    headers: { "Authorization": "Bearer token_customer" }
+  }));
+  assert.equal(a4.status, 403, "Attack 4: Customer deleting node must return 403");
+
+  // Attack 5: Customer A -> Customer B Job = 403 or 404
+  const a5Read = await coordinator.fetch(new Request(`http://localhost/api/v1/jobs/${jobTenantB}`, {
+    method: "GET",
+    headers: { "Authorization": "Bearer token_customer" }
+  }));
+  assert.ok(a5Read.status === 403 || a5Read.status === 404, "Attack 5: Customer A reading Customer B job must return 403/404");
+
+  const a5Cancel = await coordinator.fetch(new Request(`http://localhost/api/v1/jobs/${jobTenantB}/cancel`, {
+    method: "POST",
+    headers: { "Authorization": "Bearer token_customer" }
+  }));
+  assert.ok(a5Cancel.status === 403 || a5Cancel.status === 404, "Attack 5: Customer A cancelling Customer B job must return 403/404");
+
+  // Attack 6: Provider -> Admin operations = 403
+  const a6 = await coordinator.fetch(new Request("http://localhost/api/v1/fabric/emergency-stop", {
+    method: "POST",
+    headers: { "Authorization": "Bearer token_provider" }
+  }));
+  assert.equal(a6.status, 403, "Attack 6: Provider accessing admin fabric controls must return 403");
+
+  // Attack 7: Device A -> Device B poll/results = 403
+  const a7Poll = await coordinator.fetch(new Request("http://localhost/api/v1/nodes/dev_node_b/poll", {
+    method: "GET",
+    headers: { "Authorization": `Bearer ${devTokenA}` }
+  }));
+  assert.equal(a7Poll.status, 403, "Attack 7: Device A polling Device B queue must return 403");
+
+  const a7Res = await coordinator.fetch(new Request("http://localhost/api/v1/nodes/results", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${devTokenA}` },
+    body: JSON.stringify({ node_id: "dev_node_b", job_id: jobTenantB, fencing_token: "fence_b_1" })
+  }));
+  assert.equal(a7Res.status, 403, "Attack 7: Device A submitting results for Device B must return 403");
+
+  // Attack 8: Expired Session Token = 401
+  const expiredToken = "sess_expired_attack_test";
+  coordinator.sqlExec(
+    "INSERT INTO sessions (token, tenant_id, user_id, role, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    expiredToken, "tenant_enterprise_customer", "usr_cust_dev", "CUSTOMER", Date.now() - 5000, Date.now() - 100000
+  );
+  const a8 = await coordinator.fetch(new Request("http://localhost/api/v1/auth/me", {
+    method: "GET",
+    headers: { "Authorization": `Bearer ${expiredToken}` }
+  }));
+  assert.equal(a8.status, 401, "Attack 8: Expired session token must return 401");
+
+  // Attack 9: Forged Role Header Ignored
+  const a9 = await coordinator.fetch(new Request("http://localhost/api/v1/fabric/emergency-stop", {
+    method: "POST",
+    headers: {
+      "Authorization": "Bearer token_customer",
+      "X-SPaaS-Role": "SUPER_ADMIN",
+      "X-Role": "SUPER_ADMIN",
+      "Role": "SUPER_ADMIN"
+    }
+  }));
+  assert.equal(a9.status, 403, "Attack 9: Forged role headers must be ignored and request denied with 403");
+
+  // Attack 10: Modified tenant_id Ignored (Strictly Enforced Server-Side)
+  const a10 = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer token_customer"
+    },
+    body: JSON.stringify({
+      name: "Spoofed Tenant Workload",
+      tenant_id: "tenant_competitor_b", // Attacker attempts to forge tenant ownership
+      user_id: "usr_attacker_999"
+    })
+  }));
+  assert.equal(a10.status, 201);
+  const a10Data = await a10.json();
+  const createdJobInDb = coordinator.sqlExec("SELECT tenant_id FROM jobs WHERE id = ?", a10Data.job_id);
+  assert.equal(createdJobInDb[0].tenant_id, "tenant_enterprise_customer", "Attack 10: Tenant ID must be strictly bound to authenticated session, ignoring client payload spoofing");
+
+  // Attack 11: Replayed Enrollment Token Rejected
+  const tokenRes = await coordinator.fetch(new Request("http://localhost/api/v1/devices/pairing-token", {
+    method: "POST",
+    headers: ADMIN_HEADERS
+  }));
+  const { token: pairToken } = await tokenRes.json();
+  const pairPayload = { pairing_token: pairToken, node_id: "node_single_use_test", device_type: "android" };
+  const firstPair = await coordinator.fetch(new Request("http://localhost/api/v1/devices/pair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(pairPayload)
+  }));
+  assert.equal(firstPair.status, 200);
+  const replayPair = await coordinator.fetch(new Request("http://localhost/api/v1/devices/pair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(pairPayload)
+  }));
+  assert.equal(replayPair.status, 400, "Attack 11: Replayed enrollment token must be rejected");
+
+  // Attack 12: Revoked Device Rejected = 403
+  coordinator.sqlExec("UPDATE nodes SET state = 'Revoked' WHERE id = ?", "dev_node_a");
+  const a12 = await coordinator.fetch(new Request("http://localhost/api/v1/nodes/heartbeat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${devTokenA}` },
+    body: JSON.stringify({ node_id: "dev_node_a" })
+  }));
+  assert.equal(a12.status, 403, "Attack 12: Revoked device heartbeat must be rejected with 403");
+
+  // Attack 13: Duplicate Mutation with Idempotency-Key Safe
+  const idempKey = "idemp_attack_matrix_key";
+  const idempPayload = { name: "Safe Job", limits: { max_fuel: 500000 } };
+  const m1 = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer token_customer", "Idempotency-Key": idempKey },
+    body: JSON.stringify(idempPayload)
+  }));
+  assert.equal(m1.status, 201);
+  const m2 = await coordinator.fetch(new Request("http://localhost/api/v1/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer token_customer", "Idempotency-Key": idempKey },
+    body: JSON.stringify(idempPayload)
+  }));
+  assert.equal(m2.status, 201);
+  const m1Data = await m1.json();
+  const m2Data = await m2.json();
+  assert.equal(m1Data.job_id, m2Data.job_id, "Attack 13: Duplicate mutation with idempotency key must safely return original entity");
+
+  // Attack 14: Stale Fencing Result Rejected = 409
+  coordinator.sqlExec("UPDATE jobs SET state = 'RUNNING', assigned_node_id = 'dev_node_b', fencing_token = 'fence_authoritative_epoch_5' WHERE id = ?", jobTenantB);
+  const a14 = await coordinator.fetch(new Request("http://localhost/api/v1/nodes/results", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${devTokenB}` },
+    body: JSON.stringify({
+      node_id: "dev_node_b",
+      job_id: jobTenantB,
+      fencing_token: "fence_stale_epoch_1", // Stale fence
+      result: { exit_code: 0, stdout: "stale computation", fuel_consumed: 1000 }
+    })
+  }));
+  assert.equal(a14.status, 409, "Attack 14: Stale fencing token result must be rejected with 409 Conflict");
 });
