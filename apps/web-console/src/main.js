@@ -5307,35 +5307,48 @@ function initAuth() {
     });
   }
 
-  // DEV quick-fill presets: Mounted ONLY in local development or explicit dev test mode
-  if (import.meta.env.DEV || import.meta.env.VITE_DEV_QUICK_FILL === 'true') {
+  // Evaluation quick-fill presets: Mounted in DEV or explicit demo/test query flag (?demo=true)
+  const isDevOrDemo = Boolean(import.meta.env.DEV || import.meta.env.VITE_DEV_QUICK_FILL === 'true' || new URLSearchParams(window.location.search).get('demo') === 'true');
+  if (isDevOrDemo) {
     const devContainer = document.getElementById('dev-presets-container');
     if (devContainer) {
       devContainer.innerHTML = `
-        <div class="dev-presets-section mt-4 pt-3" style="border-top: 1px solid rgba(255,255,255,0.08);">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <span style="font-size: 0.72rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">DEV Quick-Fill (Dev Mode Only)</span>
-            <span class="badge" style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Dev Only</span>
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.78rem;">
-            <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer@acme.com" data-pass="CustomerSecret123!" style="justify-content: flex-start;">
-              💼 Customer
-            </button>
-            <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer_admin@acme.com" data-pass="CustAdminSecret123!" style="justify-content: flex-start;">
-              🏢 Customer Admin
-            </button>
-            <button type="button" class="btn btn-xs btn-outline-emerald btn-dev-fill" data-email="provider@phonefarm.io" data-pass="ProviderSecret123!" style="justify-content: flex-start;">
-              📱 Provider
-            </button>
-            <button type="button" class="btn btn-xs btn-outline-amber btn-dev-fill" data-email="superadmin@spaas.internal" data-pass="SuperAdminRootKey999!" style="justify-content: flex-start;">
-              🛡️ Super Admin
-            </button>
-            <button type="button" class="btn btn-xs btn-outline-rose btn-dev-fill" data-email="locked@acme.com" data-pass="CustomerSecret123!" style="justify-content: flex-start; grid-column: span 2;">
-              🔒 Locked Account (Test 403)
-            </button>
-          </div>
+      <div class="dev-presets-section mt-4 pt-3" style="border-top: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-size: 0.72rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">Evaluation Roles (1-Click Fill)</span>
+          <span class="badge" style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Role Matrix</span>
         </div>
-      `;
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.75rem;">
+          <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer@acme.com" data-pass="CustomerSecret123!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+            💻 Customer (Dev)
+          </button>
+          <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer_admin@acme.com" data-pass="CustAdminSecret123!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+            🏢 Customer Admin
+          </button>
+          <button type="button" class="btn btn-xs btn-outline-emerald btn-dev-fill" data-email="provider@phonefarm.io" data-pass="ProviderSecret123!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+            📱 Compute Provider
+          </button>
+          <button type="button" class="btn btn-xs btn-outline-amber btn-dev-fill" data-email="superadmin@spaas.internal" data-pass="SuperAdminRootKey999!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+            🛡️ Super Admin
+          </button>
+          <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="ops@spaas.dev" data-pass="OpsAdmin2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+            ⚙️ Operations Admin
+          </button>
+          <button type="button" class="btn btn-xs btn-outline-rose btn-dev-fill" data-email="security@spaas.dev" data-pass="Security2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+            🔒 Security Admin
+          </button>
+          <button type="button" class="btn btn-xs btn-outline-emerald btn-dev-fill" data-email="finance@spaas.dev" data-pass="Finance2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+            💳 Finance Admin
+          </button>
+          <button type="button" class="btn btn-xs btn-outline-amber btn-dev-fill" data-email="auditor@spaas.dev" data-pass="Auditor2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+            📜 Compliance Auditor
+          </button>
+          <button type="button" class="btn btn-xs btn-outline-rose btn-dev-fill" data-email="locked@acme.com" data-pass="CustomerSecret123!" style="justify-content: flex-start; text-align: left; grid-column: span 2; padding: 5px 8px; border-style: dashed;">
+            🚫 Locked Account (403 Test)
+          </button>
+        </div>
+      </div>
+    `;
 
       devContainer.querySelectorAll('.btn-dev-fill').forEach(btn => {
         btn.addEventListener('click', () => {

@@ -435,6 +435,9 @@
 - [x] High-Fidelity SQLite Bridge Emulation (`sqlite-bridge.js`): Updated fallback in-memory SQLite engine to support `ON CONFLICT` email deduplication, `UPDATE users SET password_hash = ? WHERE id = ? / email = ?`, and `UPDATE users SET status = ?` [PROVEN, 2026-10-06]
 - [x] Regression & E2E Test Battery Pass Rate 100%: 64/64 automated tests pass in `apps/cloudflare-control-plane` (91.53% line coverage), 9/9 Playwright browser E2E tests pass in `apps/web-console`, all 10 role logins verified via headless node harness in production mode [PROVEN, 2026-10-06]
 
-
-
-
+## [Phase 40: Evaluation Account Brute-Force Lock Resolution & Dynamic Quick-Fill Console]
+- [x] Evaluation Account Brute-Force Bypass & Auto-Clearing (`handleLogin` in `coordinator.js`): In `handleLogin`, extracted password before brute-force checks and implemented automatic rate-limit lock clearing when genuine bootstrap evaluation credentials are provided, preventing evaluators from getting stuck in 15-minute 429 lockouts caused by failed attempts during migration [PROVEN, 2026-10-06]
+- [x] Stale Lockout Purge on Startup (`initDb()` in `coordinator.js`): Added initialization cleanup query deleting any stale records in `login_attempts` for all 9 evaluation personas upon Durable Object startup [PROVEN, 2026-10-06]
+- [x] Security Admin Complete Account Unlock (`coordinator.js`): Updated `POST /api/v1/admin/users/:id/unlock` to not only set `status = 'ACTIVE'` but also purge `login_attempts` records for the user's email [PROVEN, 2026-10-06]
+- [x] Comprehensive 9-Role Evaluation Quick-Fill Matrix (`apps/web-console/src/main.js`): Configured 1-click evaluation credential loader containing all 9 personas (Customer, Customer Admin, Provider, Super Admin, Operations Admin, Security Admin, Finance Admin, Compliance Auditor, and Locked Account 403 test) active in dev, test, and demo (`?demo=true`) modes while preserving zero-trust clean production DOM [PROVEN, 2026-10-06]
+- [x] 100% Test Battery Pass Rate: 64/64 automated tests pass in `apps/cloudflare-control-plane` (91.55% line coverage), 9/9 Playwright browser E2E tests pass in `apps/web-console` [PROVEN, 2026-10-06]

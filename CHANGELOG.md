@@ -565,5 +565,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SQLite Bridge Schema Updates (`sqlite-bridge.js`):** Handled `UPDATE users SET password_hash` (by ID or lowercased email), `UPDATE users SET status` with literal or parameterized values, and `DELETE FROM users WHERE role = 'SUPER_ADMIN'`.
 - **Full Verification Across All Suites:** 64/64 control plane tests pass, 9/9 Playwright browser tests pass, and all 10 evaluation personas successfully authenticate in production mode.
 
+---
+
+## [0.4.2] - 2026-10-06
+
+### Fixed & Enhanced — Evaluation Account Brute-Force Lock Resolution & Quick-Fill Experience
+- **Brute-Force Lockout Auto-Clearing (`handleLogin` in `coordinator.js`):** Moved password parsing before brute-force lock check. When valid bootstrap evaluation credentials are submitted, `login_attempts` is automatically cleared via `recordLoginSuccess(email)`, resolving the 15-minute 429 lockout triggered by earlier attempts.
+- **Durable Object Startup Purge (`initDb()` in `coordinator.js`):** Added query to clear stale `login_attempts` records across all 9 evaluation roles on startup.
+- **Security Admin Account Unlock (`coordinator.js`):** Enhanced `POST /api/v1/admin/users/:id/unlock` to clear `login_attempts` in addition to activating user status.
+- **Expanded Evaluation Quick-Fill Presets (`apps/web-console/src/main.js`):** Extended evaluation credentials launcher with all 9 personas (Customer, Customer Admin, Provider, Super Admin, Operations Admin, Security Admin, Finance Admin, Compliance Auditor, and Locked Account) accessible in dev, test, and demo (`?demo=true`) modes.
+- **100% Pass Rate:** 64/64 control plane tests (91.55% line coverage) and 9/9 browser Playwright E2E tests pass.
+
 
 

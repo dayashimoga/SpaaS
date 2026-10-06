@@ -1580,8 +1580,12 @@ function createMinimalFallbackEngine() {
         const row = tables.login_attempts.get(params[0]);
         return row ? [row] : [];
       }
-      if (qu.startsWith("DELETE FROM LOGIN_ATTEMPTS WHERE KEY =")) {
-        tables.login_attempts.delete(params[0]);
+      if (qu.startsWith("DELETE FROM LOGIN_ATTEMPTS")) {
+        if (qu.includes("WHERE KEY =")) {
+          tables.login_attempts.delete(params[0]);
+        } else {
+          tables.login_attempts.clear();
+        }
         return [];
       }
 
