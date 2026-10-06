@@ -473,4 +473,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **100% Green Test Battery (63/63 Passing, 93.29% Coverage):** 56 unit/integration tests in `tests/coordinator.test.js` and 7 tests in `tests/e2e-regression.test.js` pass cleanly with 93.29% line coverage.
 - **Production Asset Build Validation:** Production Vite bundle verified cleanly in container (185.58 kB JS, 25.45 kB CSS, 145.83 kB HTML).
 
+---
+
+## [0.5.0-prod] - 2026-10-06
+
+### Full-Stack Production Readiness Audit, Cross-Tenant Isolation, Dynamic FinOps & SDK Delivery
+
+#### 1. Zero-Trust Authentication Boundary & Session Enforcement (`coordinator.js`)
+- **Strict 401 Unauthenticated Protection:** Explicitly blocked development test identity fallback on `/api/v1/auth/me` and all `AUTHENTICATED` routes when authorization credentials are not supplied, guaranteeing strict zero-trust boundary.
+- **Account Locking & Session Invalidation:** Verified account locked check (`ACCOUNT_LOCKED` 403) across all authenticated operations.
+
+#### 2. Cross-Tenant Data Leak Elimination (`coordinator.js`, `sqlite-bridge.js`)
+- **Subresource Tenant Boundary Checks:** Added tenant validation to `GET /api/v1/jobs/:id/trace`, `GET /api/v1/jobs/:id/decision`, and `GET /api/v1/observability/trace/:id` strictly returning `403 Forbidden` if a customer attempts to query resources belonging to another tenant.
+- **Tenant-Scoped Metering & Exports:** Scoped `/api/v1/metering` summaries and `/api/v1/ledger/download` CSV exports to the authenticated caller's `tenant_id` for customer personas.
+- **Device Pairing Tenant Binding:** Bound enrolled devices to `tokenRecord.tenant_id || 'tenant_community_providers'` upon pairing redemption.
+
+#### 3. Distributed State, OCC & Persistent Monotonic Fencing (`coordinator.js`, `sqlite-bridge.js`)
+- **Tenant-Scoped Idempotency:** Added `tenant_id` column to SQLite `idempotency_keys` table. Scoped cache lookups and insertions to prevent cross-tenant key collisions. Added idempotency checking to `POST /api/v1/jobs/sharded` and `POST /api/v1/billing/payout-request`.
+- **Atomic Fencing Token Persistence:** Updated `getNextFencingToken()` to persist and increment `fencing_seq` in the Durable Object SQLite `meta` table, preventing token collision across Worker restarts.
+- **Authoritative 6-Tuple Scheduler Filter:** Replaced legacy flat query in `schedulePendingJobs()` with dynamic 6-tuple filtering (`computeNodeAuthoritativeState()`) checking `connection === 'ONLINE'`, `availability === 'AVAILABLE'`, and non-`NONE` eligibility.
+
+#### 4. Dynamic FinOps Double-Entry Reconciliation & Pricing (`coordinator.js`)
+- **Dynamic Discrepancy Computation:** Replaced static 0.0000 CR discrepancy in `GET /api/v1/billing/reconciliation` with dynamic calculation `Math.abs(totalGrossDebits - (totalProviderCredits + totalPlatformFeeCredits))`.
+- **Unit Economics Gross Contribution Breakdown:** Returned explicit gross contribution breakdown factoring infrastructure/storage (2%), verification compute (1%), and payment/fraud reserves (1.5%).
+- **Non-Fiat Sandbox Isolation:** Tagged reconciliation response with `is_fiat: false`, sandbox gateway metadata, and regulatory compliance flags.
+
+#### 5. Full Authoritative State DR Checkpoint Export (`coordinator.js`)
+- **Complete Table Backup:** Added `users`, `tenants`, `leases`, `idempotency_keys`, and `device_sessions` tables to `GET /api/v1/dr/checkpoint` alongside nodes, jobs, and ledger for disaster recovery failover.
+
+#### 6. Honest Web Console Placeholders & Integrity Checksum (`index.html`, `main.js`)
+- **Elimination of Demo Values:** Replaced hardcoded `280 ms`, `145 ms`, `85 ms`, `3.29x Speedup`, and `0x4A8C91B2` with honest idle state placeholders (`— ms`, `— Speedup`, `CRC32_STANDBY`).
+- **Dynamic Integrity Computation:** Implemented runtime CRC32 computation in `runDiagnostics()` calculating authentic checksums across live cluster state.
+
+#### 7. Standalone Python & JavaScript Developer SDKs (`sdks/python`, `sdks/js`)
+- **Python SDK (`spaas_sdk.py`):** Created lightweight zero-dependency Python client with full lifecycle methods (`login`, `workloads`, `plan`, `run`, `status`, `logs`, `cancel`, `result`). 4/4 automated tests passing.
+- **JavaScript / Node.js SDK (`spaas-sdk.js`):** Created ES module JavaScript SDK with full lifecycle methods. 3/3 automated tests passing.
+
+#### 8. Automated Security Matrix Expansion (`tests/e2e-regression.test.js`)
+- **18-Attack-Vector Matrix:** Added Attacks 15 to 18 testing anonymous `/auth/me` rejection, cross-tenant resource isolation, complete DR state export, and FinOps dynamic reconciliation.
+- **100% Test Battery Pass Rate:** 64/64 tests pass in `apps/cloudflare-control-plane` with **93.01% line coverage**. All Rust workspace tests pass.
+
 

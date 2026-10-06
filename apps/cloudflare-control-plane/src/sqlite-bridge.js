@@ -125,21 +125,49 @@ function createMinimalFallbackEngine() {
       if (qu.startsWith("CREATE") || qu.startsWith("ALTER TABLE")) return [];
 
       // META
-      if (qu.startsWith("INSERT OR IGNORE INTO META")) {
+      if (qu.startsWith("INSERT OR IGNORE INTO META") || qu.startsWith("INSERT OR REPLACE INTO META") || qu.startsWith("INSERT INTO META")) {
         const [k, v] = params;
-        if (!tables.meta.has(k)) tables.meta.set(k, v);
+        tables.meta.set(k, v);
         return [];
       }
       if (qu.startsWith("UPDATE META SET VALUE =")) {
-        const [val, key] = params.length >= 2 ? [params[0], params[1]] : [qu.includes("'PAUSED'") ? 'PAUSED' : qu.includes("'ACTIVE'") ? 'ACTIVE' : qu.includes("'DRAINING'") ? 'DRAINING' : 'STOPPED', 'fabric_status'];
+        let key = "fabric_status";
+        let val;
+        if (params.length >= 2) {
+          [val, key] = params;
+        } else if (params.length === 1) {
+          val = params[0];
+          const m = qu.match(/WHERE KEY = '([^']+)'/i);
+          if (m) key = m[1];
+        } else {
+          val = qu.includes("'PAUSED'") ? "PAUSED" : qu.includes("'ACTIVE'") ? "ACTIVE" : qu.includes("'DRAINING'") ? "DRAINING" : "STOPPED";
+        }
         tables.meta.set(key, val);
         return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM META")) {
+        if (qu.includes("WHERE KEY =")) {
+          const k = params.length > 0 ? params[0] : (qu.match(/WHERE KEY = '([^']+)'/i)?.[1]);
+          if (k && tables.meta.has(k)) {
+            return [{ key: k, value: tables.meta.get(k) }];
+          }
+          return [];
+        }
+        return Array.from(tables.meta.entries()).map(([key, value]) => ({ key, value }));
       }
 
       // PAIRING_TOKENS
       if (qu.startsWith("INSERT INTO PAIRING_TOKENS")) {
-        const [token, short_code, opaque_credential, expires_at, status_unused, created_at] =
-          params.length >= 5 ? params : [params[0], params[0], params[0], params[1], "Active", params[2] || Date.now()];
+        let token, short_code, opaque_credential, expires_at, status_unused, created_at, tenant_id, created_by;
+        if (params.length >= 7) {
+          [token, short_code, opaque_credential, expires_at, created_at, tenant_id, created_by] = params;
+        } else if (params.length >= 5) {
+          [token, short_code, opaque_credential, expires_at, status_unused, created_at] = params;
+        } else {
+          [token, expires_at, created_at] = params;
+          short_code = token;
+          opaque_credential = token;
+        }
         tables.pairing_tokens.set(token, {
           token,
           short_code: short_code || token,
@@ -148,7 +176,9 @@ function createMinimalFallbackEngine() {
           status: "Active",
           claimed_by: null,
           consumed_at: null,
-          created_at: created_at || Date.now()
+          created_at: created_at || Date.now(),
+          tenant_id: tenant_id || "tenant_community_providers",
+          created_by: created_by || "usr_cust_dev"
         });
         return [];
       }
@@ -1025,6 +1055,9 @@ function createMinimalFallbackEngine() {
         const s = tables.device_sessions.get(params[0]);
         return s ? [s] : [];
       }
+      if (qu.startsWith("SELECT") && qu.includes("FROM DEVICE_SESSIONS")) {
+        return Array.from(tables.device_sessions.values());
+      }
       if (qu.startsWith("UPDATE DEVICE_SESSIONS SET CONNECTION_STATE =")) {
         let connection_state, updated_at, node_id;
         if (qu.includes("SET CONNECTION_STATE = 'DISCONNECTED'")) {
@@ -1053,9 +1086,16 @@ function createMinimalFallbackEngine() {
 
       // IDEMPOTENCY_KEYS
       if (qu.startsWith("INSERT OR REPLACE INTO IDEMPOTENCY_KEYS") || qu.startsWith("INSERT INTO IDEMPOTENCY_KEYS")) {
-        const [key, endpoint, request_hash, response_status, response_body, created_at, expires_at] = params;
+        let key, tenant_id, endpoint, request_hash, response_status, response_body, created_at, expires_at;
+        if (params.length >= 8) {
+          [key, tenant_id, endpoint, request_hash, response_status, response_body, created_at, expires_at] = params;
+        } else {
+          [key, endpoint, request_hash, response_status, response_body, created_at, expires_at] = params;
+          tenant_id = null;
+        }
         tables.idempotency_keys.set(key, {
           key,
+          tenant_id,
           endpoint,
           request_hash,
           response_status: Number(response_status),
@@ -1067,8 +1107,14 @@ function createMinimalFallbackEngine() {
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM IDEMPOTENCY_KEYS WHERE KEY =")) {
         const key = params[0];
+        const tenantId = params.length > 1 ? params[1] : null;
         const rec = tables.idempotency_keys.get(key);
-        return rec ? [rec] : [];
+        if (!rec) return [];
+        if (tenantId && rec.tenant_id && rec.tenant_id !== tenantId) return [];
+        return [rec];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM IDEMPOTENCY_KEYS")) {
+        return Array.from(tables.idempotency_keys.values());
       }
       if (qu.startsWith("DELETE FROM IDEMPOTENCY_KEYS WHERE KEY =")) {
         tables.idempotency_keys.delete(params[0]);
@@ -1085,14 +1131,15 @@ function createMinimalFallbackEngine() {
       // LEDGER
       if (qu.startsWith("INSERT OR IGNORE INTO LEDGER") || qu.startsWith("INSERT INTO LEDGER")) {
         let entry;
-        if (qu.includes("ENTRY_TYPE") || params.length >= 16) {
-          const [id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now, correlation_id] = params;
+        if (qu.includes("TENANT_ID") || params.length >= 18) {
+          const [id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now, correlation_id, platform_fee_credits] = params;
           entry = {
             id,
             tx_id,
             idempotency_key,
             epoch,
             job_id,
+            tenant_id: tenant_id || "tenant_enterprise_customer",
             entry_type: entry_type || "CREDIT",
             account: account || provider_pubkey,
             counterparty: counterparty || consumer_pubkey,
@@ -1104,7 +1151,31 @@ function createMinimalFallbackEngine() {
             memory_mb,
             status: status || "SETTLED",
             timestamp: now,
-            correlation_id: correlation_id || null
+            correlation_id: correlation_id || null,
+            platform_fee_credits: Number(platform_fee_credits) || 0
+          };
+        } else if (qu.includes("ENTRY_TYPE") || params.length >= 16) {
+          const [id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now, correlation_id] = params;
+          entry = {
+            id,
+            tx_id,
+            idempotency_key,
+            epoch,
+            job_id,
+            tenant_id: "tenant_enterprise_customer",
+            entry_type: entry_type || "CREDIT",
+            account: account || provider_pubkey,
+            counterparty: counterparty || consumer_pubkey,
+            consumer_pubkey,
+            provider_pubkey,
+            amount_credits: Number(amount_credits) || 0,
+            fuel_used,
+            duration_ms,
+            memory_mb,
+            status: status || "SETTLED",
+            timestamp: now,
+            correlation_id: correlation_id || null,
+            platform_fee_credits: 0
           };
         } else {
           const [id, idempotency_key, epoch, job_id, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, now] = params;
@@ -1114,6 +1185,7 @@ function createMinimalFallbackEngine() {
             idempotency_key,
             epoch,
             job_id,
+            tenant_id: "tenant_enterprise_customer",
             entry_type: "CREDIT",
             account: provider_pubkey,
             counterparty: consumer_pubkey,
@@ -1124,7 +1196,9 @@ function createMinimalFallbackEngine() {
             duration_ms,
             memory_mb,
             status: "SETTLED",
-            timestamp: now
+            timestamp: now,
+            correlation_id: null,
+            platform_fee_credits: 0
           };
         }
         if (!tables.ledger.has(entry.idempotency_key)) {
@@ -1147,6 +1221,10 @@ function createMinimalFallbackEngine() {
         if (qu.includes("WHERE ACCOUNT =")) {
           const acc = params[0];
           entries = entries.filter(e => e.account === acc || e.consumer_pubkey === acc || e.provider_pubkey === acc);
+        }
+        if (qu.includes("WHERE TENANT_ID =") || qu.includes("WHERE TENANT_ID=?")) {
+          const tid = params[0] || q.match(/WHERE tenant_id = '([^']+)'/i)?.[1];
+          if (tid) entries = entries.filter(e => e.tenant_id === tid);
         }
         if (qu.includes("COUNT(*)")) {
           return [{ c: entries.length, count: entries.length }];

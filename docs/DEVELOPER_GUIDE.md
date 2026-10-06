@@ -2,14 +2,19 @@
 
 ## 1. Codebase Architecture & Monorepo Layout
 
-SPaaS is structured as a modular Rust monorepo managed by Cargo workspaces, paired with an Android worker application and a responsive Web Management Console:
+SPaaS is structured as a modular Rust monorepo managed by Cargo workspaces, paired with an Android worker application, a responsive Web Management Console, and native developer SDKs:
 
 ```
 ├── Cargo.toml                  # Root workspace definition
 ├── apps/
-│   ├── control-plane/          # Axum HTTP/SSE server, state manager & reconciler
+│   ├── cloudflare-control-plane/ # Cloudflare Worker & Durable Object state coordinator
 │   ├── android-node/           # Android Jetpack Compose volunteer worker client
-│   └── web-console/            # Production Vite frontend & CSS design system
+│   ├── web-console/            # Production Vite frontend & CSS design system
+│   ├── desktop-worker/         # Headless native Rust edge compute daemon
+│   └── cli/                    # Developer & operator terminal CLI
+├── sdks/
+│   ├── python/                 # Native Python Developer SDK (spaas_sdk.py)
+│   └── js/                     # Native JavaScript / Node.js SDK (spaas-sdk.js)
 ├── crates/
 │   ├── protocol/               # Universal wire protocols, serde models, and state machines
 │   ├── security/               # Ed25519 signing, SHA-256 verification, token authorization
@@ -20,14 +25,94 @@ SPaaS is structured as a modular Rust monorepo managed by Cargo workspaces, pair
 │   ├── verification/           # Execution proof verification & consensus policies
 │   ├── telemetry/              # Prometheus metrics registry and structured tracing
 │   └── node-agent/             # Lightweight volunteer daemon for edge hardware
-├── tests/
-│   └── integration/            # Comprehensive multi-node end-to-end integration tests
+├── tests/                      # Multi-node integration, fuzzing & scheduler scale tests
 └── scripts/                    # Automation scripts for build, dev, and certification
 ```
 
 ---
 
-## 2. Developing WASM Workload Modules
+## 2. Developer SDKs & Quickstart
+
+SPaaS provides first-class developer client SDKs for Python, JavaScript/Node.js, and the Rust CLI:
+
+### 1. Python SDK (`sdks/python/spaas_sdk.py`)
+
+Zero-dependency standard library Python client supporting full workload lifecycles:
+
+```python
+from spaas_sdk import SpaaSClient
+
+# Initialize client
+client = SpaaSClient("http://localhost:8787")
+
+# Authenticate session
+client.login("developer@enterprise.com", "customer_secret_pass_2026")
+
+# Analyze optimization plan
+plan = client.plan_workload("matrix_multiplication", input_bytes=65536)
+print(f"Recommended placement: {plan.get('recommended_placement')}")
+
+# Submit and run workload
+job = client.run_workload("Matrix Multi-Multiply", wasm_file="workload.wasm")
+job_id = job["job_id"]
+
+# Poll for verified result
+result = client.get_result(job_id)
+print(f"Status: {result['state']}, Exit Code: {result.get('result', {}).get('exit_code')}")
+```
+
+Run tests: `python sdks/python/test_spaas_sdk.py`
+
+### 2. JavaScript / Node.js SDK (`sdks/js/spaas-sdk.js`)
+
+ES Module SDK compatible with Node.js 18+ and modern browser environments:
+
+```javascript
+import { SpaaSClient } from "./spaas-sdk.js";
+
+const client = new SpaaSClient({ baseUrl: "http://localhost:8787" });
+
+// Authenticate
+await client.login("developer@enterprise.com", "customer_secret_pass_2026");
+
+// Query optimization plan
+const plan = await client.planWorkload("image_blur", { inputDataBytes: 131072 });
+console.log(`Plan ID: ${plan.plan_id}, Placement: ${plan.recommended_placement}`);
+
+// Submit sharded job
+const job = await client.runWorkload("Batch Blur", {
+  wasmBinaryBase64: wasmBase64String,
+  shardCount: 4
+});
+console.log(`Dispatched Job ID: ${job.job_id || job.dag_id}`);
+```
+
+Run tests: `node --test sdks/js/test-sdk.js`
+
+### 3. Developer CLI (`apps/cli`)
+
+Built with Clap and console styling:
+
+```bash
+# Authenticate developer identity
+cargo run -p spaas-cli -- login
+
+# Generate Ed25519 signing keypair
+cargo run -p spaas-cli -- keygen
+
+# List registered cluster nodes
+cargo run -p spaas-cli -- node list
+
+# Submit and run a WASM workload
+cargo run -p spaas-cli -- run path/to/workload.wasm --name "Image Filter" --sharded --shards 4
+
+# Query job status and verified stdout
+cargo run -p spaas-cli -- result job_12345678
+```
+
+---
+
+## 3. Developing WASM Workload Modules
 
 All workloads executed across the SPaaS compute fabric run within a deterministic WebAssembly runtime targeting the standard WASI preview 1 (`wasm32-wasip1`) environment.
 
@@ -71,7 +156,7 @@ The resulting binary is located at `target/wasm32-wasip1/release/my_workload.was
 
 ---
 
-## 3. Protocol Evolution & Backward Compatibility
+## 4. Protocol Evolution & Backward Compatibility
 
 When modifying data models in `crates/protocol`:
 1. Always implement or derive `Default` for new structs.
@@ -81,7 +166,7 @@ When modifying data models in `crates/protocol`:
 
 ---
 
-## 4. Coding Standards & Error Handling
+## 5. Coding Standards & Error Handling
 
 - **Error Types**: Use strongly typed `enum` errors (e.g. `thiserror`) for internal crate boundaries. Avoid indiscriminate string error conversion until presentation or API boundary.
 - **Async Concurrency**: Use Tokio async primitives (`tokio::sync::RwLock`, `tokio::sync::mpsc`). Never hold synchronous locks across `.await` points.
@@ -90,8 +175,9 @@ When modifying data models in `crates/protocol`:
 
 ---
 
-## 5. Testing Philosophy & Test Organization
+## 6. Testing Philosophy & Test Organization
 
-- **Unit Tests**: Place in `tests` modules within each crate (`#[cfg(test)] mod tests { ... }`).
-- **Integration Tests**: Place in `tests/integration/tests/`. Every major user flow (node enrollment, job dispatch, failure recovery, scheduler scoring) has dedicated end-to-end integration tests.
+- **Control Plane Suite**: `apps/cloudflare-control-plane/tests/` contains `coordinator.test.js` and `e2e-regression.test.js`.
+- **Rust Unit Tests**: Located in `tests` modules within each crate (`#[cfg(test)] mod tests { ... }`).
+- **Integration Tests**: Located in `tests/` across root workspace.
 - **Regression Protection**: Always add an automated test verifying the fix for any reported defect or edge case.

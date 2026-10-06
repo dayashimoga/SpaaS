@@ -330,7 +330,7 @@
               </div>
               <div style="background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 6px;">
                 <span style="font-size: 0.75rem; color: #94a3b8; display: block;">CRC32 INTEGRITY</span>
-                <span id="diag-crc32-status" class="font-mono text-emerald" style="font-size: 0.85rem; font-weight: 600;">0x4A8C91B2 (VALID)</span>
+                <span id="diag-crc32-status" class="font-mono text-cyan" style="font-size: 0.85rem; font-weight: 600;">CRC32_STANDBY</span>
               </div>
               <div style="background: rgba(0,0,0,0.25); padding: 8px 12px; border-radius: 6px;">
                 <span style="font-size: 0.75rem; color: #94a3b8; display: block;">CONTROL EPOCH</span>
@@ -817,7 +817,7 @@
                   <span style="font-weight: 700; color: #94a3b8; font-size: 0.85rem;">💻 LOCAL CLIENT</span>
                   <span class="badge" style="background: rgba(255,255,255,0.1); color: #94a3b8;">1.00x Baseline</span>
                 </div>
-                <div style="font-size: 1.5rem; font-weight: 700; color: #f8fafc;" id="planner-local-time">280 ms</div>
+                <div style="font-size: 1.5rem; font-weight: 700; color: #f8fafc;" id="planner-local-time">— ms</div>
                 <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;">Transfer: 0ms | Queue: 0ms</div>
                 <div style="font-size: 0.85rem; color: #10b981; font-weight: 600; margin-top: 8px;">Cost: 0 TEST CR</div>
                 <div style="font-size: 0.75rem; color: #64748b; margin-top: 8px;">Executed locally in browser/client without network roundtrip.</div>
@@ -827,32 +827,32 @@
               <div class="card p-3" style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255,255,255,0.08);" id="planner-single-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                   <span style="font-weight: 700; color: #38bdf8; font-size: 0.85rem;">📱 SINGLE SPaaS NODE</span>
-                  <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;" id="planner-single-speedup">1.93x Speedup</span>
+                  <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;" id="planner-single-speedup">— Speedup</span>
                 </div>
-                <div style="font-size: 1.5rem; font-weight: 700; color: #f8fafc;" id="planner-single-time">145 ms</div>
-                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="planner-single-transfer">Transfer: 22ms | Queue: 15ms</div>
-                <div style="font-size: 0.85rem; color: #38bdf8; font-weight: 600; margin-top: 8px;" id="planner-single-cost">Cost: 10.0 TEST CR</div>
-                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 8px;" id="planner-single-why">Why this device: Direct match on 8-core ARM64 with verified WASM performance.</div>
+                <div style="font-size: 1.5rem; font-weight: 700; color: #f8fafc;" id="planner-single-time">— ms</div>
+                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="planner-single-transfer">Transfer: — | Queue: —</div>
+                <div style="font-size: 0.85rem; color: #38bdf8; font-weight: 600; margin-top: 8px;" id="planner-single-cost">Cost: — TEST CR</div>
+                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 8px;" id="planner-single-why">Select a workload and click 'Calculate Optimal Outcome Plan' to evaluate hardware affinity.</div>
               </div>
 
               <!-- Cluster Card -->
-              <div class="card p-3" style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.35);" id="planner-cluster-card">
+              <div class="card p-3" style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255,255,255,0.08);" id="planner-cluster-card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                   <span style="font-weight: 700; color: #10b981; font-size: 0.85rem;">🌐 HETEROGENEOUS CLUSTER</span>
-                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; font-weight: 700;" id="planner-cluster-speedup">3.29x Speedup</span>
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; font-weight: 700;" id="planner-cluster-speedup">— Speedup</span>
                 </div>
-                <div style="font-size: 1.5rem; font-weight: 700; color: #10b981;" id="planner-cluster-time">85 ms</div>
-                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="planner-cluster-transfer">Transfer: 24ms | Aggregation: 18ms</div>
-                <div style="font-size: 0.85rem; color: #10b981; font-weight: 600; margin-top: 8px;" id="planner-cluster-cost">Cost: 25.0 TEST CR</div>
-                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 8px;" id="planner-cluster-why">Why distribute: Computational density significantly exceeds network sharding and aggregation overhead.</div>
+                <div style="font-size: 1.5rem; font-weight: 700; color: #10b981;" id="planner-cluster-time">— ms</div>
+                <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;" id="planner-cluster-transfer">Transfer: — | Aggregation: —</div>
+                <div style="font-size: 0.85rem; color: #10b981; font-weight: 600; margin-top: 8px;" id="planner-cluster-cost">Cost: — TEST CR</div>
+                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 8px;" id="planner-cluster-why">Parallel compute gain vs transfer &amp; scheduling penalty evaluated on-demand.</div>
               </div>
             </div>
 
             <!-- Decision Explainability Banner -->
-            <div id="planner-decision-banner" class="mt-3 p-3 rounded" style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+            <div id="planner-decision-banner" class="mt-3 p-3 rounded" style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.2); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
               <div>
-                <strong style="color: #10b981; font-size: 0.9rem;" id="planner-decision-title">✓ DISTRIBUTION BENEFICIAL (Recommended Mode: CLUSTER)</strong>
-                <p style="color: #94a3b8; font-size: 0.8rem; margin: 2px 0 0 0;" id="planner-decision-desc">Distributing across 4 parallel phone + PC shards yields 3.29x speedup with verified deterministic aggregation.</p>
+                <strong style="color: #38bdf8; font-size: 0.9rem;" id="planner-decision-title">ℹ️ PLANNER STANDBY (Awaiting Workload Evaluation)</strong>
+                <p style="color: #94a3b8; font-size: 0.8rem; margin: 2px 0 0 0;" id="planner-decision-desc">Select a workload profile above and click 'Calculate Optimal Outcome Plan' to evaluate Local vs Single vs Cluster performance.</p>
               </div>
               <button type="button" id="btn-execute-planned-outcome" class="btn btn-sm btn-primary">
                 🚀 Confirm &amp; Dispatch Workload

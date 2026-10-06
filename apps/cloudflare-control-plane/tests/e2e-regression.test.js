@@ -604,4 +604,58 @@ test("E2E Integration — Mandatory 14-Attack-Vector RBAC & Security Boundaries 
     })
   }));
   assert.equal(a14.status, 409, "Attack 14: Stale fencing token result must be rejected with 409 Conflict");
+
+  // Attack 15: Anonymous /auth/me = 401
+  const a15 = await coordinator.fetch(new Request("http://localhost/api/v1/auth/me", {
+    method: "GET"
+  }));
+  assert.equal(a15.status, 401, "Attack 15: Unauthenticated /auth/me must return 401 Unauthorized");
+
+  // Attack 16: Customer A -> Customer B Job Trace, Decision, Observability Trace = 403
+  const a16Trace = await coordinator.fetch(new Request(`http://localhost/api/v1/jobs/${jobTenantB}/trace`, {
+    method: "GET",
+    headers: { "Authorization": "Bearer token_customer" }
+  }));
+  assert.equal(a16Trace.status, 403, "Attack 16: Customer A viewing Customer B job trace must return 403 Forbidden");
+
+  const a16Decision = await coordinator.fetch(new Request(`http://localhost/api/v1/jobs/${jobTenantB}/decision`, {
+    method: "GET",
+    headers: { "Authorization": "Bearer token_customer" }
+  }));
+  assert.equal(a16Decision.status, 403, "Attack 16: Customer A viewing Customer B job decision must return 403 Forbidden");
+
+  const a16Obs = await coordinator.fetch(new Request(`http://localhost/api/v1/observability/trace/${jobTenantB}`, {
+    method: "GET",
+    headers: { "Authorization": "Bearer token_customer" }
+  }));
+  assert.equal(a16Obs.status, 403, "Attack 16: Customer A viewing Customer B observability trace must return 403 Forbidden");
+
+  // Attack 17: Full Authoritative State DR Checkpoint Export
+  const drRes = await coordinator.fetch(new Request("http://localhost/api/v1/dr/checkpoint", {
+    method: "GET",
+    headers: ADMIN_HEADERS
+  }));
+  assert.equal(drRes.status, 200);
+  const drData = await drRes.json();
+  assert.ok(Array.isArray(drData.users), "DR Checkpoint must export users");
+  assert.ok(Array.isArray(drData.tenants), "DR Checkpoint must export tenants");
+  assert.ok(Array.isArray(drData.leases), "DR Checkpoint must export leases");
+  assert.ok(Array.isArray(drData.idempotency_keys), "DR Checkpoint must export idempotency_keys");
+  assert.ok(Array.isArray(drData.device_sessions), "DR Checkpoint must export device_sessions");
+  assert.ok(Array.isArray(drData.nodes), "DR Checkpoint must export nodes");
+  assert.ok(Array.isArray(drData.jobs), "DR Checkpoint must export jobs");
+  assert.ok(Array.isArray(drData.ledger), "DR Checkpoint must export ledger");
+
+  // Attack 18: FinOps Commercial Double-Entry Dynamic Reconciliation
+  const reconRes = await coordinator.fetch(new Request("http://localhost/api/v1/billing/reconciliation", {
+    method: "GET",
+    headers: ADMIN_HEADERS
+  }));
+  assert.equal(reconRes.status, 200);
+  const reconData = await reconRes.json();
+  assert.equal(typeof reconData.discrepancy_credits, "number");
+  assert.equal(reconData.reconciliation_status, "BALANCED");
+  assert.ok(reconData.payment_gateway);
+  assert.equal(reconData.payment_gateway.fiat_settlement_enabled, false);
+  assert.ok(reconData.unit_economics);
 });

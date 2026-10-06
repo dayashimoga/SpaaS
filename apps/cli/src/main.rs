@@ -56,6 +56,31 @@ enum Commands {
         #[command(subcommand)]
         cmd: SystemCommands,
     },
+    /// Predict performance: compare Local vs Single Node vs Cluster
+    Plan {
+        #[arg(short, long, default_value = "matrix")]
+        workload: String,
+        #[arg(short, long, default_value = "Fastest")]
+        goal: String,
+        #[arg(short, long, default_value_t = 1048576)]
+        size: u64,
+    },
+    /// Execute a WASM workload on the edge compute fabric
+    Run {
+        path: PathBuf,
+        #[arg(short, long)]
+        name: Option<String>,
+        #[arg(short, long, default_value_t = 10_000_000)]
+        max_fuel: u64,
+        #[arg(short, long)]
+        sharded: bool,
+        #[arg(long, default_value_t = 2)]
+        shards: usize,
+    },
+    /// Fetch execution result and digest of a finished job
+    Result {
+        id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -741,6 +766,105 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("  Uptime:              {}s", health.uptime_secs);
             }
         },
+        Commands::Plan { workload, goal, size } => {
+            let url = format!("{}/api/v1/workloads/analyze-plan", cli.api_url);
+            let payload = serde_json::json!({
+                "workload_type": workload,
+                "optimization_goal": goal,
+                "input_size_bytes": size
+            });
+            let resp = client.post(&url).json(&payload).send().await?.json::<serde_json::Value>().await?;
+
+            println!("{}", style("SPaaS Outcome Planner — Multi-Strategy Evaluation").bold().cyan());
+            if let Some(rec) = resp.get("recommendation") {
+                let mode = rec.get("mode").and_then(|m| m.as_str()).unwrap_or("UNKNOWN");
+                let reason = rec.get("reason").and_then(|r| r.as_str()).unwrap_or("");
+                println!("  Recommended Mode:    {}", style(mode).bold().green());
+                println!("  Reason:              {}", reason);
+            }
+            if let Some(prov) = resp.get("provenance") {
+                let class = prov.get("classification").and_then(|c| c.as_str()).unwrap_or("SIMULATION");
+                println!("  Evidence Provenance: {}", style(class).bold().yellow());
+            }
+
+            println!("\nStrategy Comparison:");
+            if let Some(strat) = resp.get("strategies") {
+                if let Some(loc) = strat.get("local") {
+                    let time = loc.get("predicted_wall_time_ms").and_then(|t| t.as_i64()).unwrap_or(0);
+                    println!("  [1] LOCAL:        {} ms (1.00x Baseline, 0 TEST CR)", time);
+                }
+                if let Some(single) = strat.get("single_node") {
+                    let time = single.get("predicted_wall_time_ms").and_then(|t| t.as_i64()).unwrap_or(0);
+                    let cost = single.get("cost").and_then(|c| c.get("credits")).and_then(|c| c.as_f64()).unwrap_or(0.0);
+                    let factor = single.get("speedup_factor").and_then(|f| f.as_f64()).unwrap_or(1.0);
+                    println!("  [2] SINGLE NODE:  {} ms ({:.2}x Speedup, {:.1} TEST CR)", time, factor, cost);
+                }
+                if let Some(cluster) = strat.get("cluster") {
+                    let time = cluster.get("predicted_wall_time_ms").and_then(|t| t.as_i64()).unwrap_or(0);
+                    let cost = cluster.get("cost").and_then(|c| c.get("credits")).and_then(|c| c.as_f64()).unwrap_or(0.0);
+                    let factor = cluster.get("speedup_factor").and_then(|f| f.as_f64()).unwrap_or(1.0);
+                    println!("  [3] CLUSTER:      {} ms ({:.2}x Speedup, {:.1} TEST CR)", time, factor, cost);
+                }
+            }
+        }
+        Commands::Run { path, name, max_fuel, sharded, shards } => {
+            let wasm_bytes = tokio::fs::read(&path)
+                .await
+                .map_err(|e| format!("Cannot read WASM file: {}", e))?;
+            let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &wasm_bytes);
+            let workload_name = name.unwrap_or_else(|| {
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("cli_workload")
+                    .to_string()
+            });
+
+            if sharded {
+                let url = format!("{}/api/v1/jobs/sharded", cli.api_url);
+                let payload = serde_json::json!({
+                    "name": workload_name,
+                    "wasm_binary_base64": b64,
+                    "shard_count": shards,
+                    "limits": { "max_fuel": max_fuel }
+                });
+                let resp = client.post(&url).json(&payload).send().await?.json::<serde_json::Value>().await?;
+                println!("{}", style("Distributed Sharded Job Executed!").bold().green());
+                println!("  DAG ID:    {}", resp.get("dag_id").and_then(|v| v.as_str()).unwrap_or("-"));
+                println!("  Decision:  {}", resp.get("decision").and_then(|v| v.as_str()).unwrap_or("-"));
+                if let Some(metrics) = resp.get("metrics") {
+                    println!("  Speedup:   {}", metrics.get("speedup_factor").and_then(|v| v.as_str()).unwrap_or("-"));
+                    println!("  Settled:   {} credits", metrics.get("total_credits_settled").and_then(|v| v.as_f64()).unwrap_or(0.0));
+                }
+            } else {
+                let url = format!("{}/api/v1/jobs", cli.api_url);
+                let payload = serde_json::json!({
+                    "name": workload_name,
+                    "wasm_binary_base64": b64,
+                    "limits": { "max_fuel": max_fuel, "timeout_ms": 30000 }
+                });
+                let resp = client.post(&url).json(&payload).send().await?.json::<serde_json::Value>().await?;
+                let job_id = resp.get("job_id").or_else(|| resp.get("id")).and_then(|v| v.as_str()).unwrap_or("unknown");
+                println!("{}", style("Workload Submitted!").bold().green());
+                println!("  Job ID: {}", style(job_id).bold().yellow());
+            }
+        }
+        Commands::Result { id } => {
+            let url = format!("{}/api/v1/jobs/{}", cli.api_url, id);
+            let resp = client.get(&url).send().await?.json::<serde_json::Value>().await?;
+            println!("{}", style(format!("Job Result: {}", id)).bold().cyan());
+            println!("  State:     {}", resp.get("state").and_then(|v| v.as_str()).unwrap_or("-"));
+            if let Some(res) = resp.get("result") {
+                println!("  Exit Code: {}", res.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(0));
+                println!("  Fuel Used: {}", res.get("fuel_consumed").and_then(|v| v.as_i64()).unwrap_or(0));
+                println!("  Wall Time: {} ms", res.get("wall_time_ms").and_then(|v| v.as_i64()).unwrap_or(0));
+                println!("  Digest:    {}", res.get("result_digest").and_then(|v| v.as_str()).unwrap_or("verified"));
+                if let Some(stdout) = res.get("stdout").and_then(|v| v.as_str()) {
+                    if !stdout.is_empty() {
+                        println!("\n--- STDOUT ---\n{}", stdout);
+                    }
+                }
+            }
+        }
     }
 
     Ok(())

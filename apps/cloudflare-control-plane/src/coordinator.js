@@ -236,6 +236,8 @@ export class SPaaSCoordinator {
     try { this.sqlExec(`ALTER TABLE pairing_tokens ADD COLUMN short_code TEXT;`); } catch (_) {}
     try { this.sqlExec(`ALTER TABLE pairing_tokens ADD COLUMN opaque_credential TEXT;`); } catch (_) {}
     try { this.sqlExec(`ALTER TABLE pairing_tokens ADD COLUMN consumed_at INTEGER;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE pairing_tokens ADD COLUMN tenant_id TEXT;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE pairing_tokens ADD COLUMN created_by TEXT;`); } catch (_) {}
 
     try { this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_pairing_short_code ON pairing_tokens(short_code);`); } catch (_) {}
     try { this.sqlExec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_pairing_opaque ON pairing_tokens(opaque_credential);`); } catch (_) {}
@@ -380,6 +382,7 @@ export class SPaaSCoordinator {
       );
     `);
     try { this.sqlExec(`CREATE INDEX IF NOT EXISTS idx_idempotency_keys_expires ON idempotency_keys(expires_at);`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE idempotency_keys ADD COLUMN tenant_id TEXT;`); } catch (_) {}
 
     this.sqlExec(`
       CREATE TABLE IF NOT EXISTS device_sessions (
@@ -504,6 +507,7 @@ export class SPaaSCoordinator {
     try { this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('role', 'PRIMARY');`); } catch (_) {}
     try { this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('epoch', '1');`); } catch (_) {}
     try { this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('fabric_status', 'ACTIVE');`); } catch (_) {}
+    try { this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('fencing_seq', '1');`); } catch (_) {}
 
     // Seed default tenants
     try { this.sqlExec(`INSERT OR IGNORE INTO tenants (id, name, plan, balance_credits, currency_balance, status, created_at) VALUES ('tenant_spaas_system', 'SPaaS Global System', 'enterprise', 1000000.0, 10000.0, 'ACTIVE', 1700000000000);`); } catch (_) {}
@@ -841,20 +845,27 @@ export class SPaaSCoordinator {
       .join("");
   }
 
-  getIdempotencyRecord(key) {
+  getIdempotencyRecord(key, tenantId = null) {
     if (!key) return null;
-    const rows = this.sqlExec(`SELECT * FROM idempotency_keys WHERE key = ?`, key);
+    let query = `SELECT * FROM idempotency_keys WHERE key = ?`;
+    const params = [key];
+    if (tenantId) {
+      query += ` AND (tenant_id = ? OR tenant_id IS NULL)`;
+      params.push(tenantId);
+    }
+    const rows = this.sqlExec(query, ...params);
     return rows.length > 0 ? rows[0] : null;
   }
 
-  saveIdempotencyRecord(key, endpoint, requestHash, status, body, ttlMs = 86400000) {
+  saveIdempotencyRecord(key, endpoint, requestHash, status, body, ttlMs = 86400000, tenantId = null) {
     if (!key) return;
     const now = Date.now();
     const expiresAt = now + ttlMs;
     const bodyStr = typeof body === "string" ? body : JSON.stringify(body);
     this.sqlExec(
-      `INSERT OR REPLACE INTO idempotency_keys (key, endpoint, request_hash, response_status, response_body, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO idempotency_keys (key, tenant_id, endpoint, request_hash, response_status, response_body, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       key,
+      tenantId,
       endpoint,
       requestHash,
       status,
@@ -865,8 +876,21 @@ export class SPaaSCoordinator {
   }
 
   getNextFencingToken() {
-    this._fencingSeq = (this._fencingSeq || 0) + 1;
-    return `fence_${this.epoch}_${Date.now()}_${String(this._fencingSeq).padStart(6, "0")}`;
+    let seq = 1;
+    try {
+      const rows = this.sqlExec(`SELECT value FROM meta WHERE key = ?`, "fencing_seq");
+      if (rows && rows.length > 0) {
+        seq = parseInt(rows[0].value, 10) + 1;
+        this.sqlExec(`UPDATE meta SET value = ? WHERE key = ?`, String(seq), "fencing_seq");
+      } else {
+        this.sqlExec(`INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)`, "fencing_seq", "1");
+      }
+    } catch (_) {
+      this._fencingSeq = (this._fencingSeq || 0) + 1;
+      seq = this._fencingSeq;
+    }
+    this._fencingSeq = seq;
+    return `fence_${this.epoch}_${Date.now()}_${String(seq).padStart(6, "0")}`;
   }
 
   isValidJobTransition(fromState, toState) {
@@ -969,7 +993,12 @@ export class SPaaSCoordinator {
     const pendingJobs = this.sqlExec(`SELECT * FROM jobs WHERE state IN ('Pending', 'Queued', 'QUEUED', 'SUBMITTED') ORDER BY created_at ASC`);
     if (pendingJobs.length === 0) return;
 
-    let readyNodes = this.sqlExec(`SELECT * FROM nodes WHERE state = 'Ready' AND is_simulated = 0`);
+    const now = Date.now();
+    let candidateNodes = this.sqlExec(`SELECT * FROM nodes WHERE state IN ('Ready', 'AVAILABLE', 'IDLE') AND is_simulated = 0`);
+    let readyNodes = candidateNodes.filter(n => {
+      const authState = this.computeNodeAuthoritativeState(n, now);
+      return authState.connection === "ONLINE" && authState.eligibility !== "NONE" && authState.availability === "AVAILABLE";
+    });
 
     const weights = {
       charging: 0.25,
@@ -1465,16 +1494,19 @@ export class SPaaSCoordinator {
     const consumerAccount = "consumer_verified_pubkey";
     const providerAccount = node_id || "provider_node_pubkey";
 
+    const effectiveTenantId = job.tenant_id || "tenant_enterprise_customer";
+
     try {
       // 1. DEBIT consumer account
       this.sqlExec(
-        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id, platform_fee_credits)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id, platform_fee_credits)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
         txId,
         debitKey,
         this.epoch,
         job_id,
+        effectiveTenantId,
         "DEBIT",
         consumerAccount,
         providerAccount,
@@ -1492,13 +1524,14 @@ export class SPaaSCoordinator {
 
       // 2. CREDIT provider account
       this.sqlExec(
-        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id, platform_fee_credits)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id, platform_fee_credits)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
         txId,
         creditKey,
         this.epoch,
         job_id,
+        effectiveTenantId,
         "CREDIT",
         providerAccount,
         consumerAccount,
@@ -1871,7 +1904,7 @@ export class SPaaSCoordinator {
       }
       const authHeader = req.headers.get("Authorization");
       const spaasKey = req.headers.get("X-SPaaS-Key") || req.headers.get("X-API-Key") || req.headers.get("X-Device-Auth") || req.headers.get("X-SPaaS-Auth-Token");
-      if (requireStrictAuth || Boolean(authHeader || spaasKey) || isAdminRoute) {
+      if (requireStrictAuth || Boolean(authHeader || spaasKey) || isAdminRoute || path === "/api/v1/auth/me" || matchedRoute.classification === "AUTHENTICATED") {
         return {
           authorized: false,
           status: 401,
@@ -2849,17 +2882,40 @@ export class SPaaSCoordinator {
 
       // Effective commission and gross margin
       const grossMarginPct = totalGrossDebits > 0 ? Number(((totalPlatformFeeCredits / totalGrossDebits) * 100).toFixed(2)) : 15.0;
+      const discrepancyCredits = Number(Math.abs(totalGrossDebits - (totalProviderCredits + totalPlatformFeeCredits)).toFixed(4));
+
+      // Unit economics gross contribution formula (Req 17)
+      const infraStorageNetworkEstimate = Number((totalGrossDebits * 0.02).toFixed(4));
+      const verificationComputeCost = Number((totalGrossDebits * 0.01).toFixed(4));
+      const paymentFraudReserve = Number((totalGrossDebits * 0.015).toFixed(4));
+      const netGrossContribution = Number((totalPlatformFeeCredits - infraStorageNetworkEstimate - verificationComputeCost - paymentFraudReserve).toFixed(4));
 
       return json({
         status: "ok",
-        reconciliation_status: "BALANCED",
+        reconciliation_status: discrepancyCredits <= 0.0001 ? "BALANCED" : "UNBALANCED_DISCREPANCY",
         currency: "TEST_CREDITS",
+        is_fiat: false,
+        payment_gateway: {
+          provider: "SIMULATED_TEST_GATEWAY",
+          fiat_settlement_enabled: false,
+          kyc_compliance_status: "PENDING_REGULATORY_GATEWAY",
+          supported_methods: ["TEST_CREDIT_TOKEN", "SIMULATED_SEPA_SANDBOX", "SIMULATED_STRIPE_SANDBOX"]
+        },
+        unit_economics: {
+          total_customer_charge: totalGrossDebits,
+          provider_reward: totalProviderCredits,
+          platform_fee_collected: totalPlatformFeeCredits,
+          estimated_infra_storage_network_cost: infraStorageNetworkEstimate,
+          estimated_verification_cost: verificationComputeCost,
+          payment_fraud_support_reserve: paymentFraudReserve,
+          net_gross_contribution: netGrossContribution
+        },
         total_gross_volume_credits: totalGrossDebits,
         total_customer_debits: totalGrossDebits,
         total_provider_credits: totalProviderCredits,
         total_platform_revenue: totalPlatformFeeCredits,
         gross_margin_pct: grossMarginPct,
-        discrepancy_credits: 0.0000,
+        discrepancy_credits: discrepancyCredits,
         epoch: this.epoch,
         reconciled_at: Date.now(),
         evidence_label: "PROVEN"
@@ -2966,6 +3022,24 @@ export class SPaaSCoordinator {
         return json({ error: "FORBIDDEN", message: "Only providers can request payouts" }, 403);
       }
       const body = await parseJsonBody();
+      const idempotencyKey = req.headers.get("Idempotency-Key") || req.headers.get("X-Idempotency-Key") || body?.idempotency_key;
+      let requestHash = null;
+      if (idempotencyKey) {
+        requestHash = await this.hashPayload(body);
+        const existingRecord = this.getIdempotencyRecord(idempotencyKey, auth.tenant_id);
+        if (existingRecord) {
+          if (existingRecord.request_hash !== requestHash) {
+            return json({
+              error: "IDEMPOTENCY_CONFLICT",
+              message: "Idempotency key has already been used with a different request payload."
+            }, 409);
+          }
+          let parsedBody = {};
+          try { parsedBody = JSON.parse(existingRecord.response_body); } catch (_) { parsedBody = { raw: existingRecord.response_body }; }
+          return json({ ...parsedBody, idempotent_replay: true }, existingRecord.response_status || 200, { "X-Cache-Lookup": "HIT-IDEMPOTENT" });
+        }
+      }
+
       const amountCredits = parseFloat(body?.amount_credits || "50.0");
       const payoutId = `pay_${crypto.randomUUID().substring(0, 8)}`;
       this.sqlExec(
@@ -2978,13 +3052,17 @@ export class SPaaSCoordinator {
         Date.now()
       );
       this.logAudit("PAYOUT_REQUESTED", `Payout ${payoutId} for ${amountCredits} credits requested by ${auth.user_id}`);
-      return json({
+      const resPayload = {
         status: "ok",
         payout_id: payoutId,
         amount_credits: amountCredits,
         amount_usd: amountCredits * 0.01,
         status: "PENDING"
-      }, 201);
+      };
+      if (idempotencyKey && requestHash) {
+        this.saveIdempotencyRecord(idempotencyKey, path, requestHash, 201, resPayload, 86400000, auth.tenant_id);
+      }
+      return json(resPayload, 201);
     }
 
     // ==========================================
@@ -3104,7 +3182,12 @@ export class SPaaSCoordinator {
         nodes: this.sqlExec(`SELECT * FROM nodes`),
         jobs: this.sqlExec(`SELECT * FROM jobs`),
         ledger: this.sqlExec(`SELECT * FROM ledger`),
-        pairing_tokens: this.sqlExec(`SELECT * FROM pairing_tokens WHERE status = 'Active'`)
+        pairing_tokens: this.sqlExec(`SELECT * FROM pairing_tokens WHERE status = 'Active'`),
+        users: this.sqlExec(`SELECT id, email, role, tenant_id, mfa_enabled, created_at FROM users`),
+        tenants: this.sqlExec(`SELECT * FROM tenants`),
+        leases: this.sqlExec(`SELECT * FROM leases`),
+        idempotency_keys: this.sqlExec(`SELECT * FROM idempotency_keys`),
+        device_sessions: this.sqlExec(`SELECT * FROM device_sessions`)
       };
       return json(checkpoint);
     }
@@ -3374,9 +3457,11 @@ export class SPaaSCoordinator {
       const telJson = body.initial_telemetry || body.telemetry ? JSON.stringify(body.initial_telemetry || body.telemetry) : null;
       const polJson = body.initial_policy || body.policy ? JSON.stringify(body.initial_policy || body.policy) : null;
 
+      const boundTenantId = tokenRecord.tenant_id || "tenant_community_providers";
+
       this.sqlExec(
         `INSERT OR REPLACE INTO nodes (id, name, device_type, public_key, auth_token, state, capabilities, policy, telemetry, is_simulated, tenant_id, last_heartbeat, created_at)
-         VALUES (?, ?, ?, ?, ?, 'Ready', ?, ?, ?, 0, 'tenant_community_providers', ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, 'Ready', ?, ?, ?, 0, ?, ?, ?)`,
         assignedNodeId,
         modelName,
         device_type || "android_smartphone",
@@ -3385,6 +3470,7 @@ export class SPaaSCoordinator {
         capsJson,
         polJson,
         telJson,
+        boundTenantId,
         Date.now(),
         Date.now()
       );
@@ -3961,6 +4047,11 @@ export class SPaaSCoordinator {
       if (jobs.length === 0) return json({ error: "JOB_NOT_FOUND" }, 404);
 
       const job = jobs[0];
+      const auth = authDecision.auth || this.authenticate(req);
+      if ((auth.role === "CUSTOMER" || auth.role === "CUSTOMER_ADMIN") && job.tenant_id && job.tenant_id !== auth.tenant_id) {
+        return json({ error: "FORBIDDEN", message: "Cross-tenant access forbidden: resource belongs to another tenant" }, 403);
+      }
+
       const transitions = this.sqlExec(`SELECT * FROM job_transitions WHERE job_id = ? ORDER BY timestamp ASC`, jobId);
       const leases = this.sqlExec(`SELECT * FROM leases WHERE job_id = ? ORDER BY created_at ASC`, jobId);
       const settlements = this.sqlExec(`SELECT * FROM ledger WHERE job_id = ?`, jobId);
@@ -3988,8 +4079,12 @@ export class SPaaSCoordinator {
       const nodes = this.sqlExec(`SELECT * FROM nodes WHERE id = ?`, nodeId);
       if (nodes.length === 0) return json({ error: "NODE_NOT_FOUND" }, 404);
 
+      const auth = authDecision.auth || this.authenticate(req);
+      const isCustomer = auth.role === "CUSTOMER" || auth.role === "CUSTOMER_ADMIN";
       const sessions = this.sqlExec(`SELECT * FROM device_sessions WHERE node_id = ?`, nodeId);
-      const recentJobs = this.sqlExec(`SELECT * FROM jobs WHERE assigned_node_id = ? ORDER BY created_at DESC LIMIT 10`, nodeId);
+      const recentJobs = isCustomer
+        ? this.sqlExec(`SELECT * FROM jobs WHERE assigned_node_id = ? AND tenant_id = ? ORDER BY created_at DESC LIMIT 10`, nodeId, auth.tenant_id)
+        : this.sqlExec(`SELECT * FROM jobs WHERE assigned_node_id = ? ORDER BY created_at DESC LIMIT 10`, nodeId);
       const activeLeases = this.sqlExec(`SELECT * FROM leases WHERE node_id = ? AND state = 'ACTIVE'`, nodeId);
 
       return json({
@@ -4074,8 +4169,8 @@ export class SPaaSCoordinator {
         wasm: Math.min(95, Math.round(78 + (availRam > 1500 ? 10 : 3))),
         fp: 82,
         memory: Math.min(95, Math.round(70 + (availRam / 100))),
-        gpu: isMobile ? "Score(75)" : "Untested",
-        npu: isMobile ? "Score(70)" : "Unavailable",
+        gpu: rawMetrics.vulkan_compute_tested ? "Score(75)" : (rawMetrics.vulkan_gpu_detected ? "Unverified (Detected)" : "Unavailable"),
+        npu: rawMetrics.ai_npu_runtime_tested ? "Score(70)" : (rawMetrics.ai_npu_detected ? "Unverified (Detected)" : "Unavailable"),
         storage: 85,
         network: Math.min(98, Math.round(80 + ((tel?.downlink_kbps || 50000) / 10000))),
         energy_efficiency: isMobile ? 94 : 80,
@@ -4766,6 +4861,26 @@ export class SPaaSCoordinator {
         return json({ error: "BAD_REQUEST", message: "Malformed JSON body" }, 400);
       }
 
+      const auth = authDecision.auth || this.authenticate(req);
+      const tenantId = auth.tenant_id || "tenant_enterprise_customer";
+      const idempotencyKey = req.headers.get("Idempotency-Key") || req.headers.get("X-Idempotency-Key") || body?.idempotency_key;
+      let requestHash = null;
+      if (idempotencyKey) {
+        requestHash = await this.hashPayload(body);
+        const existingRecord = this.getIdempotencyRecord(idempotencyKey, tenantId);
+        if (existingRecord) {
+          if (existingRecord.request_hash !== requestHash) {
+            return json({
+              error: "IDEMPOTENCY_CONFLICT",
+              message: "Idempotency key has already been used with a different request payload."
+            }, 409);
+          }
+          let parsedBody = {};
+          try { parsedBody = JSON.parse(existingRecord.response_body); } catch (_) { parsedBody = { raw: existingRecord.response_body }; }
+          return json({ ...parsedBody, idempotent_replay: true }, existingRecord.response_status || 200, { "X-Cache-Lookup": "HIT-IDEMPOTENT" });
+        }
+      }
+
       const workloadName = body.name || body.workload?.name || "Distributed Sharded Matrix Filter";
       const requestedShards = Math.max(1, Math.min(16, parseInt(body.shard_count || body.shards || "2", 10)));
       const baseWasm = body.wasm_binary_base64 || CHALLENGE_WASM_BASE64;
@@ -4788,8 +4903,7 @@ export class SPaaSCoordinator {
         const schedulingOverheadMs = 18;
         const transferOverheadMs = 18;
         const reason = "transfer+scheduling overhead > compute gain";
-        this.logAudit("DAG_DECISION_SINGLE", `Distribution evaluated for ${workloadName}: NOT BENEFICIAL (overhead ${schedulingOverheadMs + transferOverheadMs}ms > compute gain). Kept on single node.`);
-        return json({
+        const resPayload = {
           status: "ok",
           decision: "DISTRIBUTION NOT BENEFICIAL",
           distribution_decision: "DISTRIBUTION NOT BENEFICIAL",
@@ -4809,7 +4923,11 @@ export class SPaaSCoordinator {
             total_credits_settled: 10.05
           },
           evidence_label: "PROVEN"
-        }, 200);
+        };
+        if (idempotencyKey && requestHash) {
+          this.saveIdempotencyRecord(idempotencyKey, path, requestHash, 200, resPayload, 86400000, tenantId);
+        }
+        return json(resPayload, 200);
       }
       
       const shardJobs = [];
@@ -4909,7 +5027,7 @@ export class SPaaSCoordinator {
 
       this.logAudit("DAG_SHARDED_COMPLETED", `DAG ${dagId} (${requestedShards} shards) completed with speedup ${measuredSpeedup}x (parallel wall time: ${measuredParallelWallTimeMs}ms vs single-worker: ${sequentialEstimatedMs}ms)`);
 
-      return json({
+      const resPayload = {
         status: "ok",
         dag_id: dagId,
         workload_name: workloadName,
@@ -4932,7 +5050,11 @@ export class SPaaSCoordinator {
         },
         shards: shardJobs,
         evidence_label: allReadyNodes.some(n => !n.is_simulated) ? "PHYSICAL-DEVICE-PROVEN" : "SIMULATION-PROVEN"
-      }, 200);
+      };
+      if (idempotencyKey && requestHash) {
+        this.saveIdempotencyRecord(idempotencyKey, path, requestHash, 200, resPayload, 86400000, tenantId);
+      }
+      return json(resPayload, 200);
     }
 
     if (path === "/api/v1/jobs" && method === "GET") {
@@ -5014,8 +5136,15 @@ export class SPaaSCoordinator {
 
     if ((path.endsWith("/scheduler-decision") || path.endsWith("/decision")) && method === "GET") {
       const jobId = path.split("/")[4];
-      const jobs = this.sqlExec(`SELECT scheduler_decision FROM jobs WHERE id = ?`, jobId);
-      if (jobs.length === 0 || !jobs[0].scheduler_decision) {
+      const jobs = this.sqlExec(`SELECT scheduler_decision, tenant_id FROM jobs WHERE id = ?`, jobId);
+      if (jobs.length === 0) {
+        return json({ error: "NOT_FOUND", message: `Job ${jobId} not found` }, 404);
+      }
+      const auth = authDecision.auth || this.authenticate(req);
+      if ((auth.role === "CUSTOMER" || auth.role === "CUSTOMER_ADMIN") && jobs[0].tenant_id && jobs[0].tenant_id !== auth.tenant_id) {
+        return json({ error: "FORBIDDEN", message: "Cross-tenant access forbidden: resource belongs to another tenant" }, 403);
+      }
+      if (!jobs[0].scheduler_decision) {
         return json({ status: "ok", decision: null, message: "No decision record" });
       }
       const dec = JSON.parse(jobs[0].scheduler_decision);
@@ -5260,7 +5389,12 @@ export class SPaaSCoordinator {
 
     // 8. Metering Ledger & Double-Entry Accounting
     if (path === "/api/v1/metering" && method === "GET") {
-      const entries = this.sqlExec(`SELECT * FROM ledger ORDER BY timestamp DESC`);
+      const auth = authDecision.auth || this.authenticate(req);
+      const hasExplicitAuth = Boolean(req.headers.get("Authorization") || req.headers.get("X-API-Key") || req.headers.get("X-SPaaS-Key") || parseCookies(req).spaas_session);
+      const isCustomer = hasExplicitAuth && (auth.role === "CUSTOMER" || auth.role === "CUSTOMER_ADMIN");
+      const entries = isCustomer && auth.tenant_id
+        ? this.sqlExec(`SELECT * FROM ledger WHERE tenant_id = ? ORDER BY timestamp DESC`, auth.tenant_id)
+        : this.sqlExec(`SELECT * FROM ledger ORDER BY timestamp DESC`);
       let totalDebits = 0;
       let totalCredits = 0;
       const accountBalances = {};
@@ -5318,7 +5452,12 @@ export class SPaaSCoordinator {
     }
 
     if ((path === "/api/v1/ledger/download" || path === "/api/v1/ledger/export") && method === "GET") {
-      const entries = this.sqlExec(`SELECT * FROM ledger ORDER BY timestamp DESC`);
+      const auth = authDecision.auth || this.authenticate(req);
+      const hasExplicitAuth = Boolean(req.headers.get("Authorization") || req.headers.get("X-API-Key") || req.headers.get("X-SPaaS-Key") || parseCookies(req).spaas_session);
+      const isCustomer = hasExplicitAuth && (auth.role === "CUSTOMER" || auth.role === "CUSTOMER_ADMIN");
+      const entries = isCustomer && auth.tenant_id
+        ? this.sqlExec(`SELECT * FROM ledger WHERE tenant_id = ? ORDER BY timestamp DESC`, auth.tenant_id)
+        : this.sqlExec(`SELECT * FROM ledger ORDER BY timestamp DESC`);
       const csvHeader = "id,tx_id,timestamp_iso,epoch,job_id,entry_type,account,counterparty,amount_credits,fuel_used,duration_ms,status\n";
       const csvRows = entries.map(e => {
         const iso = new Date(e.timestamp || Date.now()).toISOString();
@@ -5635,6 +5774,10 @@ export class SPaaSCoordinator {
         return json({ error: "TRACE_NOT_FOUND", message: `No trace found matching ${traceKey}` }, 404);
       }
       const job = matchedJobs[0];
+      const auth = authDecision.auth || this.authenticate(req);
+      if ((auth.role === "CUSTOMER" || auth.role === "CUSTOMER_ADMIN") && job.tenant_id && job.tenant_id !== auth.tenant_id) {
+        return json({ error: "FORBIDDEN", message: "Cross-tenant access forbidden: resource belongs to another tenant" }, 403);
+      }
       const transitions = this.sqlExec(`SELECT * FROM job_transitions WHERE job_id = ? ORDER BY timestamp ASC`, job.id);
       const leases = this.sqlExec(`SELECT * FROM leases WHERE job_id = ? ORDER BY created_at ASC`, job.id);
       const ledger = this.sqlExec(`SELECT * FROM ledger WHERE job_id = ? OR correlation_id = ?`, job.id, job.correlation_id);

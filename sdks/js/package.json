@@ -1,0 +1,10 @@
+{
+  "name": "@spaas/sdk",
+  "version": "0.1.0",
+  "description": "Official JavaScript / TypeScript SDK for SPaaS edge compute fabric",
+  "type": "module",
+  "main": "spaas-sdk.js",
+  "scripts": {
+    "test": "node --test test-sdk.js"
+  }
+}

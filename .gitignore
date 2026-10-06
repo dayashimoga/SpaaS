@@ -40,3 +40,8 @@ Thumbs.db
 *.swp
 *.bak
 .vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
