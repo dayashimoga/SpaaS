@@ -16,8 +16,9 @@ export default {
         status: 204,
         headers: {
           "Access-Control-Allow-Origin": allowedOrigin,
+          "Access-Control-Allow-Credentials": "true",
           "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Device-Auth, X-SPaaS-Key, X-Correlation-ID, Baggage, Sentry-Trace, *",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, X-Device-Auth, X-SPaaS-Key, X-Correlation-ID, X-CSRF-Token, Idempotency-Key, X-SPaaS-Role, Baggage, Sentry-Trace",
           "Access-Control-Expose-Headers": "X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After",
           "Access-Control-Max-Age": "86400",
           "Vary": "Origin"
@@ -155,8 +156,7 @@ function resolveAllowedOrigin(request, env) {
 
   // Known production and development console origins
   if (origin === "https://spaas-console.pages.dev" ||
-      /^https:\/\/[a-zA-Z0-9-]+\.spaas-console\.pages\.dev$/.test(origin) ||
-      /^https:\/\/[a-zA-Z0-9-]+\.pages\.dev$/.test(origin) ||
+      /^https:\/\/([a-zA-Z0-9-]+\.)*pages\.dev$/.test(origin) ||
       /^http:\/\/(localhost|127\.0\.0\.1)(:[0-9]+)?$/.test(origin)) {
     return origin;
   }
@@ -171,8 +171,9 @@ function addSecurityAndCorsHeaders(res, env, request) {
   const allowedOrigin = resolveAllowedOrigin(request, env);
   const newHeaders = new Headers(res.headers);
   newHeaders.set("Access-Control-Allow-Origin", allowedOrigin);
+  newHeaders.set("Access-Control-Allow-Credentials", "true");
   newHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  newHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Device-Auth, X-SPaaS-Key, X-Correlation-ID, Baggage, Sentry-Trace, *");
+  newHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Device-Auth, X-SPaaS-Key, X-Correlation-ID, X-CSRF-Token, Idempotency-Key, X-SPaaS-Role, Baggage, Sentry-Trace");
   newHeaders.set("Access-Control-Expose-Headers", "X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After");
   newHeaders.set("Vary", "Origin");
 

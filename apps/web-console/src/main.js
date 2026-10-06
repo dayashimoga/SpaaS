@@ -505,28 +505,62 @@ let pairingTimerInterval = null;
 
 // Initialize on DOM Ready or immediately if DOM already loaded
 async function bootApp() {
-  initNavigation();
-  initAuth();
-  initOutcomePlanner();
-  initProviderJobOfferModal();
-  initReconciliationAndFeeControls();
-  initModals();
-  initDeviceControls();
-  initManifestStudio();
-  initSchedulerSliders();
-  initSettings();
-  initSearchAndFilters();
-  initSubTabs();
-  initDeviceComparison();
-  initJobOperations();
+  // PHASE 1: Lock the app shell immediately — nothing visible until auth passes
+  lockAppShell();
 
-  // Authoritative Authentication Check
+  // PHASE 2: Initialize ONLY the auth UI (login form handlers)
+  initAuth();
+
+  // PHASE 3: Authoritative Authentication Check — blocks all protected UI
   const authed = await checkInitialAuth();
   if (authed) {
+    // PHASE 4: Only after proven authentication, initialize protected UI
+    initNavigation();
+    initOutcomePlanner();
+    initProviderJobOfferModal();
+    initReconciliationAndFeeControls();
+    initModals();
+    initDeviceControls();
+    initManifestStudio();
+    initSchedulerSliders();
+    initSettings();
+    initSearchAndFilters();
+    initSubTabs();
+    initDeviceComparison();
+    initJobOperations();
+
+    unlockAppShell();
     refreshAllData();
     connectEventStream();
     startPolling();
   }
+}
+
+/**
+ * Hides the entire app shell (sidebar, main content, action bar) so
+ * unauthenticated users see ONLY the login modal. This is the
+ * authoritative security gate — no CSS overlay trick can bypass it
+ * because the DOM elements are display:none.
+ */
+function lockAppShell() {
+  const app = document.getElementById('app');
+  if (app) app.style.display = 'none';
+  const sidebar = document.querySelector('.sidebar');
+  const mainContent = document.querySelector('.main-content');
+  if (sidebar) sidebar.style.display = 'none';
+  if (mainContent) mainContent.style.display = 'none';
+}
+
+/**
+ * Reveals the app shell after authenticated session is confirmed.
+ */
+function unlockAppShell() {
+  const app = document.getElementById('app');
+  if (app) app.style.display = '';
+  const sidebar = document.querySelector('.sidebar');
+  const mainContent = document.querySelector('.main-content');
+  if (sidebar) sidebar.style.display = '';
+  if (mainContent) mainContent.style.display = '';
 }
 
 if (document.readyState === 'loading') {
@@ -3387,8 +3421,8 @@ async function fetchAudit() {
   try {
     const res = await fetch(`${API_BASE}/api/v1/audit`);
     if (!res.ok) return;
-    const events = await res.json();
-    cachedAudit = events || [];
+    const data = await res.json();
+    cachedAudit = Array.isArray(data) ? data : (data.logs || data.audit || []);
     renderAuditTable(cachedAudit);
   } catch (err) {
     console.warn('Error fetching audit:', err);
@@ -5056,7 +5090,15 @@ function handleSessionExpired() {
   currentPermissions = {};
   sessionStorage.removeItem('spaas_session_token');
   sessionStorage.removeItem('spaas_csrf_token');
+
+  // SECURITY: Lock the entire app shell — no protected content visible
+  lockAppShell();
   resetSessionUI();
+
+  // Stop live data channels
+  if (eventSource) { eventSource.close(); eventSource = null; }
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+
   const modalLogin = document.getElementById('modal-login');
   if (modalLogin) {
     modalLogin.classList.remove('hidden');
@@ -5067,6 +5109,7 @@ function handleSessionExpired() {
     }
   }
 }
+window.spaasHandleSessionExpired = handleSessionExpired;
 
 async function checkInitialAuth() {
   const modalLogin = document.getElementById('modal-login');
@@ -5191,6 +5234,24 @@ function initAuth() {
         currentPermissions = data.permissions || {};
 
         if (modalLogin) modalLogin.classList.add('hidden');
+
+        // Initialize all protected UI components that were deferred during boot
+        initNavigation();
+        initOutcomePlanner();
+        initProviderJobOfferModal();
+        initReconciliationAndFeeControls();
+        initModals();
+        initDeviceControls();
+        initManifestStudio();
+        initSchedulerSliders();
+        initSettings();
+        initSearchAndFilters();
+        initSubTabs();
+        initDeviceComparison();
+        initJobOperations();
+
+        // Reveal the app shell and apply role-based visibility
+        unlockAppShell();
         applySessionUI(currentSessionUser, currentSessionTenant, currentSessionRole, currentPermissions);
         showToast(`Authenticated as ${currentSessionUser.email} (${currentSessionRole})`, 'success');
 
@@ -5231,7 +5292,15 @@ function initAuth() {
         currentPermissions = {};
         sessionStorage.removeItem('spaas_session_token');
         sessionStorage.removeItem('spaas_csrf_token');
+
+        // SECURITY: Lock the entire app shell on logout
+        lockAppShell();
         resetSessionUI();
+
+        // Stop live data channels
+        if (eventSource) { eventSource.close(); eventSource = null; }
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+
         if (modalLogin) modalLogin.classList.remove('hidden');
         showToast('Signed out successfully. Session terminated.', 'info');
       }
@@ -5245,6 +5314,10 @@ function resetSessionUI() {
   const emailLabel = document.getElementById('auth-user-email');
   const saSelector = document.getElementById('superadmin-view-selector');
   const btnEmergencyStop = document.getElementById('btn-emergency-stop');
+  const btnLogout = document.getElementById('btn-logout');
+  const btnAddDevice = document.getElementById('btn-add-device');
+  const btnSubmitWorkload = document.getElementById('btn-submit-workload');
+  const profileContainer = document.getElementById('profile-menu-container');
 
   if (tenantBadge) tenantBadge.textContent = '🏢 Unauthenticated Session';
   if (roleBadge) {
@@ -5255,6 +5328,15 @@ function resetSessionUI() {
   if (emailLabel) emailLabel.textContent = 'Not signed in';
   if (saSelector) saSelector.style.display = 'none';
   if (btnEmergencyStop) btnEmergencyStop.style.display = 'none';
+
+  // SECURITY: Hide all privileged action buttons and Sign Out when unauthenticated
+  if (btnLogout) btnLogout.style.display = 'none';
+  if (btnAddDevice) btnAddDevice.style.display = 'none';
+  if (btnSubmitWorkload) btnSubmitWorkload.style.display = 'none';
+
+  // Hide all nav tabs (will be re-shown by applyRoleView on successful auth)
+  const allNavItems = document.querySelectorAll('.nav-links .nav-item');
+  allNavItems.forEach(n => n.style.display = 'none');
 }
 
 function applySessionUI(user, tenant, role, permissions) {
@@ -5262,6 +5344,7 @@ function applySessionUI(user, tenant, role, permissions) {
   const roleBadge = document.getElementById('active-role-badge');
   const emailLabel = document.getElementById('auth-user-email');
   const saSelector = document.getElementById('superadmin-view-selector');
+  const btnLogout = document.getElementById('btn-logout');
 
   if (tenantBadge) {
     tenantBadge.textContent = `🏢 ${tenant?.name || 'Enterprise'} (${tenant?.id || user.tenant_id})`;
@@ -5283,9 +5366,16 @@ function applySessionUI(user, tenant, role, permissions) {
     }
   }
 
+  // SECURITY: Only show Sign Out when authenticated
+  if (btnLogout) btnLogout.style.display = 'inline-flex';
+
   if (saSelector) {
     saSelector.style.display = (role === 'SUPER_ADMIN') ? 'flex' : 'none';
   }
+
+  // Show all nav items that are role-appropriate, then restrict via applyRoleView
+  const allNavItems = document.querySelectorAll('.nav-links .nav-item');
+  allNavItems.forEach(n => n.style.display = '');
 
   applyRoleView(role, permissions, role === 'SUPER_ADMIN' ? superadminSimulatedView : null);
 }
@@ -5369,14 +5459,34 @@ function clearPlannerCards(placeholder = '—') {
   }
 }
 
+let plannerState = 'IDLE'; // 'IDLE', 'CALCULATING', 'SUCCESS', 'ERROR'
+
 async function runOutcomePlanner() {
   const selectWorkload = document.getElementById('planner-workload-select');
   const selectGoal = document.getElementById('planner-goal-select');
   const btnRun = document.getElementById('btn-run-outcome-planner');
+  const bannerTitle = document.getElementById('planner-decision-title');
+  const bannerDesc = document.getElementById('planner-decision-desc');
+
+  // Enforce zero-trust authentication boundary: Never call planner anonymously
+  if (!currentSessionToken && !currentSessionUser) {
+    plannerState = 'IDLE';
+    currentPlanResult = null;
+    clearPlannerCards('—');
+    if (bannerTitle) {
+      bannerTitle.textContent = '🔒 Authentication Required [AUTH_REQUIRED]';
+      bannerTitle.style.color = '#94a3b8';
+    }
+    if (bannerDesc) {
+      bannerDesc.textContent = 'Sign in with an authorized account to evaluate distributed execution plans.';
+    }
+    return;
+  }
 
   const workloadType = selectWorkload ? selectWorkload.value : 'matrix';
   const goal = selectGoal ? selectGoal.value : 'Fastest';
 
+  plannerState = 'CALCULATING';
   if (btnRun) {
     btnRun.disabled = true;
     btnRun.textContent = '⏳ Analyzing Optimal Strategy...';
@@ -5387,21 +5497,52 @@ async function runOutcomePlanner() {
 
   try {
     const inputSize = workloadType === 'tiny' ? 4096 : (workloadType === 'hash' ? 10485760 : 1048576);
-    const res = await fetch(`${API_BASE}/api/v1/workloads/analyze-plan`, {
-      method: 'POST',
-      headers: authedHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        workload_type: workloadType,
-        optimization_goal: goal,
-        input_size_bytes: inputSize
-      })
-    });
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/api/v1/workloads/analyze-plan`, {
+        method: 'POST',
+        headers: authedHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          workload_type: workloadType,
+          optimization_goal: goal,
+          input_size_bytes: inputSize
+        })
+      });
+    } catch (networkErr) {
+      const err = new Error('Control plane API unreachable or CORS blocked');
+      err.code = 'CONTROL_PLANE_UNAVAILABLE';
+      throw err;
+    }
 
     if (!res.ok) {
-      throw new Error(`Planner returned HTTP ${res.status}`);
+      let errCode = 'CONTROL_PLANE_UNAVAILABLE';
+      let errMsg = `Planner returned HTTP ${res.status}`;
+      try {
+        const errJson = await res.json();
+        errMsg = errJson.message || errJson.error || errMsg;
+        if (errJson.error) errCode = errJson.error;
+      } catch (_) {}
+
+      if (res.status === 401) {
+        errCode = 'AUTH_REQUIRED';
+        errMsg = 'Authentication required to evaluate workload plans';
+      } else if (res.status === 403) {
+        errCode = 'FORBIDDEN';
+        errMsg = 'Insufficient permissions to access outcome planner';
+      } else if (res.status === 404) {
+        errCode = 'NO_ELIGIBLE_NODE';
+        errMsg = 'No eligible compute nodes found matching workload requirements';
+      } else if (res.status >= 500) {
+        errCode = 'CONTROL_PLANE_UNAVAILABLE';
+      }
+
+      const err = new Error(errMsg);
+      err.code = errCode;
+      throw err;
     }
 
     const plan = await res.json();
+    plannerState = 'SUCCESS';
     currentPlanResult = plan;
 
     // Support canonical typed strategies schema with backward-compatible fallbacks
@@ -5459,9 +5600,6 @@ async function runOutcomePlanner() {
     if (elClusterTransfer) elClusterTransfer.textContent = `Transfer: ${clusterTransfer}ms | Aggregation: ${clusterAgg}ms`;
 
     // Update Decision Banner
-    const bannerTitle = document.getElementById('planner-decision-title');
-    const bannerDesc = document.getElementById('planner-decision-desc');
-
     const mode = rec.mode || plan.recommended_mode || 'SINGLE_NODE';
     const isCluster = mode === 'CLUSTER';
     const isSingle = mode === 'SINGLE_NODE';
@@ -5511,18 +5649,18 @@ async function runOutcomePlanner() {
     showToast(`Planner evaluated: ${mode} recommended`, 'success');
   } catch (err) {
     console.error('[SPaaS Outcome Planner] Error:', err);
+    plannerState = 'ERROR';
     currentPlanResult = null;
-    clearPlannerCards('—');
-    const bannerTitle = document.getElementById('planner-decision-title');
-    const bannerDesc = document.getElementById('planner-decision-desc');
+    clearPlannerCards('—'); // Clear stale metrics on ERROR
+    const code = err.code || 'PLANNER_ERROR';
     if (bannerTitle) {
-      bannerTitle.textContent = `⚠️ Planner Evaluation Failed`;
+      bannerTitle.textContent = `⚠️ Planner Evaluation Failed [${code}]`;
       bannerTitle.style.color = '#ef4444';
     }
     if (bannerDesc) {
-      bannerDesc.textContent = `Error: ${err.message}. Retrying or check connectivity.`;
+      bannerDesc.textContent = `${err.message}`;
     }
-    showToast(`Outcome planner error: ${err.message}`, 'error');
+    showToast(`Outcome planner error [${code}]: ${err.message}`, 'error');
   } finally {
     if (btnRun) {
       btnRun.disabled = false;
@@ -5570,9 +5708,7 @@ function initOutcomePlanner() {
       }
     });
   }
-
-  // Pre-calculate default plan on startup
-  setTimeout(runOutcomePlanner, 800);
+  // NOTE: Never automatically call runOutcomePlanner anonymously on boot.
 }
 
 // -------------------------------------------------------------
@@ -5685,18 +5821,25 @@ async function fetchTripleEntryReconciliation() {
     const statusEl = document.getElementById('ledger-invariant-status');
     const inputFee = document.getElementById('input-platform-fee-pct');
 
-    if (debitsEl) debitsEl.textContent = `-${data.total_customer_gross_debits.toFixed(4)} TEST CR`;
-    if (creditsEl) creditsEl.textContent = `+${data.total_provider_net_credits.toFixed(4)} TEST CR`;
-    if (feeEl) feeEl.textContent = `+${data.total_platform_fee_revenue.toFixed(4)} TEST CR`;
-    if (feePctEl) feePctEl.textContent = `Fee: ${data.platform_fee_pct.toFixed(1)}%`;
-    if (inputFee && !inputFee.matches(':focus')) inputFee.value = data.platform_fee_pct.toFixed(1);
+    const grossDebits = Number(data.total_customer_gross_debits ?? data.unit_economics?.total_customer_charge ?? 0);
+    const netCredits = Number(data.total_provider_net_credits ?? data.unit_economics?.provider_reward ?? 0);
+    const feeRevenue = Number(data.total_platform_fee_revenue ?? data.unit_economics?.platform_fee_collected ?? 0);
+    const feePct = Number(data.platform_fee_pct ?? 15.0);
+    const isBalanced = Boolean(data.is_balanced ?? (data.reconciliation_status === "BALANCED"));
+    const discrepancy = Number(data.discrepancy ?? 0);
+
+    if (debitsEl) debitsEl.textContent = `-${grossDebits.toFixed(4)} TEST CR`;
+    if (creditsEl) creditsEl.textContent = `+${netCredits.toFixed(4)} TEST CR`;
+    if (feeEl) feeEl.textContent = `+${feeRevenue.toFixed(4)} TEST CR`;
+    if (feePctEl) feePctEl.textContent = `Fee: ${feePct.toFixed(1)}%`;
+    if (inputFee && !inputFee.matches(':focus')) inputFee.value = feePct.toFixed(1);
 
     if (statusEl) {
-      if (data.is_balanced) {
+      if (isBalanced) {
         statusEl.textContent = `⚖️ 100% RECONCILED (0.00 CR Discrepancy)`;
         statusEl.style.color = '#10b981';
       } else {
-        statusEl.textContent = `⚠️ DISCREPANCY: ${data.discrepancy.toFixed(4)} CR`;
+        statusEl.textContent = `⚠️ DISCREPANCY: ${discrepancy.toFixed(4)} CR`;
         statusEl.style.color = '#ef4444';
       }
     }

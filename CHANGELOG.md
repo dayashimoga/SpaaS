@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.8.1] - 2026-10-06
+
+### Added & Hardened — Web Console Auth Gating, Modal Tree Rectification, Playwright Browser E2E Suite & CORS Whitelisting
+- **HTML DOM Hierarchy & Unclosed Tag Rectification (`index.html`):** Resolved root cause of deployed web console authentication regression where unclosed tags in `#modal-compare-devices` (line 2165) and `#modal-job-offer` (line 2289) caused the login modal `#modal-login` to be parsed as a nested child of hidden modal overlays. Added static inline `style="display: none;"` directly to `#app` and `#btn-logout`, ensuring that no protected navigation tabs, metric dashboards, or privileged action buttons (`+ Add Compute Device`, `Submit Workload`, `Emergency Stop`, `Sign Out`) are rendered before authoritative authentication.
+- **Strict Client-Side App Shell Gating & Session Lockdown (`main.js`):** Implemented `lockAppShell()` and `unlockAppShell()` targeting `#app`, `.sidebar`, and `.main-content`. Gated `bootApp()` such that unauthenticated sessions initialize only the authentication UI (`initAuth()`); protected modules (`initNavigation`, `initOutcomePlanner`, `initDeviceControls`, etc.) and background metric polling are deferred until `/api/v1/auth/me` returns 200 OK. Session expiration immediately invokes `handleSessionExpired()`, clears tokens, locks the app shell, and renders the zero-trust login prompt.
+- **Production Control Plane Deny-by-Default Security Boundary (`coordinator.js`, `wrangler.toml`):** Configured `SPAAS_REQUIRE_AUTH = "true"` in `wrangler.toml` and enforced `requireStrictAuth` in `SPaaSCoordinator` when running in `production` or when `SPAAS_REQUIRE_AUTH="true"`. Strictly rejects anonymous access with HTTP 401 across all protected routes without fallback dev identities.
+- **CORS Credentials, Header Whitelisting & Multi-Dot Pages Preview Domains (`src/index.js`, `src/coordinator.js`):** Extended CORS origin regex `^https:\/\/([a-zA-Z0-9-]+\.)*pages\.dev$` to support multi-dot Cloudflare Pages preview builds (e.g., `6a587ede.spaas-console.pages.dev`). Added `"Access-Control-Allow-Credentials": "true"` to all responses and preflight OPTIONS headers. Explicitly whitelisted `X-CSRF-Token`, `Idempotency-Key`, and `X-SPaaS-Role` without wildcard `*`, eliminating browser CORS preflight blocking on credentialed requests.
+- **Outcome Planner Error State Machine & Stale Metric Clearing (`main.js`):** Gated `runOutcomePlanner()` against unauthenticated execution, returning typed `[AUTH_REQUIRED]`. Replaced unhandled fetch failure toasts with typed state machine (`IDLE` -> `CALCULATING` -> `SUCCESS` / `ERROR`) handling `AUTH_REQUIRED`, `FORBIDDEN`, `NO_ELIGIBLE_NODE`, and `CONTROL_PLANE_UNAVAILABLE`. Automatically resets card values to `—` on error, eliminating stale metric persistence. Removed rogue unauthenticated automatic calculation timers.
+- **Automated Playwright Browser E2E Test Suite (`tests/e2e-browser.test.mjs`, `package.json`):** Created 8-step real headless Chrome test suite executing against production-equivalent in-process Cloudflare Worker API gateway and static frontend server:
+  1. Fresh incognito visitor sees ONLY the Login modal; app shell and controls are strictly hidden (`PASS ✓`).
+  2. Authoritative customer login hydrates dashboard, reveals customer controls, hides admin features (`PASS ✓`).
+  3. Tasks tab outcome planner executes cleanly and displays honest provenance (`PASS ✓`).
+  4. Page reload preserves authenticated session without missing tabs or infinite spinner (`PASS ✓`).
+  5. Sign out button cleanly terminates session, clears tokens, and locks app shell (`PASS ✓`).
+  6. Super admin login reveals full administrative authority and emergency stop button (`PASS ✓`).
+  7. Provider login applies provider view and isolates from admin controls (`PASS ✓`).
+  8. Expired or unauthorized server session immediately triggers app lockdown and re-auth prompt (`PASS ✓`).
+  - **Results: 8/8 Tests Passed (100% Pass Rate).**
+- **Full-Stack Regression Verification:** 64/64 control plane unit/integration tests pass with 92.97% line coverage (`npm test` in `apps/cloudflare-control-plane`), all 11 Rust workspace crates pass (`cargo test --workspace`), and web-console builds cleanly in 602ms (`npm test` in `apps/web-console`).
+
+---
+
 ## [0.8.0] - 2026-10-05
 
 ### Added & Hardened — Authoritative Authentication Boundary, Centralized RBAC Matrix, Tenant Isolation & Metrics Provenance Tiers

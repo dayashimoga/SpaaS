@@ -220,3 +220,55 @@ $$\text{Discrepancy} = |\sum \text{Debits} - (\sum \text{Credits} + \sum \text{F
                       │ 3. Increment epoch to N + 2
                       │ 4. Cloudflare resumes primary role with epoch N + 2 fencing tokens
 ```
+
+---
+
+## 6. Client Web Console Zero-Trust Authentication & Shell Lockdown Architecture
+
+```
+                       [BROWSER INITIAL NAVIGATION]
+                                    │
+                                    ▼
+                      [STATIC HTML BOOTSTRAP]
+     • #app container has style="display: none;" (Hardened DOM)
+     • #btn-logout has style="display: none;"
+     • Modals verified well-formed direct body children
+                                    │
+                                    ▼
+                         [MAIN.JS APP BOOT]
+                                    │
+                                    ├───> lockAppShell() strictly hides #app & .sidebar
+                                    └───> initAuth() attaches login submit / dev fill listeners
+                                    │
+                                    ▼
+                       [GET /api/v1/auth/me]
+                                    │
+                     ┌──────────────┴──────────────┐
+                     │                             │
+               (401 Unauthorized)            (200 OK Authenticated)
+                     │                             │
+                     ▼                             ▼
+        [SHOW ZERO-TRUST LOGIN MODAL]   [HYDRATE CLIENT APPLICATION]
+     • App shell remains display:none   • unlockAppShell() reveals #app
+     • 0 privileged buttons rendered    • initNavigation(), initOutcomePlanner()
+     • Background metrics polling OFF   • applySessionUI(user, tenant, role)
+     • Planner blocked with typed       • Background polling activated
+       [AUTH_REQUIRED] status           • Session token persisted in sessionStorage
+                     │                             │
+                     │                             ▼
+                     │                  [SESSION EXPIRATION / LOGOUT]
+                     │                             │
+                     │                  • Server session invalidated
+                     │                  • sessionStorage cleared
+                     │                  • lockAppShell() executes immediately
+                     │                  • handleSessionExpired() displays re-auth modal
+                     └─────────────────────────────┘
+```
+
+### Verified Implementation Safeguards
+1. **Zero-Trust Default State:** HTML static markup renders `#app` and privileged action buttons (`+ Add Compute Device`, `Submit Workload`, `Emergency Stop`, `Sign Out`) with inline `display: none`.
+2. **Modal Tree Integrity:** Correct closing tags ensure `#modal-login` is a direct child of `<body>` and never rendered inside hidden modal containers.
+3. **CORS Boundary Hardening:** Explicitly whitelisted `Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Device-Auth, X-SPaaS-Key, X-Correlation-ID, X-CSRF-Token, Idempotency-Key, X-SPaaS-Role` with `Access-Control-Allow-Credentials: true` and multi-dot Cloudflare Pages previews support.
+4. **Outcome Planner Resilience:** Calls require authentication, clear stale metrics on error to `—`, and follow a typed state machine (`IDLE` -> `CALCULATING` -> `SUCCESS` / `ERROR`).
+5. **Continuous Browser E2E Enforcement:** Validated by real headless Chrome via Playwright (`apps/web-console/tests/e2e-browser.test.mjs`, 8/8 PASS).
+

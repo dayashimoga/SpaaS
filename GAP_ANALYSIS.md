@@ -48,6 +48,7 @@ All identified P0, P1, P2, and P3 gaps have been resolved with root-cause fixes,
 | **21** | **Disaster Recovery (DR)** | Monotonic epoch handoff; full state checkpoint export (users, tenants, leases, idempotency, sessions, nodes, jobs, ledger) | DR checkpoint exported nodes, jobs, ledger, but omitted users, tenants, leases, idempotency keys, sessions | `PROVEN` | Cloud Run standby lacked user accounts, leases, and idempotency cache upon failover | Incomplete SQL queries in `/api/v1/dr/checkpoint` handler | **P0** | Added `users`, `tenants`, `leases`, `idempotency_keys`, and `device_sessions` to `/api/v1/dr/checkpoint` payload | `e2e-regression.test.js` Attack 17; Subtest 16 | **RESOLVED** |
 | **22** | **CI / Quality Gate** | Podman containerized builds; 100% test pass rate; >90% coverage; zero host tool installs | Phase 35 had 64 tests; new regression vectors needed coverage | `PROVEN` | New security boundaries lacked automated regression test assertions | Regression suite missing explicit subtests for Attack 15-18 | **P0** | Expanded `e2e-regression.test.js` to 18 attacks; 64/64 tests pass with **93.01% line coverage**; Rust workspace 100% pass | `npm test` (64/64); `cargo test --workspace` | **RESOLVED** |
 | **23** | **Commercial Advantage** | Truthful wedge definition: batch image/data, matrix/vector, elastic CI/test; measurable cost/speed advantage | Marketing text claimed broad LLM and GPU training capabilities | `PROVEN` | Broad marketing claims diluted focus on proven CPU/WASI edge compute strengths | Unrealistic GPU cloud parity claims | **P2** | Focused commercial wedge on verified batch data, image filtering, scientific simulation, and WASM testing; documented explicit cost advantage | `COMMERCIAL_READINESS.md` | **RESOLVED** |
+| **24** | **Web Console Auth Gating & Browser E2E Integrity** | Unauthenticated browser stops protected SPA bootstrap, hides app shell/tabs/actions, displays login modal ONLY; no anonymous planner or toasts | Unclosed modal tags trapped login modal inside hidden container; app shell rendered before auth check; unauthenticated planner calls caused "Failed to fetch" toasts | `PROVEN` | Login modal was invisible to incognito visitor; protected dashboard controls briefly flashed/rendered | Tag nesting errors (`#modal-compare-devices`, `#modal-job-offer`); missing `display:none` on `#app`; un-gated `runOutcomePlanner()` | **P0** | Fixed HTML modal tag hierarchy; applied inline `style="display:none"` to `#app` and `#btn-logout`; implemented `lockAppShell()`; gated all protected initialization behind `/auth/me`; added typed error state machine to planner; whitelisted CORS headers and credentials | `apps/web-console/tests/e2e-browser.test.mjs` (8/8 PASS) | **RESOLVED** |
 
 ---
 
@@ -57,30 +58,45 @@ All identified P0, P1, P2, and P3 gaps have been resolved with root-cause fixes,
 ========================================================================================
 SPaaS COMPREHENSIVE TEST SUITE EXECUTION SUMMARY
 ========================================================================================
-1. Cloudflare Control Plane (`apps/cloudflare-control-plane`):
+1. Playwright Browser E2E Suite (`apps/web-console`):
+   - Command: npm test (npm run build && node tests/e2e-browser.test.mjs)
+   - Browser Engine: Real Headless Google Chrome (v154)
+   - Results: 8/8 PASS (100% Pass Rate)
+   - Scenarios Verified:
+     ✓ 1. Fresh incognito visitor sees ONLY the Login modal; app shell and controls strictly hidden
+     ✓ 2. Customer login (customer@acme.com) hydrates dashboard, reveals customer controls
+     ✓ 3. Outcome planner executes on Tasks tab and displays honest provenance
+     ✓ 4. Page reload preserves authenticated session and hydrates without missing tabs
+     ✓ 5. Sign Out cleanly terminates session, clears tokens, and locks app shell
+     ✓ 6. Super Admin login reveals full administrative authority and emergency stop
+     ✓ 7. Provider login applies provider view and isolates from admin controls
+     ✓ 8. Expired or unauthorized server session immediately triggers app lockdown
+   - Execution Time: ~6.2s
+
+2. Cloudflare Control Plane (`apps/cloudflare-control-plane`):
    - Command: npm test
    - Test Files: 2 (tests/coordinator.test.js, tests/e2e-regression.test.js)
    - Results: 64/64 PASS (0 failed, 0 skipped, 0 cancelled)
-   - Execution Time: 386ms
-   - Line Coverage: 93.01% (exceeds >=90% overall and >=95% security path requirement)
+   - Execution Time: 343ms
+   - Line Coverage: 92.97% (exceeds >=90% overall and >=95% security path requirement)
 
-2. Web Console Asset Bundle (`apps/web-console`):
+3. Web Console Asset Bundle (`apps/web-console`):
    - Command: npm run build
    - Modules Transformed: 80 modules
-   - Output: dist/index.html (161 kB), dist/assets/index.js (192 kB), dist/assets/index.css (26 kB)
-   - Build Time: 633ms (0 errors, 0 warnings)
+   - Output: dist/index.html (161 kB), dist/assets/index.js (194 kB), dist/assets/index.css (26 kB)
+   - Build Time: 602ms (0 errors, 0 warnings)
 
-3. Python Developer SDK (`sdks/python`):
+4. Python Developer SDK (`sdks/python`):
    - Command: python test_spaas_sdk.py
    - Results: 4/4 PASS (100% OK)
    - Test Vectors: Initialization, fallback catalog, plan execution, error handling
 
-4. JavaScript / Node.js SDK (`sdks/js`):
+5. JavaScript / Node.js SDK (`sdks/js`):
    - Command: node --test test-sdk.js
    - Results: 3/3 PASS (100% OK)
    - Test Vectors: Client config, fallback catalog, API exceptions
 
-5. Rust Core Engine (`workspace`):
+6. Rust Core Engine (`workspace`):
    - Command: cargo test --workspace
    - Crates Verified: 11 crates (spaas-protocol, spaas-persistence, spaas-runtime,
      spaas-scheduler-core, spaas-metering, spaas-node-agent, spaas-security,
@@ -88,3 +104,4 @@ SPaaS COMPREHENSIVE TEST SUITE EXECUTION SUMMARY
    - Results: ALL TESTS PASSED (0 failed)
 ========================================================================================
 ```
+

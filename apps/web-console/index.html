@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <div id="app" class="dashboard-layout">
+    <div id="app" class="dashboard-layout" style="display: none;">
       <!-- Sidebar Navigation -->
       <aside class="sidebar">
         <div class="brand">
@@ -80,7 +80,7 @@
               <span class="pulse-dot" style="width: 8px; height: 8px; background: #10b981; border-radius: 50%;"></span>
               <span id="auth-user-email" style="font-size: 0.82rem; color: #cbd5e1; font-family: var(--font-mono);">Not signed in</span>
             </div>
-            <button type="button" id="btn-logout" class="btn btn-xs btn-outline-rose" title="Terminate current authenticated session" style="display: flex; align-items: center; gap: 4px;">
+            <button type="button" id="btn-logout" class="btn btn-xs btn-outline-rose" title="Terminate current authenticated session" style="display: none; align-items: center; gap: 4px;">
               <span>🚪</span> Sign Out
             </button>
           </div>
@@ -2163,6 +2163,9 @@
             <!-- Dynamic comparison content rendered by JS -->
           </div>
         </div>
+      </div>
+    </div>
+
     <!-- Modal: Edit Job -->
     <div id="modal-edit-job" class="modal-overlay hidden">
       <div class="modal-card" style="max-width: 600px; width: 95%;">
@@ -2283,6 +2286,8 @@
           </div>
         </div>
       </div>
+    </div>
+
     <!-- Modal: Authoritative Authentication Boundary (P0) -->
     <div id="modal-login" class="modal-overlay">
       <div class="modal-box" style="max-width: 480px; width: 95%;">

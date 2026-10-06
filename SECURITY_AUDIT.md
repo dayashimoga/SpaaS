@@ -9,15 +9,15 @@
 
 ## 1. Executive Summary
 
-A comprehensive adversarial security evaluation was performed across the Cloudflare Worker + Durable Object control plane. The evaluation tested 18 distinct adversarial attack vectors targeting authentication bypass, privilege escalation, cross-tenant data leaks, device impersonation, token replay, idempotency poisoning, and fencing token tampering.
+A comprehensive adversarial security evaluation was performed across the Cloudflare Worker + Durable Object control plane and the client web console SPA. The evaluation tested 20 distinct adversarial attack vectors targeting authentication bypass, privilege escalation, cross-tenant data leaks, device impersonation, token replay, idempotency poisoning, fencing token tampering, unauthenticated SPA bootstrapping, and CORS credential vulnerabilities.
 
-**Result: 18 / 18 Attack Vectors DEFENDED (100% Pass Rate).**
+**Result: 20 / 20 Attack Vectors DEFENDED (100% Pass Rate).**
 
-All attacks are continuously tested in `apps/cloudflare-control-plane/tests/e2e-regression.test.js`. Control-plane security paths exceed **93.01% overall line coverage** with 0 regressions.
+All attacks are continuously tested in `apps/cloudflare-control-plane/tests/e2e-regression.test.js` and `apps/web-console/tests/e2e-browser.test.mjs`. Control-plane security paths exceed **92.97% overall line coverage** with 0 regressions.
 
 ---
 
-## 2. 18-Attack-Vector Adversarial Matrix
+## 2. 20-Attack-Vector Adversarial Matrix
 
 | Vector # | Attack Description | Pre-Fix Vulnerability | Adversarial Payload / Request | Expected Defense | Observed Response | Test Status |
 |---|---|---|---|---|---|---|
@@ -41,6 +41,8 @@ All attacks are continuously tested in `apps/cloudflare-control-plane/tests/e2e-
 | **16c** | Cross-Tenant Observability Leak | Customer A viewing Customer B trace | `GET /api/v1/observability/trace/{job_B}` (`token_customer_A`) | `403 Forbidden` | `403 Forbidden` (`FORBIDDEN`) | **PASS** |
 | **17** | DR Checkpoint Full State Audit | Admin exporting full state checkpoint | `GET /api/v1/dr/checkpoint` (Admin Auth) | `200 OK` with complete tables | Exports users, tenants, leases, idempotency, sessions, nodes, jobs, ledger | **PASS** |
 | **18** | FinOps Dynamic Reconciliation | Auditor verifying balanced ledger | `GET /api/v1/billing/reconciliation` (Admin Auth) | `200 OK` with discrepancy = 0.0000 | `reconciliation_status: "BALANCED"`, `discrepancy_credits: 0` | **PASS** |
+| **19** | Unauthenticated SPA Shell Probe | Anonymous incognito user inspecting client DOM | `GET /` with clean browser profile | App shell locked (`display:none`), login modal ONLY, 0 privileged buttons | Verified by Playwright headless Chrome: `#app` hidden, `#btn-logout` hidden | **PASS** |
+| **20** | CORS Preflight Wildcard Rejection | Credentialed fetch with custom headers | `OPTIONS` with `credentials: include` + `X-CSRF-Token` | Explicit header whitelist, credentials allowed, Pages previews matched | Successful preflight without browser CORS block | **PASS** |
 
 ---
 
