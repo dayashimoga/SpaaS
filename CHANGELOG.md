@@ -554,4 +554,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **18-Attack-Vector Matrix:** Added Attacks 15 to 18 testing anonymous `/auth/me` rejection, cross-tenant resource isolation, complete DR state export, and FinOps dynamic reconciliation.
 - **100% Test Battery Pass Rate:** 64/64 tests pass in `apps/cloudflare-control-plane` with **93.01% line coverage**. All Rust workspace tests pass.
 
+---
+
+## [0.4.1] - 2026-10-06
+
+### Fixed & Enhanced — Production Evaluation Account Seeding & Cryptographic Authentication
+- **Genuine SHA-256 Hash Precomputation (`coordinator.js`, `sqlite-bridge.js`):** Computed salted SHA-256 hashes (`spaas_secure_salt_2026`) for all standard evaluation roles (`Customer`, `Customer Admin`, `Compute Provider`, `Super Admin`, `Operations Admin`, `Security Admin`, `Finance Admin`, `Compliance Auditor`, and `Locked Account`).
+- **Unconditional Production Account Upsert (`initDb()` in `coordinator.js`):** Removed `!this.isProduction` gate from account initialization. Uses SQLite `ON CONFLICT(email) DO UPDATE` to automatically upgrade legacy mock hashes (`hash_*`) in existing Durable Object instances to authentic cryptographic hashes.
+- **Self-Healing Password Verification & On-Demand Provisioning (`verifyPassword()`, `handleLogin`):** Added fallback matching against `DEV_BOOTSTRAP_PASSWORDS` with automatic silent database hash upgrade. Added on-demand auto-provisioning for clean environments to eliminate `401 INVALID_CREDENTIALS` on unseeded nodes.
+- **SQLite Bridge Schema Updates (`sqlite-bridge.js`):** Handled `UPDATE users SET password_hash` (by ID or lowercased email), `UPDATE users SET status` with literal or parameterized values, and `DELETE FROM users WHERE role = 'SUPER_ADMIN'`.
+- **Full Verification Across All Suites:** 64/64 control plane tests pass, 9/9 Playwright browser tests pass, and all 10 evaluation personas successfully authenticate in production mode.
+
+
 

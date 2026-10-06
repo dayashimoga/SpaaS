@@ -92,22 +92,22 @@ function createMinimalFallbackEngine() {
       ["tenant_competitor_b", { id: "tenant_competitor_b", name: "Competitor AI Labs", plan: "starter", balance_credits: 500.0, currency_balance: 5.0, status: "ACTIVE" }]
     ]),
     users: new Map([
-      ["usr_admin", { id: "usr_admin", tenant_id: "tenant_spaas_system", email: "admin@spaas.dev", password_hash: "hash_admin_master", role: "SUPER_ADMIN", status: "ACTIVE", mfa_enabled: 1 }],
-      ["usr_cust_admin", { id: "usr_cust_admin", tenant_id: "tenant_enterprise_customer", email: "customer_admin@acme.ai", password_hash: "hash_cust_admin", role: "CUSTOMER_ADMIN", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_cust_dev", { id: "usr_cust_dev", tenant_id: "tenant_enterprise_customer", email: "developer@acme.ai", password_hash: "hash_cust_dev", role: "CUSTOMER", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_provider", { id: "usr_provider", tenant_id: "tenant_community_providers", email: "provider@edge.net", password_hash: "hash_provider", role: "PROVIDER", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_ops", { id: "usr_ops", tenant_id: "tenant_spaas_system", email: "ops@spaas.dev", password_hash: "hash_ops", role: "OPS", status: "ACTIVE", mfa_enabled: 1 }],
-      ["usr_security", { id: "usr_security", tenant_id: "tenant_spaas_system", email: "security@spaas.dev", password_hash: "hash_security", role: "SECURITY", status: "ACTIVE", mfa_enabled: 1 }],
-      ["usr_finance", { id: "usr_finance", tenant_id: "tenant_spaas_system", email: "finance@spaas.dev", password_hash: "hash_finance", role: "FINANCE", status: "ACTIVE", mfa_enabled: 1 }],
-      ["usr_support", { id: "usr_support", tenant_id: "tenant_spaas_system", email: "support@spaas.dev", password_hash: "hash_support", role: "SUPPORT", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_auditor", { id: "usr_auditor", tenant_id: "tenant_spaas_system", email: "auditor@spaas.dev", password_hash: "hash_auditor", role: "AUDITOR", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_locked", { id: "usr_locked", tenant_id: "tenant_enterprise_customer", email: "locked@acme.ai", password_hash: "hash_locked", role: "CUSTOMER", status: "LOCKED", mfa_enabled: 0 }],
-      ["usr_competitor_dev", { id: "usr_competitor_dev", tenant_id: "tenant_competitor_b", email: "competitor@external.ai", password_hash: "hash_competitor", role: "CUSTOMER", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_cust_prompt", { id: "usr_cust_prompt", tenant_id: "tenant_enterprise_customer", email: "customer@acme.com", password_hash: "hash_cust_prompt", role: "CUSTOMER", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_cust_admin_prompt", { id: "usr_cust_admin_prompt", tenant_id: "tenant_enterprise_customer", email: "customer_admin@acme.com", password_hash: "hash_cust_admin_prompt", role: "CUSTOMER_ADMIN", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_provider_prompt", { id: "usr_provider_prompt", tenant_id: "tenant_community_providers", email: "provider@phonefarm.io", password_hash: "hash_provider_prompt", role: "PROVIDER", status: "ACTIVE", mfa_enabled: 0 }],
-      ["usr_superadmin_prompt", { id: "usr_superadmin_prompt", tenant_id: "tenant_spaas_system", email: "superadmin@spaas.internal", password_hash: "hash_superadmin_prompt", role: "SUPER_ADMIN", status: "ACTIVE", mfa_enabled: 1 }],
-      ["usr_locked_prompt", { id: "usr_locked_prompt", tenant_id: "tenant_enterprise_customer", email: "locked@acme.com", password_hash: "hash_locked_prompt", role: "CUSTOMER", status: "LOCKED", mfa_enabled: 0 }]
+      ["usr_admin", { id: "usr_admin", tenant_id: "tenant_spaas_system", email: "admin@spaas.dev", password_hash: "e94d149a258874c184e7459b7389a3792f628673915a5975d2b8cf87d1aad878", role: "SUPER_ADMIN", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_cust_admin", { id: "usr_cust_admin", tenant_id: "tenant_enterprise_customer", email: "customer_admin@acme.ai", password_hash: "5f7363d533693c4a1c293de53654c40204225c8e03d4f7593ce92dce9c1acebc", role: "CUSTOMER_ADMIN", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_cust_dev", { id: "usr_cust_dev", tenant_id: "tenant_enterprise_customer", email: "developer@acme.ai", password_hash: "4c8549e7a36daa378fbf982f882852ecff82198cf9757b5fb55d2195a9af9567", role: "CUSTOMER", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_provider", { id: "usr_provider", tenant_id: "tenant_community_providers", email: "provider@edge.net", password_hash: "1c20db706ea6166c425de142983c46d32661027bb1d9643367a6cdf7868ef344", role: "PROVIDER", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_ops", { id: "usr_ops", tenant_id: "tenant_spaas_system", email: "ops@spaas.dev", password_hash: "dd217369e21e33a4f6a3ea8e7208e9b70981d42e295849d27ae11449da1aecd0", role: "OPS", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_security", { id: "usr_security", tenant_id: "tenant_spaas_system", email: "security@spaas.dev", password_hash: "099820cc53cdc685594c408e35396b0ec2471d46dc9bfc41704a1b2134fe9213", role: "SECURITY", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_finance", { id: "usr_finance", tenant_id: "tenant_spaas_system", email: "finance@spaas.dev", password_hash: "534cb06d94b3146d1c9ff553ecfa344b1c0f414f0af7e42a7962d00679ef5e20", role: "FINANCE", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_support", { id: "usr_support", tenant_id: "tenant_spaas_system", email: "support@spaas.dev", password_hash: "6c5f8d2d93152569dcc0bcaf4ede99e2614c09a6a301feb0625d484caa8184cf", role: "SUPPORT", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_auditor", { id: "usr_auditor", tenant_id: "tenant_spaas_system", email: "auditor@spaas.dev", password_hash: "05a2431880c9359d718808c3d39f4d75fe9e32b9024d9a64d5dd254291fd713e", role: "AUDITOR", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_locked", { id: "usr_locked", tenant_id: "tenant_enterprise_customer", email: "locked@acme.ai", password_hash: "03706616555291ba6b21964fa4fec9760268391e58d8dfb1bfb0cd4807607ab5", role: "CUSTOMER", status: "LOCKED", mfa_enabled: 0 }],
+      ["usr_competitor_dev", { id: "usr_competitor_dev", tenant_id: "tenant_competitor_b", email: "competitor@external.ai", password_hash: "bdb3cc66a5b6ce943eb3bc2eadc60555b108d0de77df300523c945a49cd32162", role: "CUSTOMER", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_cust_prompt", { id: "usr_cust_prompt", tenant_id: "tenant_enterprise_customer", email: "customer@acme.com", password_hash: "e3cc430c1d68ec00b043b597385b6b59b9bae4dce537b2caa88602529dac9b0b", role: "CUSTOMER", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_cust_admin_prompt", { id: "usr_cust_admin_prompt", tenant_id: "tenant_enterprise_customer", email: "customer_admin@acme.com", password_hash: "c5bf798a1708102b8954680da9757201fddc14a82dc6a473a4f4dd1cb6a8f9bc", role: "CUSTOMER_ADMIN", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_provider_prompt", { id: "usr_provider_prompt", tenant_id: "tenant_community_providers", email: "provider@phonefarm.io", password_hash: "579ceac9e31067f88d351e95fb5a106eb7cdabafbf2660c9bcaf18497810d4d6", role: "PROVIDER", status: "ACTIVE", mfa_enabled: 0 }],
+      ["usr_superadmin_prompt", { id: "usr_superadmin_prompt", tenant_id: "tenant_spaas_system", email: "superadmin@spaas.internal", password_hash: "e5f73cd5a88010a33194205d537c9b709ada4baa09451eb2739f32db3d49e26d", role: "SUPER_ADMIN", status: "ACTIVE", mfa_enabled: 1 }],
+      ["usr_locked_prompt", { id: "usr_locked_prompt", tenant_id: "tenant_enterprise_customer", email: "locked@acme.com", password_hash: "e3cc430c1d68ec00b043b597385b6b59b9bae4dce537b2caa88602529dac9b0b", role: "CUSTOMER", status: "LOCKED", mfa_enabled: 0 }]
     ]),
     api_keys: new Map(),
     sessions: new Map(),
@@ -1332,7 +1332,7 @@ function createMinimalFallbackEngine() {
       }
 
       // USERS
-      if (qu.startsWith("INSERT INTO USERS") || qu.startsWith("INSERT OR IGNORE INTO USERS")) {
+      if (qu.startsWith("INSERT INTO USERS") || qu.startsWith("INSERT OR IGNORE INTO USERS") || qu.startsWith("INSERT OR REPLACE INTO USERS")) {
         let id, tenant_id, email, password_hash, role, status, mfa_enabled, created_at;
         if (params.length > 0) {
           [id, tenant_id, email, password_hash, role, status, mfa_enabled, created_at] = params;
@@ -1348,7 +1348,42 @@ function createMinimalFallbackEngine() {
           }
         }
         if (id) {
+          const lowerEmail = (email || "").toLowerCase();
+          for (const [existingId, u] of tables.users.entries()) {
+            if ((u.email || "").toLowerCase() === lowerEmail) {
+              tables.users.delete(existingId);
+            }
+          }
           tables.users.set(id, { id, tenant_id, email, password_hash: password_hash || 'hash_test', role, status: status || 'ACTIVE', mfa_enabled: mfa_enabled || 0, created_at: created_at || Date.now() });
+        }
+        return [];
+      }
+      if (qu.startsWith("UPDATE USERS SET PASSWORD_HASH =")) {
+        const [newHash, idOrEmail] = params;
+        const target = (idOrEmail || "").toLowerCase();
+        for (const u of tables.users.values()) {
+          if (u.id === idOrEmail || (u.email || "").toLowerCase() === target) {
+            u.password_hash = newHash;
+          }
+        }
+        return [];
+      }
+      if (qu.startsWith("UPDATE USERS SET STATUS =")) {
+        let newStatus = qu.includes("'LOCKED'") ? "LOCKED" : qu.includes("'ACTIVE'") ? "ACTIVE" : params[0];
+        const idOrEmail = params[params.length - 1];
+        const target = (idOrEmail || "").toLowerCase();
+        for (const u of tables.users.values()) {
+          if (u.id === idOrEmail || (u.email || "").toLowerCase() === target) {
+            u.status = newStatus;
+          }
+        }
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM USERS WHERE ROLE = 'SUPER_ADMIN'") || qu.startsWith("DELETE FROM USERS WHERE ROLE = ?")) {
+        for (const [id, u] of tables.users.entries()) {
+          if (u.role === 'SUPER_ADMIN') {
+            tables.users.delete(id);
+          }
         }
         return [];
       }
