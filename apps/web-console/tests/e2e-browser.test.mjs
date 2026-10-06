@@ -64,7 +64,7 @@ async function createApiServer() {
   const workerEnv = {
     SPAAS_ROLE: 'PRIMARY',
     SPAAS_CONTROL_PLANE_EPOCH: '1',
-    SPAAS_ENVIRONMENT: 'production',
+    SPAAS_ENVIRONMENT: 'test',
     SPAAS_REQUIRE_AUTH: 'true',
     SPAAS_RATE_LIMIT_RPS: '100',
     SPAAS_ALLOWED_ORIGINS: 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:8787,http://127.0.0.1:8787'
@@ -212,11 +212,15 @@ async function runTests() {
       const btnEmergencyVisible = await page.isVisible('#btn-emergency-stop');
       assert.equal(btnEmergencyVisible, false, 'Emergency Stop button #btn-emergency-stop must NOT be visible');
 
-      // 4. Nav items MUST NOT be visible
+      // 5. Nav items MUST NOT be visible
       const navOverviewVisible = await page.isVisible('#nav-overview');
       assert.equal(navOverviewVisible, false, 'Overview nav tab must NOT be visible');
 
-      // 5. Verify NO "Outcome planner error: Failed to fetch" toast appeared
+      // 6. DEV quick-fill buttons MUST NOT exist in production DOM
+      const devFillCount = await page.locator('.btn-dev-fill').count();
+      assert.equal(devFillCount, 0, 'Production bundle/DOM must not contain dev quick-fill buttons');
+
+      // 7. Verify NO "Outcome planner error: Failed to fetch" toast appeared
       const toasts = await page.$$eval('.toast', els => els.map(e => e.textContent));
       const failedToFetch = toasts.some(t => t.includes('Failed to fetch') || t.includes('Outcome planner error'));
       assert.equal(failedToFetch, false, 'No unauthenticated outcome planner toast should ever appear');
@@ -226,8 +230,9 @@ async function runTests() {
     // TEST 2: Authoritative Login as CUSTOMER
     // -------------------------------------------------------------------------
     await step('Login as CUSTOMER (customer@acme.com) hydrates dashboard, reveals customer controls and hides admin features', async () => {
-      // Click customer dev quick-fill button
-      await page.click('.btn-dev-fill[data-email="customer@acme.com"]');
+      // Direct form inputs (no dev quick-fill in production)
+      await page.fill('#login-email', 'customer@acme.com');
+      await page.fill('#login-password', 'CustomerSecret123!');
       const emailVal = await page.$eval('#login-email', el => el.value);
       const passVal = await page.$eval('#login-password', el => el.value);
       console.log(`DEBUG Form inputs: email=${emailVal}, pass=${passVal}`);
@@ -357,7 +362,8 @@ async function runTests() {
     // TEST 6: Super Admin Privileged Surface
     // -------------------------------------------------------------------------
     await step('Login as SUPER_ADMIN reveals full administrative authority and emergency stop', async () => {
-      await page.click('.btn-dev-fill[data-email="superadmin@spaas.internal"]');
+      await page.fill('#login-email', 'superadmin@spaas.internal');
+      await page.fill('#login-password', 'SuperAdminRootKey999!');
       await Promise.all([
         page.waitForResponse(res => res.url().includes('/api/v1/auth/login'), { timeout: 5000 }),
         page.click('#btn-login-submit')
@@ -400,7 +406,8 @@ async function runTests() {
       }, { timeout: 5000 });
 
       // Login as Provider
-      await page.click('.btn-dev-fill[data-email="provider@phonefarm.io"]');
+      await page.fill('#login-email', 'provider@phonefarm.io');
+      await page.fill('#login-password', 'ProviderSecret123!');
       await Promise.all([
         page.waitForResponse(res => res.url().includes('/api/v1/auth/login'), { timeout: 5000 }),
         page.click('#btn-login-submit')
@@ -452,6 +459,21 @@ async function runTests() {
       // Verify error message is shown in login modal
       const errorMsg = await page.textContent('#login-error-msg');
       assert.ok(errorMsg.includes('expired') || errorMsg.includes('unauthorized'), `Expected expired/unauthorized message, got: ${errorMsg}`);
+    });
+
+    // -------------------------------------------------------------------------
+    // TEST 9: Password Recovery and Owner Bootstrap Navigation
+    // -------------------------------------------------------------------------
+    await step('Password recovery navigation switches views cleanly without errors', async () => {
+      // Click Forgot Password
+      await page.click('#link-show-reset');
+      assert.equal(await page.isVisible('#form-reset'), true, 'Password reset form must become visible');
+      assert.equal(await page.isVisible('#form-login'), false, 'Login form must be hidden when reset form is shown');
+
+      // Click Back to Sign In
+      await page.click('#form-reset .link-back-to-login');
+      assert.equal(await page.isVisible('#form-login'), true, 'Login form must be restored');
+      assert.equal(await page.isVisible('#form-reset'), false, 'Reset form must be hidden');
     });
 
     await context.close();

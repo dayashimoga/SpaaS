@@ -658,4 +658,292 @@ test("E2E Integration — Mandatory 14-Attack-Vector RBAC & Security Boundaries 
   assert.ok(reconData.payment_gateway);
   assert.equal(reconData.payment_gateway.fiat_settlement_enabled, false);
   assert.ok(reconData.unit_economics);
+
+  // Attack 19: One-Time First Owner Bootstrap Lifecycle & Permanent Disable
+  // Reset bootstrap state to simulate fresh deployment
+  const resetRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/bootstrap/test-reset", { method: "POST" }));
+  assert.equal(resetRes.status, 200);
+  const resetData = await resetRes.json();
+  const bootstrapToken = resetData.bootstrap_token;
+  assert.ok(bootstrapToken, "Bootstrap token must be generated");
+
+  const bootStatusRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/bootstrap/status", { method: "GET" }));
+  assert.equal(bootStatusRes.status, 200);
+  const bootStatus = await bootStatusRes.json();
+  assert.equal(bootStatus.bootstrap_available, true, "Bootstrap must be available when no superadmin exists");
+
+  // Attempt owner creation with invalid bootstrap token -> 401
+  const badBootRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/bootstrap/owner", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: "invalid_secret_token", email: "first_owner@spaas.dev", password: "SuperSecureOwnerPassword123!" })
+  }));
+  assert.equal(badBootRes.status, 401, "Attack 19a: Invalid bootstrap token must return 401");
+
+  // Valid owner bootstrap -> 201
+  const goodBootRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/bootstrap/owner", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: bootstrapToken, email: "first_owner@spaas.dev", password: "SuperSecureOwnerPassword123!" })
+  }));
+  assert.equal(goodBootRes.status, 201, "Valid owner creation must succeed with 201");
+  const goodBoot = await goodBootRes.json();
+  assert.equal(goodBoot.role, "SUPER_ADMIN");
+
+  // Subsequent bootstrap attempt MUST be permanently rejected -> 410
+  const repeatBootRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/bootstrap/owner", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: bootstrapToken, email: "attacker@spaas.dev", password: "AnotherSuperPassword123!" })
+  }));
+  assert.equal(repeatBootRes.status, 410, "Attack 19b: Subsequent bootstrap attempt must return 410 Gone");
+
+  const bootStatusAfter = await (await coordinator.fetch(new Request("http://localhost/api/v1/auth/bootstrap/status", { method: "GET" }))).json();
+  assert.equal(bootStatusAfter.bootstrap_available, false, "Bootstrap must be permanently closed");
+
+  // Attack 20: Brute-Force Login Sliding Window Lockout
+  const targetEmail = "first_owner@spaas.dev";
+  for (let i = 0; i < 5; i++) {
+    await coordinator.fetch(new Request("http://localhost/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: targetEmail, password: "WrongPassword999!" })
+    }));
+  }
+  const lockedLoginRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: targetEmail, password: "SuperSecureOwnerPassword123!" })
+  }));
+  assert.equal(lockedLoginRes.status, 429, "Attack 20: 6th login attempt after 5 failures must return 429 Too Many Requests");
+  // Unlock for subsequent tests
+  coordinator.recordLoginSuccess(targetEmail);
+
+  // Attack 21: Turnstile Bot / Abuse Defense Enforcement
+  const badTurnstileRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: targetEmail, password: "SuperSecureOwnerPassword123!", turnstile_token: "invalid_bot_token" })
+  }));
+  assert.equal(badTurnstileRes.status, 403, "Attack 21: Invalid Cloudflare Turnstile token must return 403 Forbidden");
+
+  // Attack 22: Password Reset & Recovery Flow
+  const resetReqRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/password/reset-request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: targetEmail })
+  }));
+  assert.equal(resetReqRes.status, 200);
+  const resetReqData = await resetReqRes.json();
+  const resetToken = resetReqData.reset_token;
+  assert.ok(resetToken, "Reset token must be generated in test mode");
+
+  const confirmResetRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/password/reset-confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: resetToken, new_password: "BrandNewOwnerPassword456!" })
+  }));
+  assert.equal(confirmResetRes.status, 200, "Password reset confirmation must succeed");
+
+  // Login with new password succeeds
+  const loginNewPassRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: targetEmail, password: "BrandNewOwnerPassword456!" })
+  }));
+  assert.equal(loginNewPassRes.status, 200);
+  const ownerSession = await loginNewPassRes.json();
+  const ownerAuthHeader = `Bearer ${ownerSession.token}`;
+
+  // Attack 23: MFA Enrollment & Verification
+  const mfaSetupRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/mfa/setup", {
+    method: "POST",
+    headers: { "Authorization": ownerAuthHeader }
+  }));
+  assert.equal(mfaSetupRes.status, 200);
+  const mfaSetup = await mfaSetupRes.json();
+  assert.ok(mfaSetup.secret);
+  assert.ok(Array.isArray(mfaSetup.backup_codes));
+
+  const mfaVerifyRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/mfa/verify", {
+    method: "POST",
+    headers: { "Authorization": ownerAuthHeader, "Content-Type": "application/json" },
+    body: JSON.stringify({ code: "123456" })
+  }));
+  assert.equal(mfaVerifyRes.status, 200);
+  assert.equal((await mfaVerifyRes.json()).mfa_enabled, true);
+
+  // Attack 24: Passkey Challenge & Registration
+  const pkChalRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/passkey/register-challenge", {
+    method: "POST",
+    headers: { "Authorization": ownerAuthHeader }
+  }));
+  assert.equal(pkChalRes.status, 200);
+
+  const pkRegRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/passkey/verify-register", {
+    method: "POST",
+    headers: { "Authorization": ownerAuthHeader, "Content-Type": "application/json" },
+    body: JSON.stringify({ public_key: "ed25519_pk_yubikey_01", name: "YubiKey 5C NFC" })
+  }));
+  assert.equal(pkRegRes.status, 200);
+  const pkReg = await pkRegRes.json();
+  assert.ok(pkReg.passkey_id);
+
+  // Attack 25: Session Listing & Revocation
+  const listSessRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/sessions", {
+    method: "GET",
+    headers: { "Authorization": ownerAuthHeader }
+  }));
+  assert.equal(listSessRes.status, 200);
+  const sessionsList = await listSessRes.json();
+  assert.ok(sessionsList.sessions.length >= 1);
+
+  const revokeAllRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/sessions/revoke-all", {
+    method: "POST",
+    headers: { "Authorization": ownerAuthHeader }
+  }));
+  assert.equal(revokeAllRes.status, 200);
+
+  // Previously valid session is now revoked -> 401
+  const afterRevokeRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/me", {
+    method: "GET",
+    headers: { "Authorization": ownerAuthHeader }
+  }));
+  assert.equal(afterRevokeRes.status, 401, "Attack 25: Revoked session must return 401 Unauthorized");
+
+  // Attack 26: User Account Locking by Security Admin
+  const lockRes = await coordinator.fetch(new Request("http://localhost/api/v1/admin/users/usr_cust_dev/lock", {
+    method: "POST",
+    headers: { "Authorization": "Bearer token_security" }
+  }));
+  assert.equal(lockRes.status, 200);
+
+  // Locked user login attempt -> 403
+  const lockedUserLogin = await coordinator.fetch(new Request("http://localhost/api/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "developer@acme.ai", password: "any" })
+  }));
+  assert.equal(lockedUserLogin.status, 403, "Attack 26: Login to locked account must return 403 Forbidden");
+
+  // Unlock user
+  const unlockRes = await coordinator.fetch(new Request("http://localhost/api/v1/admin/users/usr_cust_dev/unlock", {
+    method: "POST",
+    headers: { "Authorization": "Bearer token_security" }
+  }));
+  assert.equal(unlockRes.status, 200);
+
+  // Attack 27: API Key Rotation
+  const createKeyRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/api-keys", {
+    method: "POST",
+    headers: { "Authorization": "Bearer token_customer_admin", "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "CI Build Key" })
+  }));
+  assert.equal(createKeyRes.status, 201);
+  const keyData = await createKeyRes.json();
+
+  const rotateKeyRes = await coordinator.fetch(new Request(`http://localhost/api/v1/auth/api-keys/${keyData.key_id}/rotate`, {
+    method: "POST",
+    headers: { "Authorization": "Bearer token_customer_admin" }
+  }));
+  assert.equal(rotateKeyRes.status, 200);
+  const rotated = await rotateKeyRes.json();
+  assert.notEqual(rotated.api_key, keyData.api_key, "Rotated key secret must differ from original");
+
+  // Attack 28: Audited Break-Glass Emergency Recovery
+  const bgInitRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/break-glass/initiate", { method: "POST" }));
+  assert.equal(bgInitRes.status, 200);
+
+  const bgConfirmRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/break-glass/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recovery_code: "emergency_break_glass_root_2026" })
+  }));
+  assert.equal(bgConfirmRes.status, 200);
+  const bgData = await bgConfirmRes.json();
+  assert.equal(bgData.role, "SUPER_ADMIN");
+  assert.ok(bgData.emergency_session_token);
+
+  // Attack 29: Cloudflare R2 Content-Addressed Artifacts with Tenant Isolation
+  const rawBase64 = "SGVsbG8gU1BhYVMgRWRnZSBDb21wdXRlIEZhYnJpYyE=";
+  const storeArtRes = await coordinator.fetch(new Request("http://localhost/api/v1/artifacts", {
+    method: "POST",
+    headers: { "Authorization": "Bearer token_customer", "Content-Type": "application/json" },
+    body: JSON.stringify({ content_base64: rawBase64, filename: "payload.bin", content_type: "application/octet-stream" })
+  }));
+  assert.equal(storeArtRes.status, 201);
+  const artData = await storeArtRes.json();
+  assert.ok(artData.sha256);
+
+  // Cross-tenant artifact fetch -> 403
+  coordinator.sqlExec("INSERT OR IGNORE INTO users (id, tenant_id, email, role, status, created_at) VALUES ('usr_tenant_b', 'tenant_competitor_b', 'b@comp.ai', 'CUSTOMER', 'ACTIVE', 1700000000000)");
+  coordinator.sqlExec("INSERT OR IGNORE INTO sessions (token, tenant_id, user_id, role, expires_at, created_at) VALUES ('sess_tenant_b', 'tenant_competitor_b', 'usr_tenant_b', 'CUSTOMER', 9999999999999, 1700000000000)");
+  const crossArtRes = await coordinator.fetch(new Request(`http://localhost/api/v1/artifacts/${artData.sha256}`, {
+    method: "GET",
+    headers: { "Authorization": "Bearer sess_tenant_b" }
+  }));
+  assert.equal(crossArtRes.status, 403, "Attack 29: Cross-tenant artifact access must return 403 Forbidden");
+
+  // Owner tenant artifact fetch -> 200
+  const ownerArtRes = await coordinator.fetch(new Request(`http://localhost/api/v1/artifacts/${artData.sha256}`, {
+    method: "GET",
+    headers: { "Authorization": "Bearer token_customer" }
+  }));
+  assert.equal(ownerArtRes.status, 200);
+
+  // Attack 30: Cloudflare Queues Delivery Layer
+  const queueMsgRes = await coordinator.fetch(new Request("http://localhost/api/v1/queues/dispatch", {
+    method: "POST",
+    headers: { "Authorization": "Bearer token_ops", "Content-Type": "application/json" },
+    body: JSON.stringify({ job_id: "job_queue_test", task: "compile_wasm" })
+  }));
+  assert.equal(queueMsgRes.status, 202);
+  const qData = await queueMsgRes.json();
+  assert.ok(qData.event_id);
+  assert.equal(qData.queue, "dispatch");
+
+  const qStatusRes = await coordinator.fetch(new Request("http://localhost/api/v1/queues/status", {
+    method: "GET",
+    headers: { "Authorization": "Bearer token_ops" }
+  }));
+  assert.equal(qStatusRes.status, 200);
+
+  // Attack 31: Cloudflare Quota Guard Monitoring
+  const quotaRes = await coordinator.fetch(new Request("http://localhost/api/v1/system/quota-guard", { method: "GET" }));
+  assert.equal(quotaRes.status, 200);
+  const quotaData = await quotaRes.json();
+  assert.ok(quotaData.quota_guard);
+  assert.equal(quotaData.quota_guard.status, "HEALTHY");
+
+  // Attack 32: Job Checkpoint & Ephemeral CI Agent Lifecycle
+  const chkRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs/job_checkpoint_test/checkpoint", {
+    method: "POST",
+    headers: { "Authorization": "Bearer token_ops", "Content-Type": "application/json" },
+    body: JSON.stringify({ step: 42, state_data: { processed_rows: 50000, current_hash: "abcd1234" } })
+  }));
+  assert.equal(chkRes.status, 201);
+
+  const getChkRes = await coordinator.fetch(new Request("http://localhost/api/v1/jobs/job_checkpoint_test/checkpoint", {
+    method: "GET",
+    headers: { "Authorization": "Bearer token_customer" }
+  }));
+  assert.equal(getChkRes.status, 200);
+  assert.equal((await getChkRes.json()).checkpoint.step, 42);
+
+  // Ephemeral CI Sandboxed Agent
+  const ciRes = await coordinator.fetch(new Request("http://localhost/api/v1/ci/jobs", {
+    method: "POST",
+    headers: { "Authorization": "Bearer token_customer", "Content-Type": "application/json" },
+    body: JSON.stringify({ repo: "https://github.com/spaas/wasm-kernel", commit: "a1b2c3d" })
+  }));
+  assert.equal(ciRes.status, 201);
+  const ciJob = await ciRes.json();
+  assert.equal(ciJob.workspace_status, "ACTIVE");
+
+  const destroyCiRes = await coordinator.fetch(new Request(`http://localhost/api/v1/ci/jobs/${ciJob.ci_job_id}/destroy`, {
+    method: "POST",
+    headers: { "Authorization": "Bearer token_customer" }
+  }));
+  assert.equal(destroyCiRes.status, 200);
+  assert.equal((await destroyCiRes.json()).workspace_status, "DESTROYED");
 });

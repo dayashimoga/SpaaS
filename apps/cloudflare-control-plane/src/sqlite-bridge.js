@@ -113,7 +113,15 @@ function createMinimalFallbackEngine() {
     sessions: new Map(),
     invoices: new Map(),
     provider_payouts: new Map(),
-    billing_config: new Map([["platform_fee_pct", "15.0"], ["min_withdrawal_credits", "50.0"], ["credit_to_usd_rate", "0.01"]])
+    billing_config: new Map([["platform_fee_pct", "15.0"], ["min_withdrawal_credits", "50.0"], ["credit_to_usd_rate", "0.01"]]),
+    login_attempts: new Map(),
+    password_resets: new Map(),
+    passkeys: new Map(),
+    mfa_enrollments: new Map(),
+    artifacts: new Map(),
+    queue_messages: new Map(),
+    job_checkpoints: new Map(),
+    ci_jobs: new Map()
   };
 
   return {
@@ -126,8 +134,21 @@ function createMinimalFallbackEngine() {
 
       // META
       if (qu.startsWith("INSERT OR IGNORE INTO META") || qu.startsWith("INSERT OR REPLACE INTO META") || qu.startsWith("INSERT INTO META")) {
-        const [k, v] = params;
-        tables.meta.set(k, v);
+        let k, v;
+        if (params.length >= 2) {
+          [k, v] = params;
+        } else if (params.length === 1) {
+          v = params[0];
+          const m = qu.match(/VALUES\s*\(\s*'([^']+)'/i);
+          if (m) k = m[1];
+        } else {
+          const m = qu.match(/VALUES\s*\(\s*'([^']+)'\s*,\s*'([^']+)'/i);
+          if (m) {
+            k = m[1];
+            v = m[2];
+          }
+        }
+        if (k) tables.meta.set(k, v);
         return [];
       }
       if (qu.startsWith("UPDATE META SET VALUE =")) {
@@ -155,6 +176,12 @@ function createMinimalFallbackEngine() {
         }
         return Array.from(tables.meta.entries()).map(([key, value]) => ({ key, value }));
       }
+      if (qu.startsWith("DELETE FROM META WHERE KEY =")) {
+        const k = params.length > 0 ? params[0] : (qu.match(/WHERE KEY = '([^']+)'/i)?.[1]);
+        if (k) tables.meta.delete(k);
+        return [];
+      }
+
 
       // PAIRING_TOKENS
       if (qu.startsWith("INSERT INTO PAIRING_TOKENS")) {
@@ -1306,8 +1333,23 @@ function createMinimalFallbackEngine() {
 
       // USERS
       if (qu.startsWith("INSERT INTO USERS") || qu.startsWith("INSERT OR IGNORE INTO USERS")) {
-        const [id, tenant_id, email, password_hash, role, status, mfa_enabled, created_at] = params;
-        tables.users.set(id, { id, tenant_id, email, password_hash, role, status: status || 'ACTIVE', mfa_enabled: mfa_enabled || 0, created_at: created_at || Date.now() });
+        let id, tenant_id, email, password_hash, role, status, mfa_enabled, created_at;
+        if (params.length > 0) {
+          [id, tenant_id, email, password_hash, role, status, mfa_enabled, created_at] = params;
+        } else {
+          const m = query.match(/VALUES\s*\(([^)]+)\)/i);
+          if (m) {
+            const vals = m[1].split(',').map(s => s.trim().replace(/^['"]|['"]$/g, ''));
+            if (qu.includes("(ID, TENANT_ID, EMAIL, ROLE, STATUS, CREATED_AT)")) {
+              id = vals[0]; tenant_id = vals[1]; email = vals[2]; role = vals[3]; status = vals[4]; created_at = Number(vals[5]);
+            } else {
+              id = vals[0]; tenant_id = vals[1]; email = vals[2]; password_hash = vals[3]; role = vals[4]; status = vals[5];
+            }
+          }
+        }
+        if (id) {
+          tables.users.set(id, { id, tenant_id, email, password_hash: password_hash || 'hash_test', role, status: status || 'ACTIVE', mfa_enabled: mfa_enabled || 0, created_at: created_at || Date.now() });
+        }
         return [];
       }
       if (qu.startsWith("SELECT") && (qu.includes("FROM USERS WHERE EMAIL =") || qu.includes("FROM USERS WHERE LOWER(EMAIL) ="))) {
@@ -1320,19 +1362,31 @@ function createMinimalFallbackEngine() {
         const match = tables.users.get(id);
         return match ? [match] : [];
       }
+      if (qu.startsWith("SELECT") && qu.includes("FROM USERS WHERE ROLE =")) {
+        const role = params.length > 0 ? params[0] : (qu.match(/WHERE ROLE = '([^']+)'/i)?.[1]);
+        return Array.from(tables.users.values()).filter(u => u.role === role);
+      }
       if (qu.startsWith("SELECT") && qu.includes("FROM USERS")) {
         return Array.from(tables.users.values());
       }
 
       // SESSIONS
-      if (qu.startsWith("INSERT INTO SESSIONS")) {
+      if (qu.startsWith("INSERT INTO SESSIONS") || qu.startsWith("INSERT OR IGNORE INTO SESSIONS") || qu.startsWith("INSERT OR REPLACE INTO SESSIONS")) {
         let token, tenant_id, user_id, role, expires_at, csrf_token, created_at;
         if (params.length >= 7) {
           [token, tenant_id, user_id, role, expires_at, csrf_token, created_at] = params;
-        } else {
+        } else if (params.length >= 5) {
           [token, tenant_id, user_id, role, expires_at, created_at] = params;
+        } else {
+          const m = query.match(/VALUES\s*\(([^)]+)\)/i);
+          if (m) {
+            const vals = m[1].split(',').map(s => s.trim().replace(/^['"]|['"]$/g, ''));
+            token = vals[0]; tenant_id = vals[1]; user_id = vals[2]; role = vals[3]; expires_at = Number(vals[4]); created_at = Number(vals[5]);
+          }
         }
-        tables.sessions.set(token, { token, tenant_id, user_id, role, expires_at, csrf_token: csrf_token || null, created_at: created_at || Date.now() });
+        if (token) {
+          tables.sessions.set(token, { token, tenant_id, user_id, role, expires_at, csrf_token: csrf_token || null, created_at: created_at || Date.now() });
+        }
         return [];
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM SESSIONS WHERE TOKEN =")) {
@@ -1414,6 +1468,209 @@ function createMinimalFallbackEngine() {
       }
       if (qu.startsWith("SELECT") && qu.includes("FROM PROVIDER_PAYOUTS")) {
         return Array.from(tables.provider_payouts.values());
+      }
+
+      // SESSIONS EXTENSIONS
+      if (qu.startsWith("SELECT") && qu.includes("FROM SESSIONS WHERE USER_ID =")) {
+        const uid = params[0];
+        return Array.from(tables.sessions.values()).filter(s => s.user_id === uid);
+      }
+      if (qu.startsWith("DELETE FROM SESSIONS WHERE USER_ID =") && qu.includes("TOKEN !=")) {
+        const [uid, tok] = params;
+        for (const [k, s] of tables.sessions.entries()) {
+          if (s.user_id === uid && k !== tok) tables.sessions.delete(k);
+        }
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM SESSIONS WHERE USER_ID =")) {
+        const uid = params[0];
+        for (const [k, s] of tables.sessions.entries()) {
+          if (s.user_id === uid) tables.sessions.delete(k);
+        }
+        return [];
+      }
+
+      // USERS EXTENSIONS
+      if (qu.startsWith("UPDATE USERS SET PASSWORD_HASH =")) {
+        const [hash, id] = params;
+        const u = tables.users.get(id);
+        if (u) u.password_hash = hash;
+        return [];
+      }
+      if (qu.startsWith("UPDATE USERS SET STATUS =")) {
+        let status, id;
+        if (params.length >= 2) {
+          [status, id] = params;
+        } else {
+          id = params[0];
+          const m = qu.match(/SET STATUS = '([^']+)'/i);
+          status = m ? m[1] : "LOCKED";
+        }
+        const u = tables.users.get(id);
+        if (u) u.status = status;
+        return [];
+      }
+      if (qu.startsWith("UPDATE USERS SET MFA_ENABLED =")) {
+        let mfa, id;
+        if (params.length >= 2) {
+          [mfa, id] = params;
+        } else {
+          id = params[0];
+          const m = qu.match(/SET MFA_ENABLED = (\d+)/i);
+          mfa = m ? parseInt(m[1], 10) : 1;
+        }
+        const u = tables.users.get(id);
+        if (u) u.mfa_enabled = mfa;
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM USERS WHERE ID =")) {
+        tables.users.delete(params[0]);
+        return [];
+      }
+      if (qu.startsWith("DELETE FROM USERS WHERE ROLE =")) {
+        const role = params.length > 0 ? params[0] : (qu.match(/WHERE ROLE = '([^']+)'/i)?.[1] || "SUPER_ADMIN");
+        for (const [id, u] of tables.users.entries()) {
+          if (u.role === role) tables.users.delete(id);
+        }
+        return [];
+      }
+
+      // LOGIN ATTEMPTS
+      if (qu.startsWith("INSERT OR REPLACE INTO LOGIN_ATTEMPTS") || qu.startsWith("INSERT INTO LOGIN_ATTEMPTS")) {
+        const [k, attempts, locked_until, last_attempt] = params;
+        tables.login_attempts.set(k, { key: k, attempts, fail_count: attempts, locked_until, last_attempt, updated_at: last_attempt });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM LOGIN_ATTEMPTS WHERE KEY =")) {
+        const row = tables.login_attempts.get(params[0]);
+        return row ? [row] : [];
+      }
+      if (qu.startsWith("DELETE FROM LOGIN_ATTEMPTS WHERE KEY =")) {
+        tables.login_attempts.delete(params[0]);
+        return [];
+      }
+
+      // PASSWORD RESETS
+      if (qu.startsWith("INSERT OR REPLACE INTO PASSWORD_RESETS") || qu.startsWith("INSERT INTO PASSWORD_RESETS")) {
+        const [token, user_id, expires_at, used, created_at] = params;
+        tables.password_resets.set(token, { token, token_hash: token, user_id, expires_at, used: used || 0, created_at });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM PASSWORD_RESETS WHERE") && (qu.includes("TOKEN =") || qu.includes("TOKEN_HASH ="))) {
+        const token = params[0];
+        const row = tables.password_resets.get(token);
+        if (!row || row.used === 1) return [];
+        if (params.length >= 2 && typeof params[1] === "number" && params[1] >= row.expires_at) return [];
+        return [row];
+      }
+      if (qu.startsWith("UPDATE PASSWORD_RESETS SET USED = 1 WHERE")) {
+        const token = params[0];
+        const row = tables.password_resets.get(token);
+        if (row) row.used = 1;
+        return [];
+      }
+
+      // PASSKEYS
+      if (qu.startsWith("INSERT INTO PASSKEYS")) {
+        const [id, user_id, public_key, counter, name, created_at] = params;
+        tables.passkeys.set(id, { id, user_id, public_key, counter: counter || 0, name: name || 'Security Key', device_name: name, created_at });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM PASSKEYS WHERE USER_ID =")) {
+        return Array.from(tables.passkeys.values()).filter(p => p.user_id === params[0]);
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM PASSKEYS WHERE ID =")) {
+        const row = tables.passkeys.get(params[0]);
+        return row ? [row] : [];
+      }
+
+      // MFA ENROLLMENTS
+      if (qu.startsWith("INSERT OR REPLACE INTO MFA_ENROLLMENTS") || qu.startsWith("INSERT INTO MFA_ENROLLMENTS")) {
+        const [user_id, secret, backup_codes, created_at] = params;
+        tables.mfa_enrollments.set(user_id, { user_id, secret, backup_codes, verified: 0, created_at });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM MFA_ENROLLMENTS WHERE USER_ID =")) {
+        const row = tables.mfa_enrollments.get(params[0]);
+        return row ? [row] : [];
+      }
+      if (qu.startsWith("UPDATE MFA_ENROLLMENTS SET VERIFIED = 1 WHERE USER_ID =")) {
+        const row = tables.mfa_enrollments.get(params[0]);
+        if (row) row.verified = 1;
+        return [];
+      }
+
+      // ARTIFACTS
+      if (qu.startsWith("INSERT OR REPLACE INTO ARTIFACTS") || qu.startsWith("INSERT INTO ARTIFACTS")) {
+        const [sha256, tenant_id, size_bytes, content_type, content_base64, filename, created_at] = params;
+        tables.artifacts.set(sha256, { sha256, tenant_id, size_bytes, size: size_bytes, content_type, content_base64, data: content_base64, filename, created_at });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM ARTIFACTS WHERE SHA256 =")) {
+        const row = tables.artifacts.get(params[0]);
+        return row ? [row] : [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM ARTIFACTS WHERE TENANT_ID =")) {
+        return Array.from(tables.artifacts.values()).filter(a => a.tenant_id === params[0]);
+      }
+      if (qu.startsWith("DELETE FROM ARTIFACTS WHERE SHA256 =")) {
+        tables.artifacts.delete(params[0]);
+        return [];
+      }
+      if (qu.startsWith("SELECT COUNT(*) AS COUNT, SUM(SIZE_BYTES)") || qu.includes("FROM ARTIFACTS")) {
+        let total = 0;
+        for (const a of tables.artifacts.values()) total += a.size_bytes || 0;
+        return [{ count: tables.artifacts.size, total_bytes: total }];
+      }
+
+      // QUEUE MESSAGES
+      if (qu.startsWith("INSERT INTO QUEUE_MESSAGES")) {
+        const [event_id, queue_name, tenant_id, job_id, payload, payload_hash, status, attempt, created_at] = params;
+        tables.queue_messages.set(event_id, { event_id, queue_name, tenant_id, job_id, payload, payload_hash, status: status || 'PENDING', attempt: attempt || 1, created_at });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM QUEUE_MESSAGES WHERE EVENT_ID =")) {
+        const row = tables.queue_messages.get(params[0]);
+        return row ? [row] : [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM QUEUE_MESSAGES WHERE QUEUE_NAME =")) {
+        return Array.from(tables.queue_messages.values()).filter(m => m.queue_name === params[0]);
+      }
+      if (qu.startsWith("UPDATE QUEUE_MESSAGES SET STATUS = 'PROCESSED'")) {
+        const [processed_at, event_id] = params;
+        const row = tables.queue_messages.get(event_id);
+        if (row) { row.status = 'PROCESSED'; row.processed_at = processed_at; }
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM QUEUE_MESSAGES")) {
+        return Array.from(tables.queue_messages.values());
+      }
+
+      // JOB CHECKPOINTS
+      if (qu.startsWith("INSERT OR REPLACE INTO JOB_CHECKPOINTS") || qu.startsWith("INSERT INTO JOB_CHECKPOINTS")) {
+        const [id, job_id, node_id, fencing_token, step, state_data, created_at] = params;
+        tables.job_checkpoints.set(id, { id, job_id, node_id, fencing_token, step, state_data, created_at });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM JOB_CHECKPOINTS WHERE JOB_ID =")) {
+        return Array.from(tables.job_checkpoints.values()).filter(c => c.job_id === params[0]).sort((a, b) => b.step - a.step);
+      }
+
+      // CI JOBS
+      if (qu.startsWith("INSERT INTO CI_JOBS")) {
+        const [id, tenant_id, repo, commit_hash, isolation_tier, created_at] = params.length >= 6 ? params : [params[0], params[1], params[2], params[3], params[4] || 'SANDBOX', params[5] || Date.now()];
+        tables.ci_jobs.set(id, { id, tenant_id, repo, commit_hash, status: 'QUEUED', isolation_tier, workspace_status: 'ACTIVE', created_at });
+        return [];
+      }
+      if (qu.startsWith("SELECT") && qu.includes("FROM CI_JOBS WHERE ID =")) {
+        const row = tables.ci_jobs.get(params[0]);
+        return row ? [row] : [];
+      }
+      if (qu.startsWith("UPDATE CI_JOBS SET WORKSPACE_STATUS = 'DESTROYED'")) {
+        const [destroyed_at, id] = params;
+        const row = tables.ci_jobs.get(id);
+        if (row) { row.workspace_status = 'DESTROYED'; row.status = 'COMPLETED'; row.destroyed_at = destroyed_at; }
+        return [];
       }
 
       return [];

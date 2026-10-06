@@ -2313,33 +2313,57 @@
             <button type="submit" id="btn-login-submit" class="btn btn-primary" style="width: 100%; padding: 10px; font-weight: 600; justify-content: center; display: flex; align-items: center; gap: 6px;">
               <span>🔐</span> Sign In
             </button>
+            <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.78rem;">
+              <a href="#" id="link-show-reset" style="color: #38bdf8; text-decoration: none;">Forgot password?</a>
+              <a href="#" id="link-show-bootstrap" style="color: #a78bfa; text-decoration: none; display: none;">First-Time Bootstrap</a>
+            </div>
             <div id="login-error-msg" class="alert-banner" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; display: none; margin-top: 1rem; padding: 10px 14px; font-size: 0.85rem; border-radius: 6px;">
             </div>
           </form>
 
-          <div class="dev-presets-section mt-4 pt-3" style="border-top: 1px solid rgba(255,255,255,0.08);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-              <span style="font-size: 0.72rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">DEV Quick-Fill (Pre-seeded Accounts)</span>
-              <span class="badge" style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Dev Only</span>
+          <form id="form-bootstrap" style="display: none;">
+            <div style="background: rgba(167, 139, 250, 0.1); border: 1px solid rgba(167, 139, 250, 0.3); border-radius: 6px; padding: 10px; margin-bottom: 1rem; font-size: 0.78rem; color: #c4b5fd;">
+              🛡️ <strong>First-Time Production Bootstrap</strong>: Create the initial Platform Owner using the server-generated single-use token. Once created, bootstrap is permanently disabled.
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.78rem;">
-              <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer@acme.com" data-pass="CustomerSecret123!" style="justify-content: flex-start;">
-                💼 Customer
-              </button>
-              <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer_admin@acme.com" data-pass="CustAdminSecret123!" style="justify-content: flex-start;">
-                🏢 Customer Admin
-              </button>
-              <button type="button" class="btn btn-xs btn-outline-emerald btn-dev-fill" data-email="provider@phonefarm.io" data-pass="ProviderSecret123!" style="justify-content: flex-start;">
-                📱 Provider
-              </button>
-              <button type="button" class="btn btn-xs btn-outline-amber btn-dev-fill" data-email="superadmin@spaas.internal" data-pass="SuperAdminRootKey999!" style="justify-content: flex-start;">
-                🛡️ Super Admin
-              </button>
-              <button type="button" class="btn btn-xs btn-outline-rose btn-dev-fill" data-email="locked@acme.com" data-pass="CustomerSecret123!" style="justify-content: flex-start; grid-column: span 2;">
-                🔒 Locked Account (Test 403)
-              </button>
+            <div class="form-group mb-2">
+              <label for="bootstrap-secret" style="display: block; font-size: 0.82rem; font-weight: 600; color: #cbd5e1; margin-bottom: 4px;">One-Time Bootstrap Secret</label>
+              <input type="password" id="bootstrap-secret" class="form-input" style="width: 100%; box-sizing: border-box;" placeholder="Enter server bootstrap token" />
             </div>
-          </div>
+            <div class="form-group mb-2">
+              <label for="bootstrap-email" style="display: block; font-size: 0.82rem; font-weight: 600; color: #cbd5e1; margin-bottom: 4px;">Owner Email</label>
+              <input type="email" id="bootstrap-email" class="form-input" style="width: 100%; box-sizing: border-box;" placeholder="admin@spaas.dev" />
+            </div>
+            <div class="form-group mb-3">
+              <label for="bootstrap-password" style="display: block; font-size: 0.82rem; font-weight: 600; color: #cbd5e1; margin-bottom: 4px;">Password (Min 12 chars)</label>
+              <input type="password" id="bootstrap-password" class="form-input" style="width: 100%; box-sizing: border-box;" placeholder="••••••••••••" />
+            </div>
+            <button type="submit" id="btn-bootstrap-submit" class="btn btn-primary" style="width: 100%; padding: 10px; font-weight: 600; justify-content: center; display: flex; align-items: center; gap: 6px; background: #7c3aed;">
+              <span>🛡️</span> Initialize Owner Account
+            </button>
+            <div style="text-align: center; margin-top: 10px;">
+              <a href="#" class="link-back-to-login" style="font-size: 0.78rem; color: #94a3b8; text-decoration: none;">← Back to Sign In</a>
+            </div>
+            <div id="bootstrap-msg" class="alert-banner" style="display: none; margin-top: 1rem; padding: 10px 14px; font-size: 0.85rem; border-radius: 6px;"></div>
+          </form>
+
+          <form id="form-reset" style="display: none;">
+            <div style="font-size: 0.82rem; color: #94a3b8; margin-bottom: 1rem;">
+              Enter your registered email address to receive password recovery instructions.
+            </div>
+            <div class="form-group mb-3">
+              <label for="reset-email" style="display: block; font-size: 0.82rem; font-weight: 600; color: #cbd5e1; margin-bottom: 4px;">Account Email</label>
+              <input type="email" id="reset-email" class="form-input" style="width: 100%; box-sizing: border-box;" placeholder="user@domain.com" />
+            </div>
+            <button type="submit" id="btn-reset-submit" class="btn btn-primary" style="width: 100%; padding: 10px; font-weight: 600; justify-content: center; display: flex; align-items: center; gap: 6px;">
+              <span>✉️</span> Request Recovery Link
+            </button>
+            <div style="text-align: center; margin-top: 10px;">
+              <a href="#" class="link-back-to-login" style="font-size: 0.78rem; color: #94a3b8; text-decoration: none;">← Back to Sign In</a>
+            </div>
+            <div id="reset-msg" class="alert-banner" style="display: none; margin-top: 1rem; padding: 10px 14px; font-size: 0.85rem; border-radius: 6px;"></div>
+          </form>
+
+          <div id="dev-presets-container"></div>
         </div>
       </div>
     </div>

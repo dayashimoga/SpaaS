@@ -5167,18 +5167,189 @@ function initAuth() {
     });
   }
 
-  // DEV quick-fill presets
-  document.querySelectorAll('.btn-dev-fill').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const email = btn.getAttribute('data-email');
-      const pass = btn.getAttribute('data-pass');
-      const emailInput = document.getElementById('login-email');
-      const passInput = document.getElementById('login-password');
-      if (emailInput) emailInput.value = email;
-      if (passInput) passInput.value = pass;
-      if (errorBox) errorBox.style.display = 'none';
+  // Bootstrap & Password Reset Form Navigation
+  const formBootstrap = document.getElementById('form-bootstrap');
+  const formReset = document.getElementById('form-reset');
+  const linkShowReset = document.getElementById('link-show-reset');
+  const linkShowBootstrap = document.getElementById('link-show-bootstrap');
+  const bootstrapMsg = document.getElementById('bootstrap-msg');
+  const resetMsg = document.getElementById('reset-msg');
+
+  // Check if first-owner bootstrap is available
+  originalFetch(`${API_BASE}/api/v1/auth/bootstrap/status`).then(r => r.json()).then(data => {
+    if (data && data.bootstrap_available) {
+      if (linkShowBootstrap) linkShowBootstrap.style.display = 'inline';
+    }
+  }).catch(() => {});
+
+  if (linkShowBootstrap) {
+    linkShowBootstrap.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (formLogin) formLogin.style.display = 'none';
+      if (formReset) formReset.style.display = 'none';
+      if (formBootstrap) formBootstrap.style.display = 'block';
+    });
+  }
+
+  if (linkShowReset) {
+    linkShowReset.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (formLogin) formLogin.style.display = 'none';
+      if (formBootstrap) formBootstrap.style.display = 'none';
+      if (formReset) formReset.style.display = 'block';
+    });
+  }
+
+  document.querySelectorAll('.link-back-to-login').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (formBootstrap) formBootstrap.style.display = 'none';
+      if (formReset) formReset.style.display = 'none';
+      if (formLogin) formLogin.style.display = 'block';
     });
   });
+
+  if (formBootstrap) {
+    formBootstrap.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const secret = document.getElementById('bootstrap-secret')?.value.trim();
+      const email = document.getElementById('bootstrap-email')?.value.trim();
+      const password = document.getElementById('bootstrap-password')?.value;
+      const btn = document.getElementById('btn-bootstrap-submit');
+
+      if (!secret || !email || !password) {
+        if (bootstrapMsg) {
+          bootstrapMsg.style.display = 'block';
+          bootstrapMsg.style.background = 'rgba(239, 68, 68, 0.15)';
+          bootstrapMsg.style.color = '#fca5a5';
+          bootstrapMsg.textContent = 'Secret, email, and password are all required';
+        }
+        return;
+      }
+
+      try {
+        if (btn) { btn.disabled = true; btn.textContent = 'Initializing...'; }
+        const res = await originalFetch(`${API_BASE}/api/v1/auth/bootstrap/owner`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bootstrap_secret: secret, email, password })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (bootstrapMsg) {
+            bootstrapMsg.style.display = 'block';
+            bootstrapMsg.style.background = 'rgba(239, 68, 68, 0.15)';
+            bootstrapMsg.style.color = '#fca5a5';
+            bootstrapMsg.textContent = data.message || `Bootstrap failed: ${data.error}`;
+          }
+          return;
+        }
+
+        if (bootstrapMsg) {
+          bootstrapMsg.style.display = 'block';
+          bootstrapMsg.style.background = 'rgba(16, 185, 129, 0.15)';
+          bootstrapMsg.style.color = '#6ee7b7';
+          bootstrapMsg.textContent = 'Platform Owner initialized successfully! Please sign in.';
+        }
+        if (linkShowBootstrap) linkShowBootstrap.style.display = 'none';
+        setTimeout(() => {
+          if (formBootstrap) formBootstrap.style.display = 'none';
+          if (formLogin) {
+            formLogin.style.display = 'block';
+            const emailInput = document.getElementById('login-email');
+            if (emailInput) emailInput.value = email;
+          }
+        }, 1500);
+      } catch (err) {
+        if (bootstrapMsg) {
+          bootstrapMsg.style.display = 'block';
+          bootstrapMsg.style.background = 'rgba(239, 68, 68, 0.15)';
+          bootstrapMsg.style.color = '#fca5a5';
+          bootstrapMsg.textContent = `Network error: ${err.message}`;
+        }
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<span>🛡️</span> Initialize Owner Account'; }
+      }
+    });
+  }
+
+  if (formReset) {
+    formReset.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('reset-email')?.value.trim();
+      const btn = document.getElementById('btn-reset-submit');
+      if (!email) return;
+
+      try {
+        if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+        const res = await originalFetch(`${API_BASE}/api/v1/auth/password/reset-request`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        if (resetMsg) {
+          resetMsg.style.display = 'block';
+          resetMsg.style.background = 'rgba(16, 185, 129, 0.15)';
+          resetMsg.style.color = '#6ee7b7';
+          resetMsg.textContent = data.message || 'If that email exists, password recovery instructions have been dispatched.';
+        }
+      } catch (err) {
+        if (resetMsg) {
+          resetMsg.style.display = 'block';
+          resetMsg.style.background = 'rgba(239, 68, 68, 0.15)';
+          resetMsg.style.color = '#fca5a5';
+          resetMsg.textContent = `Network error: ${err.message}`;
+        }
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<span>✉️</span> Request Recovery Link'; }
+      }
+    });
+  }
+
+  // DEV quick-fill presets: Mounted ONLY in local development or explicit dev test mode
+  if (import.meta.env.DEV || import.meta.env.VITE_DEV_QUICK_FILL === 'true') {
+    const devContainer = document.getElementById('dev-presets-container');
+    if (devContainer) {
+      devContainer.innerHTML = `
+        <div class="dev-presets-section mt-4 pt-3" style="border-top: 1px solid rgba(255,255,255,0.08);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 0.72rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">DEV Quick-Fill (Dev Mode Only)</span>
+            <span class="badge" style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Dev Only</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.78rem;">
+            <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer@acme.com" data-pass="CustomerSecret123!" style="justify-content: flex-start;">
+              💼 Customer
+            </button>
+            <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer_admin@acme.com" data-pass="CustAdminSecret123!" style="justify-content: flex-start;">
+              🏢 Customer Admin
+            </button>
+            <button type="button" class="btn btn-xs btn-outline-emerald btn-dev-fill" data-email="provider@phonefarm.io" data-pass="ProviderSecret123!" style="justify-content: flex-start;">
+              📱 Provider
+            </button>
+            <button type="button" class="btn btn-xs btn-outline-amber btn-dev-fill" data-email="superadmin@spaas.internal" data-pass="SuperAdminRootKey999!" style="justify-content: flex-start;">
+              🛡️ Super Admin
+            </button>
+            <button type="button" class="btn btn-xs btn-outline-rose btn-dev-fill" data-email="locked@acme.com" data-pass="CustomerSecret123!" style="justify-content: flex-start; grid-column: span 2;">
+              🔒 Locked Account (Test 403)
+            </button>
+          </div>
+        </div>
+      `;
+
+      devContainer.querySelectorAll('.btn-dev-fill').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const email = btn.getAttribute('data-email');
+          const pass = btn.getAttribute('data-pass');
+          const emailInput = document.getElementById('login-email');
+          const passInput = document.getElementById('login-password');
+          if (emailInput) emailInput.value = email;
+          if (passInput) passInput.value = pass;
+          if (errorBox) errorBox.style.display = 'none';
+        });
+      });
+    }
+  }
 
   if (formLogin) {
     formLogin.addEventListener('submit', async (e) => {
