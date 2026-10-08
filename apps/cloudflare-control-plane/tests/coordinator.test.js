@@ -3694,13 +3694,33 @@ test("SPaaSCoordinator — Subtest 56: State Reconciliation RBAC Rejects Unprivi
   assert.equal(opsRes.status, 200);
 });
 
+test("SPaaSCoordinator — Subtest 57: Automated Scheduled Cron Backup & State Snapshot Endpoint", async () => {
+  const coordinator = await SPaaSCoordinator.create(null, {
+    SPAAS_ROLE: "PRIMARY",
+    SPAAS_API_SECRET: TEST_ADMIN_SECRET
+  });
 
+  // 1. Unauthenticated external request rejected with 403
+  const unauthRes = await coordinator.fetch(new Request("http://localhost/api/v1/system/cron-backup", {
+    method: "POST"
+  }));
+  assert.equal(unauthRes.status, 403);
 
+  // 2. Internal cron trigger succeeds
+  const cronRes = await coordinator.fetch(new Request("http://localhost/api/v1/system/cron-backup", {
+    method: "POST",
+    headers: { "X-SPaaS-Internal-Cron": "true" }
+  }));
+  assert.equal(cronRes.status, 200);
+  const cronData = await cronRes.json();
+  assert.equal(cronData.status, "ok");
+  assert.ok(cronData.backup_id.startsWith("snap_"));
+  assert.ok(typeof cronData.stats.nodeCount === "number");
 
-
-
-
-
-
-
-
+  // 3. Super Admin trigger succeeds
+  const adminRes = await coordinator.fetch(new Request("http://localhost/api/v1/system/cron-backup", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${TEST_ADMIN_SECRET}` }
+  }));
+  assert.equal(adminRes.status, 200);
+});

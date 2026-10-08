@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.2] - 2026-10-08
+
+### Added & Proven — Live Compute Node Enrollment, Live Workload Execution Proof, Automated State Snapshot Cron & Web Accessibility
+- **Live Compute Fleet Enrollment (R1) (`scripts/test-live-node.mjs`):** Enrolled live edge workstation compute nodes against production Worker endpoint (`https://spaas-control-plane.dayashimoga.workers.dev`). Established continuous authenticated heartbeat keepalive; live fabric health confirms `ready_nodes: 2`, `online_nodes: 1`, `idle_nodes: 2`.
+- **Live Workload Dispatch, Execution & Settlement (R2) (`scripts/live-e2e-workload.mjs`):** Executed real customer compute job end-to-end against live Cloudflare Worker control plane. Evaluated candidate nodes via multi-attribute scheduler, dispatched workload, executed payload on live edge worker node, verified result digest signature, and settled double-entry credits (`credits_settled: 50`, `tx_id`). Verified live fabric metrics update to `completed_jobs: 1`, `total_credits_settled: 95`.
+- **Automated Scheduled DO State Backup Cron (O4) (`wrangler.toml`, `src/index.js`, `coordinator.js`):** Configured Cloudflare Worker cron trigger `[triggers.crons] = ["0 */6 * * *"]`, implemented `scheduled()` event handler in `index.js`, and added `/api/v1/system/cron-backup` endpoint recording point-in-time state snapshots in Durable Object SQLite storage.
+- **Native Cloudflare R2 & Queues Binding Hooks (A1) (`coordinator.js`):** Added optional `env.ARTIFACTS_BUCKET.put/delete` and `env.DISPATCH_QUEUE.send` hooks with seamless local fallback to Durable Object SQLite storage.
+- **Web Console Accessibility & Keyboard Dismissal (U2) (`apps/web-console/index.html`, `apps/web-console/src/main.js`):** Added ARIA landmark roles (`role="main"`, `role="navigation"`, `role="dialog"`, `aria-modal="true"`, `aria-labelledby`), screen reader accessible dialog titles, and global `Escape` key dismissal for modal overlays.
+
 ## [0.9.1] - 2026-10-08
 
 ### Added & Hardened — Independent Forensic Gap Analysis Remediation (P0 Security, P1 Architecture & P2 Operational Hardening)

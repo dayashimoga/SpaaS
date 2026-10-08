@@ -13,7 +13,7 @@
   <body>
     <div id="app" class="dashboard-layout" style="display: none;">
       <!-- Sidebar Navigation -->
-      <aside class="sidebar">
+      <aside class="sidebar" role="navigation" aria-label="Main Sidebar Navigation">
         <div class="brand">
           <div class="brand-icon">
             <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
@@ -60,7 +60,7 @@
       </aside>
 
       <!-- Main Content Area -->
-      <main class="main-content">
+      <main class="main-content" role="main" aria-label="SPaaS Management Dashboard">
         <!-- Authoritative Session Identity & Context Bar -->
         <div class="session-identity-bar" id="session-identity-bar">
           <div class="session-left">
@@ -1906,11 +1906,11 @@
     </div>
 
     <!-- Modal 1: + Add Compute Device -->
-    <div id="modal-add-device" class="modal-overlay hidden">
+    <div id="modal-add-device" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-add-device-title">
       <div class="modal-box modal-lg">
         <div class="modal-header">
-          <h2>Enroll Compute Device into SPaaS Fabric</h2>
-          <button id="modal-add-device-close" class="modal-close-btn" title="Close">&times;</button>
+          <h2 id="modal-add-device-title">Enroll Compute Device into SPaaS Fabric</h2>
+          <button id="modal-add-device-close" class="modal-close-btn" title="Close" aria-label="Close modal">&times;</button>
         </div>
 
         <div class="modal-scroll-body">
@@ -2102,11 +2102,11 @@
     </div>
 
     <!-- Modal 2: Submit Workload Modal -->
-    <div id="modal-submit" class="modal-overlay hidden">
+    <div id="modal-submit" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-submit-title">
       <div class="modal-box">
         <div class="modal-header">
-          <h2>Submit Sandboxed Workload</h2>
-          <button id="modal-close" class="modal-close-btn">&times;</button>
+          <h2 id="modal-submit-title">Submit Sandboxed Workload</h2>
+          <button id="modal-close" class="modal-close-btn" title="Close" aria-label="Close modal">&times;</button>
         </div>
         <form id="form-submit-workload">
           <div class="form-group">
@@ -2372,13 +2372,13 @@
     </div>
 
     <!-- Modal: Authoritative Authentication Boundary (P0) -->
-    <div id="modal-login" class="modal-overlay">
+    <div id="modal-login" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-login-title">
       <div class="modal-box" style="max-width: 480px; width: 95%;">
         <div class="modal-header" style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.15) 0%, rgba(15, 23, 42, 0.95) 100%);">
           <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <span style="font-size: 1.6rem;">🔐</span>
+            <span style="font-size: 1.6rem;" aria-hidden="true">🔐</span>
             <div>
-              <h2 style="margin: 0; font-size: 1.25rem; color: #38bdf8;">SPaaS Edge Fabric Sign In</h2>
+              <h2 id="modal-login-title" style="margin: 0; font-size: 1.25rem; color: #38bdf8;">SPaaS Edge Fabric Sign In</h2>
               <span class="text-sub" style="font-size: 0.8rem;">Authoritative Zero-Trust Authentication Boundary</span>
             </div>
           </div>

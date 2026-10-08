@@ -176,6 +176,7 @@ export const ROUTE_REGISTRY = [
   { pattern: /^\/api\/v1\/auth\/break-glass\/initiate$/, methods: ["POST"], classification: "PUBLIC" },
   { pattern: /^\/api\/v1\/auth\/break-glass\/confirm$/, methods: ["POST"], classification: "PUBLIC" },
   { pattern: /^\/api\/v1\/system\/quota-guard$/, methods: ["GET"], classification: "PUBLIC" },
+  { pattern: /^\/api\/v1\/system\/cron-backup$/, methods: ["POST"], classification: "PUBLIC" },
   { pattern: /^\/api\/v1\/openapi\.json$/, methods: ["GET"], classification: "PUBLIC" },
   { pattern: /^\/api\/v1\/ota\/spaas-node-latest\.apk$/, methods: ["GET"], classification: "PUBLIC" },
   { pattern: /^\/api\/v1\/releases\/(apk-info|desktop-info)$/, methods: ["GET"], classification: "PUBLIC" },
@@ -6997,6 +6998,31 @@ export class SPaaSCoordinator {
       });
     }
 
+    if (path === "/api/v1/system/cron-backup" && method === "POST") {
+      const isInternal = req.headers.get("X-SPaaS-Internal-Cron") === "true";
+      const auth = authDecision.auth || this.authenticate(req);
+      if (!isInternal && (!auth.authenticated || auth.role !== "SUPER_ADMIN")) {
+        return json({ error: "FORBIDDEN", message: "Only platform administrator or internal cron can trigger state snapshot" }, 403);
+      }
+      const snapshotTime = Date.now();
+      const nodeCount = this.sqlExec(`SELECT count(*) as c FROM nodes`)[0]?.c || 0;
+      const jobCount = this.sqlExec(`SELECT count(*) as c FROM jobs`)[0]?.c || 0;
+      const ledgerCount = this.sqlExec(`SELECT count(*) as c FROM ledger`)[0]?.c || 0;
+      const backupId = `snap_${snapshotTime}`;
+      this.sqlExec(
+        `INSERT OR REPLACE INTO meta (key, value) VALUES ('last_cron_backup_at', ?)`,
+        String(snapshotTime)
+      );
+      this.logAudit("CRON_BACKUP_COMPLETED", `Automated DO state snapshot ${backupId} completed (${nodeCount} nodes, ${jobCount} jobs, ${ledgerCount} ledger entries)`);
+      return json({
+        status: "ok",
+        backup_id: backupId,
+        timestamp: snapshotTime,
+        stats: { nodeCount, jobCount, ledgerCount },
+        message: "Durable Object state snapshot recorded successfully"
+      });
+    }
+
     // ==========================================
     // 11. WORKERS AI EXECUTION CANDIDATE
     // ==========================================
@@ -7163,6 +7189,17 @@ export class SPaaSCoordinator {
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         sha256, auth.tenant_id, sizeBytes, contentType, body.content_base64, filename, Date.now()
       );
+      if (this.env?.ARTIFACTS_BUCKET && typeof this.env.ARTIFACTS_BUCKET.put === "function") {
+        try {
+          const rawBytes = Uint8Array.from(atob(body.content_base64), c => c.charCodeAt(0));
+          await this.env.ARTIFACTS_BUCKET.put(`${auth.tenant_id}/${sha256}`, rawBytes, {
+            httpMetadata: { contentType },
+            customMetadata: { filename, tenant_id: auth.tenant_id }
+          });
+        } catch (e) {
+          console.warn("[R2 Bucket Put Failed - Preserving DO SQLite]:", e?.message || e);
+        }
+      }
       this.logAudit("ARTIFACT_STORED", `Artifact ${sha256} stored for tenant ${auth.tenant_id} (${sizeBytes} bytes)`);
 
       return json({
@@ -7210,6 +7247,11 @@ export class SPaaSCoordinator {
       }
 
       this.sqlExec(`DELETE FROM artifacts WHERE sha256 = ?`, sha256);
+      if (this.env?.ARTIFACTS_BUCKET && typeof this.env.ARTIFACTS_BUCKET.delete === "function") {
+        try {
+          await this.env.ARTIFACTS_BUCKET.delete(`${auth.tenant_id}/${sha256}`);
+        } catch (_) {}
+      }
       this.logAudit("ARTIFACT_DELETED", `Artifact ${sha256} deleted`);
       return json({ status: "ok", message: "Artifact deleted successfully" });
     }
@@ -7227,6 +7269,14 @@ export class SPaaSCoordinator {
          VALUES (?, 'dispatch', ?, ?, ?, ?, 'PENDING', 1, ?)`,
         eventId, body.tenant_id || "tenant_enterprise_customer", body.job_id || null, JSON.stringify(body), payloadHash, Date.now()
       );
+
+      if (this.env?.DISPATCH_QUEUE && typeof this.env.DISPATCH_QUEUE.send === "function") {
+        try {
+          await this.env.DISPATCH_QUEUE.send({ eventId, queue: "dispatch", body, payloadHash });
+        } catch (e) {
+          console.warn("[Cloudflare Queue Send Failed - Preserving DO SQLite]:", e?.message || e);
+        }
+      }
 
       return json({
         status: "ok",

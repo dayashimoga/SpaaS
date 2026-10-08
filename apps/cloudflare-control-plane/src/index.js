@@ -139,6 +139,25 @@ export default {
         request
       );
     }
+  },
+
+  async scheduled(event, env, ctx) {
+    // Scheduled Cron Trigger: Automated DO state snapshot and backup
+    try {
+      if (env?.COORDINATOR) {
+        const doId = env.COORDINATOR.idFromName("spaas-primary-fabric");
+        const stub = env.COORDINATOR.get(doId);
+        await stub.fetch(new Request("https://internal.spaas.coordinator/api/v1/system/cron-backup", {
+          method: "POST",
+          headers: {
+            "X-SPaaS-Internal-Cron": "true",
+            "Authorization": `Bearer ${env.SPAAS_API_SECRET || "internal_cron_secret"}`
+          }
+        }));
+      }
+    } catch (err) {
+      console.error("[Scheduled Backup Execution Error]:", err?.message || err);
+    }
   }
 };
 

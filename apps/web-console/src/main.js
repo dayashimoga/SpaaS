@@ -3873,6 +3873,19 @@ function initModals() {
     if (pairingTimerInterval) clearInterval(pairingTimerInterval);
     modalAddDevice.classList.add('hidden');
   };
+
+  // Keyboard accessibility: Escape closes any open dismissible modal
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      document.querySelectorAll('.modal-overlay:not(#modal-login)').forEach(m => {
+        if (!m.classList.contains('hidden')) {
+          m.classList.add('hidden');
+        }
+      });
+      if (pairingTimerInterval) clearInterval(pairingTimerInterval);
+    }
+  });
+
   if (btnCloseAdd) btnCloseAdd.addEventListener('click', closeAddModal);
   if (btnDoneAdd) btnDoneAdd.addEventListener('click', closeAddModal);
 
