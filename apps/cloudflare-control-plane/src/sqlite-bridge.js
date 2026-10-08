@@ -113,7 +113,7 @@ function createMinimalFallbackEngine() {
     sessions: new Map(),
     invoices: new Map(),
     provider_payouts: new Map(),
-    billing_config: new Map([["platform_fee_pct", "15.0"], ["min_withdrawal_credits", "50.0"], ["credit_to_usd_rate", "0.01"]]),
+    billing_config: new Map([["platform_fee_pct", "15.0"], ["fee_policy_version", "v1.0-85_15"], ["min_withdrawal_credits", "50.0"], ["credit_to_usd_rate", "0.01"]]),
     login_attempts: new Map(),
     password_resets: new Map(),
     passkeys: new Map(),
@@ -739,6 +739,14 @@ function createMinimalFallbackEngine() {
         return [];
       }
       if (qu.startsWith("UPDATE JOBS SET STATE = 'RUNNING'") || qu.startsWith("UPDATE JOBS SET STATE = 'DISPATCHED'") || qu.startsWith("UPDATE JOBS SET STATE = 'OFFERED'")) {
+        if (params.length === 1) {
+          const id = params[0];
+          const j = tables.jobs.get(id);
+          if (j) {
+            j.state = qu.includes("'DISPATCHED'") ? "DISPATCHED" : (qu.includes("'OFFERED'") ? "OFFERED" : "Running");
+          }
+          return [];
+        }
         const [assigned_node_id, fencing_token, lease_expires_at, scheduler_decision, ...rest] = params;
         const id = rest[rest.length - 1];
         const j = tables.jobs.get(id);
@@ -1159,7 +1167,7 @@ function createMinimalFallbackEngine() {
       if (qu.startsWith("INSERT OR IGNORE INTO LEDGER") || qu.startsWith("INSERT INTO LEDGER")) {
         let entry;
         if (qu.includes("TENANT_ID") || params.length >= 18) {
-          const [id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now, correlation_id, platform_fee_credits] = params;
+          const [id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now, correlation_id, platform_fee_credits, fee_policy_version] = params;
           entry = {
             id,
             tx_id,
@@ -1179,7 +1187,8 @@ function createMinimalFallbackEngine() {
             status: status || "SETTLED",
             timestamp: now,
             correlation_id: correlation_id || null,
-            platform_fee_credits: Number(platform_fee_credits) || 0
+            platform_fee_credits: Number(platform_fee_credits) || 0,
+            fee_policy_version: fee_policy_version || "v1.0-85_15"
           };
         } else if (qu.includes("ENTRY_TYPE") || params.length >= 16) {
           const [id, tx_id, idempotency_key, epoch, job_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now, correlation_id] = params;

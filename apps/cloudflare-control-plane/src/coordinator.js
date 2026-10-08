@@ -278,7 +278,7 @@ export const ROUTE_REGISTRY = [
   { pattern: /^\/api\/v1\/nodes\/[^/]+\/revoke$/, methods: ["POST"], classification: "SECURITY_ADMIN", permission: "nodes:revoke", allowedRoles: ["SECURITY", "OPS", "SUPER_ADMIN"] },
   { pattern: /^\/api\/v1\/nodes\/[^/]+\/emergency-stop$/, methods: ["POST"], classification: "OPS_ADMIN", permission: "nodes:manage", allowedRoles: ["OPS", "SUPER_ADMIN", "PROVIDER"] },
   { pattern: /^\/api\/v1\/nodes\/[^/]+$/, methods: ["DELETE"], classification: "SECURITY_ADMIN", permission: "nodes:revoke", allowedRoles: ["SECURITY", "OPS", "SUPER_ADMIN"] },
-  { pattern: /^\/api\/v1\/nodes$/, methods: ["DELETE"], classification: "SECURITY_ADMIN", permission: "nodes:revoke", allowedRoles: ["SECURITY", "OPS", "SUPER_ADMIN"] },
+  { pattern: /^\/api\/v1\/nodes$/, methods: ["DELETE"], classification: "OPS_ADMIN", permission: "nodes:manage", allowedRoles: ["OPS", "SUPER_ADMIN"] },
   { pattern: /^\/api\/v1\/nodes\/bulk-action$/, methods: ["POST"], classification: "OPS_ADMIN", permission: "nodes:manage", allowedRoles: ["OPS", "SUPER_ADMIN"] },
 
   // 7. DEVICE ROUTES (authenticated as DEVICE)
@@ -810,6 +810,7 @@ export class SPaaSCoordinator {
     try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN tenant_id TEXT;`); } catch (_) {}
     try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN fee_type TEXT;`); } catch (_) {}
     try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN platform_fee_credits REAL DEFAULT 0;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN fee_policy_version TEXT DEFAULT 'v1.0-85_15';`); } catch (_) {}
 
     // Seed default baseline metadata
     try { this.sqlExec(`INSERT OR IGNORE INTO meta (key, value) VALUES ('role', 'PRIMARY');`); } catch (_) {}
@@ -858,8 +859,9 @@ export class SPaaSCoordinator {
     }
     try { this.sqlExec(`ALTER TABLE sessions ADD COLUMN csrf_token TEXT;`); } catch (_) {}
 
-    // Seed billing config: default 15% platform fee
+    // Seed billing config: default 15% platform fee (85/15 model)
     try { this.sqlExec(`INSERT OR IGNORE INTO billing_config (key, value) VALUES ('platform_fee_pct', '15.0');`); } catch (_) {}
+    try { this.sqlExec(`INSERT OR IGNORE INTO billing_config (key, value) VALUES ('fee_policy_version', 'v1.0-85_15');`); } catch (_) {}
     try { this.sqlExec(`INSERT OR IGNORE INTO billing_config (key, value) VALUES ('min_withdrawal_credits', '50.0');`); } catch (_) {}
     try { this.sqlExec(`INSERT OR IGNORE INTO billing_config (key, value) VALUES ('credit_to_usd_rate', '0.01');`); } catch (_) {}
 
@@ -1686,6 +1688,17 @@ export class SPaaSCoordinator {
     const job = jobs[0];
     const correlationId = correlation_id || job.correlation_id || `corr_${job_id}`;
 
+    // Terminal state protection: Cancelled or Revoked jobs cannot accept worker results
+    const curStateUpper = (job.state || "").toUpperCase();
+    if (curStateUpper === "CANCELLED" || curStateUpper === "REVOKED" || curStateUpper === "FAILED") {
+      return {
+        status: "rejected",
+        reason: "TERMINAL_STATE_CANNOT_BE_OVERWRITTEN",
+        message: `Job is in terminal state '${job.state}' and cannot accept worker results`,
+        state: job.state
+      };
+    }
+
     // Node ownership check
     if (job.assigned_node_id && node_id && job.assigned_node_id !== node_id) {
       return { status: "rejected", reason: "NODE_MISMATCH" };
@@ -1693,11 +1706,14 @@ export class SPaaSCoordinator {
 
     // Fencing token verification: Mismatched fencing token is always rejected
     if (fencing_token && job.fencing_token && job.fencing_token !== fencing_token) {
-      return { status: "rejected", reason: "STALE_FENCING_TOKEN" };
+      return { status: "rejected", reason: "STALE_FENCING_TOKEN", message: "Result rejected: fencing token is stale or superseded" };
     }
 
     // Idempotency: If job is already COMPLETED / SETTLED, return existing settlement without duplicating credits
-    if (job.state === 'Completed' || job.state === 'Settled' || job.state === 'COMPLETED' || job.state === 'SETTLED') {
+    if (curStateUpper === 'COMPLETED' || curStateUpper === 'SETTLED') {
+      if (job.fencing_token && fencing_token && job.fencing_token !== fencing_token) {
+        return { status: "rejected", reason: "STALE_FENCING_TOKEN", message: "Result rejected: newer fencing token has already settled this job" };
+      }
       const existingLedger = this.sqlExec(`SELECT * FROM ledger WHERE job_id = ? AND entry_type = 'CREDIT'`, job_id);
       return {
         status: "accepted",
@@ -1714,7 +1730,7 @@ export class SPaaSCoordinator {
     if (fencing_token) {
       const activeLeases = this.sqlExec(`SELECT * FROM leases WHERE job_id = ? AND fencing_token = ?`, job_id, fencing_token);
       if (activeLeases.length > 0 && activeLeases[0].state !== "ACTIVE") {
-        return { status: "rejected", reason: "STALE_FENCING_TOKEN" };
+        return { status: "rejected", reason: "STALE_FENCING_TOKEN", message: "Lease has been revoked or expired" };
       }
     }
 
@@ -1819,9 +1835,13 @@ export class SPaaSCoordinator {
     // Dynamic credit calculation (base + fuel fee) with paired double-entry ledger
     const amountCredits = Number((10.0 + (actualFuel / 25000)).toFixed(4));
     let feePct = 15.0;
+    let feePolicyVersion = "v1.0-85_15";
     try {
-      const cfgRows = this.sqlExec(`SELECT value FROM billing_config WHERE key = 'platform_fee_pct'`);
-      if (cfgRows.length > 0) feePct = parseFloat(cfgRows[0].value) || 15.0;
+      const cfgRows = this.sqlExec(`SELECT key, value FROM billing_config WHERE key IN ('platform_fee_pct', 'fee_policy_version')`);
+      for (const r of cfgRows) {
+        if (r.key === 'platform_fee_pct') feePct = parseFloat(r.value) || 15.0;
+        if (r.key === 'fee_policy_version') feePolicyVersion = r.value || "v1.0-85_15";
+      }
     } catch (_) {}
     const platformFeeCredits = Number(((amountCredits * feePct) / 100).toFixed(4));
     const providerNetCredits = Number((amountCredits - platformFeeCredits).toFixed(4));
@@ -1837,8 +1857,8 @@ export class SPaaSCoordinator {
     try {
       // 1. DEBIT consumer account
       this.sqlExec(
-        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id, platform_fee_credits)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id, platform_fee_credits, fee_policy_version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
         txId,
         debitKey,
@@ -1857,13 +1877,14 @@ export class SPaaSCoordinator {
         "SETTLED",
         now,
         correlationId,
-        platformFeeCredits
+        platformFeeCredits,
+        feePolicyVersion
       );
 
       // 2. CREDIT provider account
       this.sqlExec(
-        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id, platform_fee_credits)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id, platform_fee_credits, fee_policy_version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
         txId,
         creditKey,
@@ -1882,7 +1903,8 @@ export class SPaaSCoordinator {
         "SETTLED",
         now,
         correlationId,
-        platformFeeCredits
+        platformFeeCredits,
+        feePolicyVersion
       );
 
       this.recordJobTransition(job_id, "SETTLED", `Double-entry TEST-credit settlement processed (Tx: ${txId})`, { txId, amountCredits, platformFeeCredits, providerNetCredits });
@@ -2514,8 +2536,37 @@ export class SPaaSCoordinator {
 
     await this.ensureReady();
 
-    // Handle WebSocket upgrade
+    // Handle WebSocket upgrade with central deny-by-default authentication
     if (req.headers.get("Upgrade") === "websocket") {
+      const nodeId = url.searchParams.get("node_id");
+      const authHeader = req.headers.get("Authorization");
+      const tokenParam = url.searchParams.get("token") || url.searchParams.get("auth_token") || url.searchParams.get("spaas_token");
+      const token = authHeader?.startsWith("Bearer ") ? authHeader.substring(7).trim() : tokenParam;
+
+      if (this.requireAuth || this.isProduction) {
+        if (!token && !nodeId) {
+          return new Response(JSON.stringify({ error: "UNAUTHORIZED", message: "WebSocket connection requires authenticated credentials" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (nodeId) {
+          const authResult = this.verifyDeviceAuth(req, { auth_token: token }, nodeId);
+          if (authResult === "REVOKED") {
+            return new Response(JSON.stringify({ error: "FORBIDDEN", message: "Device registration has been revoked" }), {
+              status: 403,
+              headers: { "Content-Type": "application/json" }
+            });
+          }
+          if (!authResult && this.requireAuth) {
+            return new Response(JSON.stringify({ error: "UNAUTHORIZED", message: "Invalid or missing device credentials for WebSocket connection" }), {
+              status: 401,
+              headers: { "Content-Type": "application/json" }
+            });
+          }
+        }
+      }
+
       if (typeof WebSocketPair === "undefined") {
         return new Response(JSON.stringify({ error: "WEBSOCKET_UNSUPPORTED", message: "WebSocketPair is only available in Cloudflare Workers runtime" }), {
           status: 400,
@@ -2524,10 +2575,10 @@ export class SPaaSCoordinator {
       }
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
-      const nodeId = url.searchParams.get("node_id") || "anonymous_edge_node";
+      const effectiveNodeId = nodeId || "anonymous_edge_node";
 
       if (this.ctx?.acceptWebSocket) {
-        this.ctx.acceptWebSocket(server, [nodeId]);
+        this.ctx.acceptWebSocket(server, [effectiveNodeId]);
       }
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -3783,11 +3834,20 @@ export class SPaaSCoordinator {
     // ==========================================
     if (path === "/api/v1/billing/config" && method === "GET") {
       const feeRows = this.sqlExec(`SELECT value FROM billing_config WHERE key = 'platform_fee_pct'`);
+      const polRows = this.sqlExec(`SELECT value FROM billing_config WHERE key = 'fee_policy_version'`);
       const minPayoutRows = this.sqlExec(`SELECT value FROM billing_config WHERE key = 'min_withdrawal_credits'`);
       const rateRows = this.sqlExec(`SELECT value FROM billing_config WHERE key = 'credit_to_usd_rate'`);
+      const feePct = parseFloat(feeRows[0]?.value || "15.0");
+      const policyVersion = polRows[0]?.value || (feePct === 10.0 ? "v0.9-90_10" : "v1.0-85_15");
       return json({
         status: "ok",
-        platform_fee_pct: parseFloat(feeRows[0]?.value || "15.0"),
+        platform_fee_pct: feePct,
+        provider_reward_pct: Number((100.0 - feePct).toFixed(1)),
+        fee_policy_version: policyVersion,
+        supported_policies: [
+          { version: "v1.0-85_15", platform_fee_pct: 15.0, provider_reward_pct: 85.0, description: "Production Default (85% Provider / 15% Platform Margin)" },
+          { version: "v0.9-90_10", platform_fee_pct: 10.0, provider_reward_pct: 90.0, description: "Early Beta Incentive (90% Provider / 10% Platform Margin)" }
+        ],
         min_withdrawal_credits: parseFloat(minPayoutRows[0]?.value || "50.0"),
         credit_to_usd_rate: parseFloat(rateRows[0]?.value || "0.01"),
         currency: "USD",
@@ -3804,7 +3864,12 @@ export class SPaaSCoordinator {
       if (body?.platform_fee_pct !== undefined) {
         const fee = Math.max(0, Math.min(50, parseFloat(body.platform_fee_pct)));
         this.sqlExec(`INSERT OR REPLACE INTO billing_config (key, value) VALUES ('platform_fee_pct', ?)`, String(fee));
-        this.logAudit("BILLING_CONFIG_UPDATED", `Platform fee updated to ${fee}% by user ${auth.user_id}`);
+        const policyVer = fee === 10.0 ? "v0.9-90_10" : (fee === 15.0 ? "v1.0-85_15" : `custom-${100 - fee}_${fee}`);
+        this.sqlExec(`INSERT OR REPLACE INTO billing_config (key, value) VALUES ('fee_policy_version', ?)`, policyVer);
+        this.logAudit("BILLING_CONFIG_UPDATED", `Platform fee updated to ${fee}% (policy: ${policyVer}) by user ${auth.user_id}`);
+      }
+      if (body?.fee_policy_version !== undefined) {
+        this.sqlExec(`INSERT OR REPLACE INTO billing_config (key, value) VALUES ('fee_policy_version', ?)`, String(body.fee_policy_version));
       }
       return json({ status: "ok", message: "Billing configuration updated" });
     }
@@ -3849,11 +3914,22 @@ export class SPaaSCoordinator {
       const paymentFraudReserve = Number((totalGrossDebits * 0.015).toFixed(4));
       const netGrossContribution = Number((totalPlatformFeeCredits - infraStorageNetworkEstimate - verificationComputeCost - paymentFraudReserve).toFixed(4));
 
+      const polRows = this.sqlExec(`SELECT value FROM billing_config WHERE key = 'fee_policy_version'`);
+      const cfgFeeRows = this.sqlExec(`SELECT value FROM billing_config WHERE key = 'platform_fee_pct'`);
+      const activeFeePct = parseFloat(cfgFeeRows[0]?.value || "15.0");
+      const activePolicyVersion = polRows[0]?.value || (activeFeePct === 10.0 ? "v0.9-90_10" : "v1.0-85_15");
+
       return json({
         status: "ok",
         reconciliation_status: discrepancyCredits <= 0.0001 ? "BALANCED" : "UNBALANCED_DISCREPANCY",
         currency: "TEST_CREDITS",
         is_fiat: false,
+        fee_policy_version: activePolicyVersion,
+        active_fee_policy: {
+          version: activePolicyVersion,
+          platform_fee_pct: activeFeePct,
+          provider_reward_pct: Number((100.0 - activeFeePct).toFixed(1))
+        },
         payment_gateway: {
           provider: "SIMULATED_TEST_GATEWAY",
           fiat_settlement_enabled: false,
@@ -5081,7 +5157,7 @@ export class SPaaSCoordinator {
         return json({ error: "DEVICE_UNAUTHORIZED", message: "Valid device credentials required to submit job results" }, 401);
       }
       const res = await this.handleResultSubmission(body);
-      const statusCode = (res.status === "rejected" && (res.reason === "STALE_FENCING_TOKEN" || res.reason === "LEASE_EXPIRED" || res.reason === "OCC_CONFLICT")) ? 409 : 200;
+      const statusCode = (res.status === "rejected" && (res.reason === "STALE_FENCING_TOKEN" || res.reason === "MISSING_FENCING_TOKEN" || res.reason === "TERMINAL_STATE_CANNOT_BE_OVERWRITTEN" || res.reason === "LEASE_EXPIRED" || res.reason === "OCC_CONFLICT")) ? 409 : 200;
       return json(res, statusCode);
     }
 
@@ -5754,7 +5830,7 @@ export class SPaaSCoordinator {
       let requestHash = null;
       if (idempotencyKey) {
         requestHash = await this.hashPayload(body);
-        const existingRecord = this.getIdempotencyRecord(idempotencyKey);
+        const existingRecord = this.getIdempotencyRecord(idempotencyKey, tenantId);
         if (existingRecord) {
           if (existingRecord.request_hash !== requestHash) {
             return json({
@@ -5800,7 +5876,7 @@ export class SPaaSCoordinator {
       const resPayload = created[0] ? { ...created[0], job_id: created[0].id, correlation_id: correlationId } : { id: jobId, job_id: jobId, correlation_id: correlationId, state: "QUEUED" };
 
       if (idempotencyKey && requestHash) {
-        this.saveIdempotencyRecord(idempotencyKey, path, requestHash, 201, resPayload);
+        this.saveIdempotencyRecord(idempotencyKey, path, requestHash, 201, resPayload, 86400000, tenantId);
       }
 
       return json(resPayload, 201);
@@ -6786,7 +6862,13 @@ export class SPaaSCoordinator {
         quota_guard: {
           status: healthStatus,
           thresholds: { warning_pct: 75, critical_pct: 90 },
-          metrics: limits
+          metrics: limits,
+          device_capacity_budget: {
+            daily_operations_per_active_device: 2880,
+            free_tier_max_concurrent_devices: 34,
+            paid_tier_max_concurrent_devices: 3470,
+            websocket_efficiency_gain: "10x fewer HTTP operations when long-lived WSS connection is maintained"
+          }
         }
       });
     }

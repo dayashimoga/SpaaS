@@ -28,29 +28,58 @@ SPaaS is built to guarantee that volunteering compute never compromises device b
 | **Thermal Ceilings** | `MODERATE (40°C)` | If battery or SoC temperature exceeds threshold, active jobs are cleanly yielded to avoid thermal stress. |
 | **Screen-On Yielding** | `Optional` | Can be configured to pause compute whenever the phone screen is turned on by the user. |
 
+## 4. Operational Modes & Sovereign Control
+
+Device providers retain total autonomy over which workloads execute on their hardware. You can configure four distinct dispatch modes in the SPaaS mobile/desktop client:
+
+| Operational Mode | Behavior |
+|---|---|
+| **AUTO ACCEPT** | Autonomous execution of any dispatched workload meeting all local battery, thermal, and network constraints. Ideal for overnight docked charging. |
+| **ASK ME** | Renders an **11-Field Job Offer Preview** dialog before any compute begins. Workload will not execute without explicit user approval within 15 seconds. |
+| **SCHEDULED** | Compute engine activates strictly during defined time windows (e.g., 01:00 AM – 06:00 AM). |
+| **PAUSED** | Temporarily suspends all edge worker polling and WebSocket lease requests without unenrolling the device. |
+
+### 4.1 11-Field Job Offer Preview Modal
+When operating in **ASK ME** mode, the SPaaS client presents an informative confirmation modal displaying:
+1. **Workload Identifier & Name**
+2. **Submitter Tenant Identity**
+3. **Execution Fuel Ceiling (Max Instructions)**
+4. **Memory Allocation (MB)**
+5. **Estimated Wall-Clock Duration**
+6. **Required Battery Headroom & AC State**
+7. **Network Transfer Volume (Inbound/Outbound KB)**
+8. **Thermal Threshold Ceiling (°C)**
+9. **WASM Bytecode SHA-256 Digest**
+10. **Verification Strategy (Deterministic / Consensus)**
+11. **Estimated Provider Reward (TEST CR)**
+
 ---
 
-## 4. Pairing Your Smartphone with a Cluster
+## 5. Pairing Your Smartphone with a Cluster
 
-### Method 1: QR Code Fast Pairing
+### Method 1: Single-Use QR Code Fast Pairing
 1. Open the SPaaS Web Management Console in your desktop browser.
 2. Click **+ Add Compute Device** in the top navigation bar.
-3. Select the **Android Smartphone** tab to generate an ephemeral pairing QR code.
+3. Select the **Android Smartphone** tab to generate an ephemeral, single-use pairing QR code (expires in 15 minutes).
 4. Launch the SPaaS Node app on your smartphone, tap **Scan Pairing QR**, and point the camera at your desktop monitor.
-5. The device automatically exchanges Ed25519 public keys and enters the active worker pool.
+5. The device automatically exchanges Ed25519 public keys, securely binds to the provider tenant, and enters the active worker pool.
 
 ### Method 2: 6-Character Manual Pairing Code
 If your camera is unavailable or you are pairing an Android emulator:
 1. Note the 6-character uppercase alphanumeric code shown on the desktop console (e.g. `K9X2P4`).
-2. Enter this code into the SPaaS Android app input field along with the control plane IP.
+2. Enter this code into the SPaaS Android app input field along with the control plane endpoint.
 3. Tap **Connect** to finalize enrollment.
 
 ---
 
-## 5. Understanding Your Credit Earnings
+## 6. Transparent Credit Accounting & Fee Policies
 
 Every completed workload settled on the SPaaS network is compensated in TEST CREDITS based on deterministic resource accounting:
-- **Base Execution Reward**: 10 TEST CREDITS per settled job.
+- **Base Execution Reward**: Fixed base credits per settled job.
 - **Fuel Gas Compensation**: Calculated per 100,000 WebAssembly instructions executed.
-- **Hardware Qualification Multiplier**: Higher-tier devices with higher MIPS and low thermal throttling receive bonus multipliers.
-- **Provider Payout Ratio**: Providers receive 90% of the total workload settlement, credited directly to their device public key.
+- **Hardware Qualification Multiplier**: Higher-tier devices with verified MIPS throughput receive benchmark multipliers.
+- **Provider Fee Split Policy**:
+  - **`v1.0-85_15` (Production Standard)**: Providers receive **85%** of gross settlement; 15% is retained as platform margin.
+  - **`v0.9-90_10` (Legacy Pilot)**: Legacy configuration granting 90% provider payout / 10% platform fee.
+  - Every settlement entry in the double-entry ledger explicitly records the active `fee_policy_version` for audit traceability.
+

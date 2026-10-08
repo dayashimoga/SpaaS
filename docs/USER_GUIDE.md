@@ -58,16 +58,38 @@ spaas job cancel <JOB_ID>
 
 ## 3. Web Management Console User Experience
 
-The SPaaS Web Console provides a responsive dashboard for monitoring and managing your cluster:
+The SPaaS Web Console provides a role-customized, responsive interface tailored for Customers, Providers, Developers, and Administrators.
 
-### 3.1 Cluster Overview Tab
-- **Real-Time Fleet KPI Cards**: Displays active vs idle nodes, queued jobs, completed workloads, and cluster uptime.
+### 3.1 Task-First Customer Workspace (Customer Role)
+When logged in as a Customer or Developer, the console presents a task-centric workspace designed to submit and monitor workloads without cluttering the screen with infrastructure-heavy node internals:
+
+- **Workspace Header**: Displays `SPaaS Compute | Customer Workspace` with the active enterprise tenant chip (e.g. `Acme Labs`).
+- **"Run your next workload" Card**:
+  - Subtitle: *"Submit compute tasks and let SPaaS choose the most suitable execution environment."*
+  - **Strategy Selector**: Toggle between four optimization objectives:
+    - `Fastest`: Prioritizes lowest latency and fastest available CPU/device.
+    - `Lowest cost`: Prioritizes lowest credit rate across edge devices.
+    - `Balanced`: Balances wall-clock execution time against credit spend.
+    - `Private`: Restricts execution strictly to dedicated enterprise/tenant nodes.
+  - **Dynamic Compute Availability Banner**:
+    - When zero compatible devices are online: Displays actionable alert: `(!) No eligible edge devices. Local execution may still be available if supported.`
+    - When devices are online: Displays live count of eligible physical and desktop nodes.
+  - **Primary Action**: `Design workload flow ->` navigates directly into the Workload Manifest Studio.
+- **Customer KPI Metrics**:
+  - `Running`: Live count of active jobs executing on the edge mesh.
+  - `Completed`: Total count of settled jobs.
+  - `CR Usage`: Real-time consumption of non-fiat TEST CREDITS.
+- **Recent Executions**:
+  - Clean empty state: *"No executions yet / Your submitted workloads and results will appear here."*
+  - Live table rendering active and settled jobs with status indicators, duration, and download links.
+
+### 3.2 Operator Infrastructure View (Admin / Ops Roles)
+Platform operators and infrastructure engineers have access to the comprehensive fleet control plane:
+- **Fleet KPI Cards**: Active vs idle nodes, queued jobs, and operational uptime (`Operational (99.99% SLA)`).
+- **Dynamic Verification Rate**: Honestly calculates and renders verification status:
+  - If 0 jobs completed: Displays `N/A (0/0 verified)`.
+  - When jobs are completed: Displays exact ratio, e.g. `100.0% (12/12 verified)`.
 - **Fleet Breakdown Pills**: Instant visibility into the ratio of Physical Phones, Emulators, Desktops, and Simulated Workers.
-
-### 3.2 Devices Tab
-- **Fleet Filter Tabs**: Filter devices by hardware category (Physical, Desktop, Emulator, Simulated).
-- **Device Detail Drawer**: Inspect live hardware metrics (MIPS qualification, thermal level, battery %, network latency, active lease).
-- **Remote Operations**: Trigger device capability re-qualification or administrative drain.
 
 ### 3.3 Workload Manifest Studio Tab
 - **Starter Catalog Presets**: One-click dispatch of pre-verified WebAssembly modules (`hello-world-wasi`, `sha256-hasher`, `prime-sieve-compute`, `edge-matrix-multiplication`).
@@ -76,8 +98,9 @@ The SPaaS Web Console provides a responsive dashboard for monitoring and managin
 ### 3.4 Jobs & Execution History Tab
 - **10-Step Deterministic Timeline**: Visual progression from Submission to Settlement.
 - **Job Detail Modal**: Inspect exit code, exact fuel consumed, wall-clock time, estimated energy (mWh/Joules), and verification receipts.
-- **Scheduler Explainability**: Click "Why this device?" to view the candidate evaluation rankings and filter rejection reasons.
+- **Scheduler Explainability**: Click "Why this device?" to view candidate evaluation rankings and filter rejection reasons.
 
 ### 3.5 Usage & Credits Tab
-- **Dual-Entry Ledger**: Real-time audit of all TEST CREDITS earned by providers and spent by submitters.
+- **Balanced Dual-Entry Ledger**: Real-time audit of all TEST CREDITS earned by providers and spent by submitters with verified $\Delta = 0.0000\text{ CR}$ balance identity.
 - **Consumer Account Balance**: Check your submitter balance, total spend, and job history.
+

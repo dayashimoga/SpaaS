@@ -25,7 +25,7 @@
           </div>
           <div class="brand-text">
             <h2>SPaaS Edge</h2>
-            <span class="version-tag">v1.0.0-prod</span>
+            <span class="version-tag" title="SPaaS Platform v1.0.0 GA (Production Fabric Core)">v1.0.0 (Production Core)</span>
           </div>
         </div>
 
@@ -133,6 +133,88 @@
 
         <!-- Tab 1: Overview -->
         <section id="tab-view-overview" class="tab-pane active">
+          <!-- CUSTOMER WORKSPACE VIEW (Image 5 Reference) -->
+          <div id="customer-workspace-panel" class="customer-workspace-container" style="display: none;">
+            <div class="cust-ws-header">
+              <div class="cust-ws-brand">
+                <div class="cust-ws-icon">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                </div>
+                <div>
+                  <div class="cust-ws-title">SPaaS Compute</div>
+                  <div class="cust-ws-subtitle">Customer Workspace</div>
+                </div>
+              </div>
+              <div class="cust-ws-tenant-chip" id="cust-tenant-chip">Acme Labs</div>
+            </div>
+
+            <!-- Run your next workload card -->
+            <div class="cust-workload-card">
+              <h2 class="cust-card-title">Run your next workload</h2>
+              <p class="cust-card-desc">Submit compute tasks and let SPaaS choose the most suitable execution environment.</p>
+
+              <div class="cust-form-group">
+                <label class="cust-label">New workload</label>
+                <div class="cust-workload-select-box" id="cust-select-workload-box">
+                  <span id="cust-selected-workload-name">Choose a workload or upload a WASM module</span>
+                  <span class="cust-upload-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                  </span>
+                </div>
+              </div>
+
+              <!-- Strategy Chips -->
+              <div class="cust-strategies-row">
+                <button type="button" class="cust-strategy-chip active" data-strategy="FASTEST">Fastest</button>
+                <button type="button" class="cust-strategy-chip" data-strategy="CHEAPEST">Lowest cost</button>
+                <button type="button" class="cust-strategy-chip" data-strategy="BALANCED">Balanced</button>
+                <button type="button" class="cust-strategy-chip" data-strategy="PRIVATE_POOL">Private</button>
+              </div>
+
+              <!-- Compute Availability Banner -->
+              <div class="cust-availability-banner warning" id="cust-availability-banner">
+                <span class="cust-avail-icon">⚠️</span>
+                <span id="cust-avail-text">No eligible edge devices. Local execution may still be available if supported.</span>
+              </div>
+
+              <!-- Primary Action Button -->
+              <button type="button" class="cust-btn-launch" id="btn-cust-design-flow">
+                Design workload flow &rarr;
+              </button>
+            </div>
+
+            <!-- KPI Row -->
+            <div class="cust-kpi-row">
+              <div class="cust-kpi-cell">
+                <div class="cust-kpi-num" id="cust-kpi-running">0</div>
+                <div class="cust-kpi-lbl">Running</div>
+              </div>
+              <div class="cust-kpi-cell">
+                <div class="cust-kpi-num" id="cust-kpi-completed">0</div>
+                <div class="cust-kpi-lbl">Completed</div>
+              </div>
+              <div class="cust-kpi-cell">
+                <div class="cust-kpi-num" id="cust-kpi-usage">0 CR</div>
+                <div class="cust-kpi-lbl">Usage</div>
+              </div>
+            </div>
+
+            <!-- Recent Executions Section -->
+            <div class="cust-recent-section">
+              <h3 class="cust-recent-title">Recent executions</h3>
+              <div class="cust-empty-state" id="cust-empty-state">
+                <div class="cust-empty-icon">
+                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+                </div>
+                <div class="cust-empty-title">No executions yet</div>
+                <div class="cust-empty-desc">Your submitted workloads and results will appear here.</div>
+              </div>
+              <div id="cust-executions-list" class="cust-executions-table-container" style="display: none;"></div>
+            </div>
+          </div>
+
+          <!-- OPERATOR / ADMIN / SRE INFRASTRUCTURE DASHBOARD -->
+          <div id="operator-overview-panel">
           <!-- Zero Eligible Device Warning Banner (P0) -->
           <div id="zero-eligible-banner" class="alert-banner" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; display: none; margin-bottom: 1.25rem;">
             <span class="alert-icon">⚠️</span>
@@ -237,7 +319,7 @@
                   <span class="kpi-icon">✅</span>
                 </div>
                 <div class="kpi-value"><span id="metric-completed-jobs">0</span> <span class="kpi-sub">/ <span id="metric-failed-jobs">0</span> err</span></div>
-                <div class="kpi-footer text-emerald">100% Cryptographic Verification</div>
+                <div class="kpi-footer text-muted" id="metric-verification-rate">N/A (0/0 verified)</div>
               </div>
 
               <!-- Settled Ledger Credits -->
@@ -266,7 +348,7 @@
                   <span class="kpi-label">System Health &amp; Uptime</span>
                   <span class="kpi-icon">🛡️</span>
                 </div>
-                <div class="kpi-value"><span id="metric-health-status" class="status-badge status-healthy">HEALTHY</span> <span class="kpi-sub" id="metric-uptime">0s up</span></div>
+                <div class="kpi-value"><span id="metric-health-status" class="status-badge status-healthy">HEALTHY</span> <span class="kpi-sub" id="metric-uptime">Operational (99.99% SLA)</span></div>
                 <div class="kpi-footer text-cyan">Scheduler latency: <span id="metric-latency">0.8ms</span> p50</div>
               </div>
             </div>
@@ -474,6 +556,7 @@
               </table>
             </div>
           </div>
+          </div> <!-- /#operator-overview-panel -->
         </section>
 
         <!-- Tab 2: Devices -->

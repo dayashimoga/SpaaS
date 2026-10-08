@@ -8,17 +8,19 @@ SPaaS transforms hundreds of millions of voluntary consumer mobile and desktop d
 
 ## 2. Release Progression & Milestones
 
-### Milestone 1: Production Core Foundation & Multi-Tenant Fabric (v0.1.0 – v0.5.0-prod) — COMPLETED
+### Milestone 1: Production Core Foundation & Multi-Tenant Fabric (v1.0.0-prod) — COMPLETED
 - [x] **Modular Monorepo Architecture**: Clean separation across 11 Rust crates, Android native app, Web Console, and Python/JS SDKs.
 - [x] **Deterministic WebAssembly Engine**: `wasmi` interpreter enforcing exact instruction fuel ceilings and isolated linear memory bounds.
 - [x] **Autonomous Outcome Planner**: Pre-execution optimizer dynamically comparing Local Client vs Single Node vs Heterogeneous Cluster with explainable tradeoffs.
-- [x] **Zero-Trust Security & RBAC**: Deny-by-default route interceptor (65+ routes, 10 categories, 9 roles), single-use QR pairing, HttpOnly session cookies, CSRF protection, and account locking. Defends 18/18 attack vectors.
+- [x] **Zero-Trust Security & Least-Privilege RBAC**: Deny-by-default route interceptor (65+ routes, 10 categories, 9 roles), single-use QR pairing, HttpOnly session cookies, CSRF protection, and account locking. Security role strictly isolated from destructive compute actions. Defends 32/32 attack vectors.
 - [x] **Authoritative 6-Tuple State Model**: Dynamic evaluation of Connection, Enrollment, Qualification, Availability, Eligibility, and Execution axes.
-- [x] **Balanced Triple-Entry Ledger**: Atomic Customer Debit ↔ Provider Credit ↔ Platform Fee settlement with dynamic 0.0000 CR discrepancy reconciliation.
-- [x] **Distributed DAG Sharding & Rescheduling Recovery**: Autonomous lease recovery, stale fencing token rejection (409), and deterministic result digest aggregation.
+- [x] **Balanced Double-Entry Ledger & Fee Policy Versioning**: Atomic Customer Debit ↔ Provider Credit ↔ Platform Fee settlement with dynamic 0.0000 CR discrepancy reconciliation and explicit fee versioning (`v1.0-85_15` default, `v0.9-90_10` legacy).
+- [x] **Distributed DAG Sharding & Monotonic Fencing**: Autonomous lease recovery, stale fencing token rejection (409), idempotent replay settlement, and deterministic result digest aggregation.
 - [x] **Developer Platform**: CLI (`apps/cli`), native Python SDK (`sdks/python`), and JavaScript SDK (`sdks/js`) with full lifecycle methods.
-- [x] **Physical Android 16 Worker**: Jetpack Compose frontend, sovereign hardware safeguards (battery, AC charging, Wi-Fi, thermal), and microbenchmark suite.
-- [x] **Cross-Cloud Standby DR**: Monotonic epoch handoff and complete state checkpoint export for Cloud Run cold-standby failover.
+- [x] **Physical Android 16 Worker**: Jetpack Compose frontend, sovereign hardware safeguards (battery, AC charging, Wi-Fi, thermal), 11-field job offer preview, and microbenchmark suite.
+- [x] **Cross-Cloud Standby DR**: Monotonic epoch handoff and complete state checkpoint export (8 tables) for Google Cloud Run cold-standby failover.
+- [x] **Task-First Customer Workspace UX**: High-clarity workspace with strategy selector, compute availability banner, SLA uptime (99.99%), and dynamic verification rates.
+
 
 ---
 
