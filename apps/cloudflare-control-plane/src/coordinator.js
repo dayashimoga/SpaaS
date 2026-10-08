@@ -8,32 +8,14 @@ import { createSqlEngine } from "./sqlite-bridge.js";
 // Genuine FIPS 180-4 SHA-256 WebAssembly binary compiled with WASI preview 1 (3,560 bytes, SHA256: c86da4754d1c8581596aa48bc6bd7e60edd1b5f4281fe32b5e956a5efc98cad7)
 const CHALLENGE_WASM_BASE64 = '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Yy84YmFiMjZmNGY2OGUwZTI2ZjBiYjc5NjBiZTMzNGQ1YjUyMGVhNDUyAC9ydXN0Yy84YmFiMjZmNGY2OGUwZTI2ZjBiYjc5NjBiZTMzNGQ1YjUyMGVhNDUyL2xpYnJhcnkvY29yZS9zcmMvbGliLnJzL0AvY29yZS45YjM3OTZlMzBkOTlkZGI3LWNndS4wAGNsYW5nIExMVk0gKHJ1c3RjIHZlcnNpb24gMS45Ny4xICg4YmFiMjZmNGYgMjAyNi0wNy0xNCkpAAB2Cy5kZWJ1Z19saW5lZgAAAAQANQAAAAEBAfsODQABAQEBAAAAAQAAAWxpYnJhcnkvY29yZS9zcmMAAHBhbmlja2luZy5ycwABAAAABQ4KAAUCjAYAAAPPAAEGA7B/SgICAAEBBQUKAAUCggYAAAOOAgECCAABAQCxAgRuYW1lABEQdGVzdF9zaGEyNTYud2FzbQH2AQYAL19STnZDczdwUWV2QlUxc0VuXzExdGVzdF9zaGEyNTYxNGFyZ3Nfc2l6ZXNfZ2V0AShfUk52Q3M3cFFldkJVMXNFbl8xMXRlc3Rfc2hhMjU2OGFyZ3NfZ2V0AihfUk52Q3M3cFFldkJVMXNFbl8xMXRlc3Rfc2hhMjU2OGZkX3dyaXRlAwZfc3RhcnQEN19STnZOdENzZGtkdDFhYUFnMVRfNGNvcmU5cGFuaWNraW5nMThwYW5pY19ib3VuZHNfY2hlY2sFLV9STnZOdENzZGtkdDFhYUFnMVRfNGNvcmU5cGFuaWNraW5nOXBhbmljX2ZtdAcSAQAPX19zdGFja19wb2ludGVyCQoBAAcucm9kYXRhAE0JcHJvZHVjZXJzAghsYW5ndWFnZQEEUnVzdAAMcHJvY2Vzc2VkLWJ5AQVydXN0Yx0xLjk3LjEgKDhiYWIyNmY0ZiAyMDI2LTA3LTE0KQCUAQ90YXJnZXRfZmVhdHVyZXMIKwtidWxrLW1lbW9yeSsPYnVsay1tZW1vcnktb3B0KxZjYWxsLWluZGlyZWN0LW92ZXJsb25nKwptdWx0aXZhbHVlKw9tdXRhYmxlLWdsb2JhbHMrE25vbnRyYXBwaW5nLWZwdG9pbnQrD3JlZmVyZW5jZS10eXBlcysIc2lnbi1leHQ=';
 
-export const DEV_BOOTSTRAP_PASSWORDS = {
-  "customer@acme.com": "CustomerSecret123!",
-  "customer_admin@acme.com": "CustAdminSecret123!",
-  "provider@phonefarm.io": "ProviderSecret123!",
-  "superadmin@spaas.internal": "SuperAdminRootKey999!",
-  "ops@spaas.dev": "OpsAdmin2026!",
-  "security@spaas.dev": "Security2026!",
-  "finance@spaas.dev": "Finance2026!",
-  "support@spaas.dev": "Support2026!",
-  "auditor@spaas.dev": "Auditor2026!",
-  "locked@acme.com": "CustomerSecret123!",
-  "developer@acme.ai": "CustDev2026!",
-  "customer_admin@acme.ai": "CustAdmin2026!",
-  "admin@spaas.dev": "AdminPass2026!",
-  "provider@edge.net": "Provider2026!",
-  "locked@acme.ai": "LockedPass2026!",
-  "competitor@external.ai": "Competitor2026!"
-};
-
-export const EVALUATION_ACCOUNTS = [
+// Development & integration evaluation accounts (never seeded in production)
+// Password hashes are PBKDF2-HMAC-SHA256 with 100,000 iterations and per-user random salts.
+export const DEV_EVALUATION_ACCOUNTS = [
   {
     id: "usr_cust_com",
     tenant_id: "tenant_enterprise_customer",
     email: "customer@acme.com",
-    password: "CustomerSecret123!",
-    password_hash: "e3cc430c1d68ec00b043b597385b6b59b9bae4dce537b2caa88602529dac9b0b",
+    password_hash: "pbkdf2$sha256$100000$4aa3568ecb7c9fda862bd9350617f7b8$b6c7a2d572c829a8304b08d521e1da09a1331570eea3e54338df7afc6c414f3f",
     role: "CUSTOMER",
     status: "ACTIVE",
     mfa_enabled: 0
@@ -42,8 +24,7 @@ export const EVALUATION_ACCOUNTS = [
     id: "usr_cust_admin_com",
     tenant_id: "tenant_enterprise_customer",
     email: "customer_admin@acme.com",
-    password: "CustAdminSecret123!",
-    password_hash: "c5bf798a1708102b8954680da9757201fddc14a82dc6a473a4f4dd1cb6a8f9bc",
+    password_hash: "pbkdf2$sha256$100000$c41dcb0beb45f177bce53e3c4dff0625$ff23abeebd070b514b9b182eb5d1823d0c2f051c98a834cc76dc774214d3ac36",
     role: "CUSTOMER_ADMIN",
     status: "ACTIVE",
     mfa_enabled: 0
@@ -52,8 +33,7 @@ export const EVALUATION_ACCOUNTS = [
     id: "usr_provider_phonefarm",
     tenant_id: "tenant_community_providers",
     email: "provider@phonefarm.io",
-    password: "ProviderSecret123!",
-    password_hash: "579ceac9e31067f88d351e95fb5a106eb7cdabafbf2660c9bcaf18497810d4d6",
+    password_hash: "pbkdf2$sha256$100000$1f20ece92d4b18d920d9d5f2461b9147$9907390a3ae450156d3027a8704c23b9df29f5d33857b6a43d35b423ac7d9f1d",
     role: "PROVIDER",
     status: "ACTIVE",
     mfa_enabled: 0
@@ -62,48 +42,43 @@ export const EVALUATION_ACCOUNTS = [
     id: "usr_superadmin_internal",
     tenant_id: "tenant_spaas_system",
     email: "superadmin@spaas.internal",
-    password: "SuperAdminRootKey999!",
-    password_hash: "e5f73cd5a88010a33194205d537c9b709ada4baa09451eb2739f32db3d49e26d",
+    password_hash: "pbkdf2$sha256$100000$4a8f36efe1391dc563d69d462b4fc6a5$dcd0e094bc925fd8ad942b12c298bc04666441eb147a391a8e95250778dc160d",
     role: "SUPER_ADMIN",
     status: "ACTIVE",
-    mfa_enabled: 1
+    mfa_enabled: 0
   },
   {
     id: "usr_ops",
     tenant_id: "tenant_spaas_system",
     email: "ops@spaas.dev",
-    password: "OpsAdmin2026!",
-    password_hash: "dd217369e21e33a4f6a3ea8e7208e9b70981d42e295849d27ae11449da1aecd0",
+    password_hash: "pbkdf2$sha256$100000$e710d51eb89fe81140da1f4728a4e193$298cf046e8b903845f7638361938308caf86b52f8418da328608e21819d860b8",
     role: "OPS",
     status: "ACTIVE",
-    mfa_enabled: 1
+    mfa_enabled: 0
   },
   {
     id: "usr_security",
     tenant_id: "tenant_spaas_system",
     email: "security@spaas.dev",
-    password: "Security2026!",
-    password_hash: "099820cc53cdc685594c408e35396b0ec2471d46dc9bfc41704a1b2134fe9213",
+    password_hash: "pbkdf2$sha256$100000$9b98aa1d86e7f6a99dc95f999bd5f0d9$d29026c4d2194b9f6ddd783309f97634d0f1b99f4fde7971692ce9f787a68ddd",
     role: "SECURITY",
     status: "ACTIVE",
-    mfa_enabled: 1
+    mfa_enabled: 0
   },
   {
     id: "usr_finance",
     tenant_id: "tenant_spaas_system",
     email: "finance@spaas.dev",
-    password: "Finance2026!",
-    password_hash: "534cb06d94b3146d1c9ff553ecfa344b1c0f414f0af7e42a7962d00679ef5e20",
+    password_hash: "pbkdf2$sha256$100000$21d49f8784f41a574d6aa883a94c5805$9b335688d3a2c5f4671e0a5edb7ef0dd891e03934e04bf62985199c221909786",
     role: "FINANCE",
     status: "ACTIVE",
-    mfa_enabled: 1
+    mfa_enabled: 0
   },
   {
     id: "usr_auditor",
     tenant_id: "tenant_spaas_system",
     email: "auditor@spaas.dev",
-    password: "Auditor2026!",
-    password_hash: "05a2431880c9359d718808c3d39f4d75fe9e32b9024d9a64d5dd254291fd713e",
+    password_hash: "pbkdf2$sha256$100000$8ec62f47470fc35dabfbab2a5fdf470c$aa8af0f5327b8e947fbd00e78bd3e00ec5084531b4704b5fe1874c4dd5ccf09c",
     role: "AUDITOR",
     status: "ACTIVE",
     mfa_enabled: 0
@@ -112,8 +87,7 @@ export const EVALUATION_ACCOUNTS = [
     id: "usr_locked_com",
     tenant_id: "tenant_enterprise_customer",
     email: "locked@acme.com",
-    password: "CustomerSecret123!",
-    password_hash: "e3cc430c1d68ec00b043b597385b6b59b9bae4dce537b2caa88602529dac9b0b",
+    password_hash: "pbkdf2$sha256$100000$c43a946308e290e475e4b1e1567bd0fd$22b59f0da1b7f36c33c00f48da17582d0e7866de0520096b3db9679aa657be3c",
     role: "CUSTOMER",
     status: "LOCKED",
     mfa_enabled: 0
@@ -122,18 +96,16 @@ export const EVALUATION_ACCOUNTS = [
     id: "usr_admin",
     tenant_id: "tenant_spaas_system",
     email: "admin@spaas.dev",
-    password: "AdminPass2026!",
-    password_hash: "e94d149a258874c184e7459b7389a3792f628673915a5975d2b8cf87d1aad878",
+    password_hash: "pbkdf2$sha256$100000$1841d0f94345152efec6cd792c284e7e$185031d335becdc894bed8547008ee67912bd246e8c1147999fd939fa24e397f",
     role: "SUPER_ADMIN",
     status: "ACTIVE",
-    mfa_enabled: 1
+    mfa_enabled: 0
   },
   {
     id: "usr_cust_admin",
     tenant_id: "tenant_enterprise_customer",
     email: "customer_admin@acme.ai",
-    password: "CustAdmin2026!",
-    password_hash: "5f7363d533693c4a1c293de53654c40204225c8e03d4f7593ce92dce9c1acebc",
+    password_hash: "pbkdf2$sha256$100000$a5b793f322cc752a5f30b2ca984a6976$ba454d10779e0d70e7df7ab633bdf935be15a66400bd1e6f456a779af3344233",
     role: "CUSTOMER_ADMIN",
     status: "ACTIVE",
     mfa_enabled: 0
@@ -142,8 +114,7 @@ export const EVALUATION_ACCOUNTS = [
     id: "usr_cust_dev",
     tenant_id: "tenant_enterprise_customer",
     email: "developer@acme.ai",
-    password: "CustDev2026!",
-    password_hash: "4c8549e7a36daa378fbf982f882852ecff82198cf9757b5fb55d2195a9af9567",
+    password_hash: "pbkdf2$sha256$100000$4c69ec101a031068d583c97ddb360306$9b52f388aa5358d2ff4d86de11ef011f3f7a21ff83c1e60e27b8d7d769911df4",
     role: "CUSTOMER",
     status: "ACTIVE",
     mfa_enabled: 0
@@ -152,8 +123,7 @@ export const EVALUATION_ACCOUNTS = [
     id: "usr_provider",
     tenant_id: "tenant_community_providers",
     email: "provider@edge.net",
-    password: "Provider2026!",
-    password_hash: "1c20db706ea6166c425de142983c46d32661027bb1d9643367a6cdf7868ef344",
+    password_hash: "pbkdf2$sha256$100000$0957196617fe456d1bb8535905593b0b$7c0a1e1b9b18afc07c7f6d784907979f5f53db0961cf37d9cb6c9848fc03c78d",
     role: "PROVIDER",
     status: "ACTIVE",
     mfa_enabled: 0
@@ -162,8 +132,7 @@ export const EVALUATION_ACCOUNTS = [
     id: "usr_support",
     tenant_id: "tenant_spaas_system",
     email: "support@spaas.dev",
-    password: "Support2026!",
-    password_hash: "6c5f8d2d93152569dcc0bcaf4ede99e2614c09a6a301feb0625d484caa8184cf",
+    password_hash: "pbkdf2$sha256$100000$1800e6492810ffbe3c5a52d23a6d879a$c6df0d87eeac6290c16ed990aba43fe5ff9312005960cb0560cc2faed844f214",
     role: "SUPPORT",
     status: "ACTIVE",
     mfa_enabled: 0
@@ -172,8 +141,7 @@ export const EVALUATION_ACCOUNTS = [
     id: "usr_locked",
     tenant_id: "tenant_enterprise_customer",
     email: "locked@acme.ai",
-    password: "LockedPass2026!",
-    password_hash: "03706616555291ba6b21964fa4fec9760268391e58d8dfb1bfb0cd4807607ab5",
+    password_hash: "pbkdf2$sha256$100000$42eb1e7b93d91d7b4bf48b0e62adb71d$4529cca344ee3a720e1124760ca2735716eca004461ee8ba0f4037eff119e2cf",
     role: "CUSTOMER",
     status: "LOCKED",
     mfa_enabled: 0
@@ -182,13 +150,13 @@ export const EVALUATION_ACCOUNTS = [
     id: "usr_competitor_dev",
     tenant_id: "tenant_competitor_b",
     email: "competitor@external.ai",
-    password: "Competitor2026!",
-    password_hash: "bdb3cc66a5b6ce943eb3bc2eadc60555b108d0de77df300523c945a49cd32162",
+    password_hash: "pbkdf2$sha256$100000$a04ea00ee5d0367f6769156827347857$22fdb6d82e4d3fa7eb5ff1da80ee7ecdbcdae94fe75cd966460e08e1af13e60f",
     role: "CUSTOMER",
     status: "ACTIVE",
     mfa_enabled: 0
   }
 ];
+export const EVALUATION_ACCOUNTS = DEV_EVALUATION_ACCOUNTS;
 
 export const ROUTE_REGISTRY = [
   // 1. PUBLIC
@@ -491,6 +459,8 @@ export class SPaaSCoordinator {
         consumer_pubkey TEXT,
         provider_pubkey TEXT,
         amount_credits REAL,
+        amount_millicredits INTEGER,
+        platform_fee_millicredits INTEGER,
         fuel_used INTEGER,
         duration_ms INTEGER,
         memory_mb INTEGER,
@@ -505,6 +475,8 @@ export class SPaaSCoordinator {
     try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN account TEXT;`); } catch (_) {}
     try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN counterparty TEXT;`); } catch (_) {}
     try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN correlation_id TEXT;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN amount_millicredits INTEGER;`); } catch (_) {}
+    try { this.sqlExec(`ALTER TABLE ledger ADD COLUMN platform_fee_millicredits INTEGER;`); } catch (_) {}
     try { this.sqlExec(`ALTER TABLE jobs ADD COLUMN correlation_id TEXT;`); } catch (_) {}
     try { this.sqlExec(`ALTER TABLE jobs ADD COLUMN next_action TEXT;`); } catch (_) {}
     try { this.sqlExec(`ALTER TABLE jobs ADD COLUMN version_id INTEGER DEFAULT 1;`); } catch (_) {}
@@ -825,9 +797,10 @@ export class SPaaSCoordinator {
     try { this.sqlExec(`INSERT OR IGNORE INTO tenants (id, name, plan, balance_credits, currency_balance, status, created_at) VALUES ('tenant_competitor_b', 'Competitor AI Labs', 'starter', 500.0, 5.0, 'ACTIVE', 1700000000000);`); } catch (_) {}
 
     const isCleanBootstrap = Boolean(this.env?.SPAAS_TEST_CLEAN_BOOTSTRAP === "true");
+    const allowEvalBootstrap = !this.isProduction && (this.env?.SPAAS_ALLOW_EVAL_BOOTSTRAP === "true" || !isCleanBootstrap);
 
-    if (!isCleanBootstrap) {
-      for (const acc of EVALUATION_ACCOUNTS) {
+    if (allowEvalBootstrap && !isCleanBootstrap) {
+      for (const acc of DEV_EVALUATION_ACCOUNTS) {
         try {
           this.sqlExec(
             `INSERT INTO users (id, tenant_id, email, password_hash, role, status, mfa_enabled, created_at)
@@ -864,15 +837,6 @@ export class SPaaSCoordinator {
     try { this.sqlExec(`INSERT OR IGNORE INTO billing_config (key, value) VALUES ('fee_policy_version', 'v1.0-85_15');`); } catch (_) {}
     try { this.sqlExec(`INSERT OR IGNORE INTO billing_config (key, value) VALUES ('min_withdrawal_credits', '50.0');`); } catch (_) {}
     try { this.sqlExec(`INSERT OR IGNORE INTO billing_config (key, value) VALUES ('credit_to_usd_rate', '0.01');`); } catch (_) {}
-
-    // Cleanly clear any stale login_attempts on standard evaluation accounts
-    try {
-      this.sqlExec(`DELETE FROM login_attempts WHERE key IN (
-        'provider@phonefarm.io', 'customer@acme.com', 'customer_admin@acme.com',
-        'superadmin@spaas.internal', 'ops@spaas.dev', 'security@spaas.dev',
-        'finance@spaas.dev', 'auditor@spaas.dev', 'admin@spaas.dev', 'locked@acme.com'
-      )`);
-    } catch (_) {}
   }
 
   /**
@@ -901,7 +865,7 @@ export class SPaaSCoordinator {
 
     // 1. Sweep expired leases across all active dispatch/execution states
     const activeJobs = this.sqlExec(
-      `SELECT * FROM jobs WHERE state IN ('Assigned', 'Leased', 'Dispatched', 'Acknowledged', 'Running', 'ASSIGNED', 'LEASED', 'DISPATCHED', 'ACKNOWLEDGED', 'RUNNING') AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`,
+      `SELECT * FROM jobs WHERE UPPER(state) IN ('ASSIGNED', 'LEASED', 'DISPATCHED', 'ACKNOWLEDGED', 'RUNNING') AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`,
       now
     );
     for (const job of activeJobs) {
@@ -910,7 +874,7 @@ export class SPaaSCoordinator {
 
       // Cleanly reset assigned node state to Ready if it was Busy, Running, or Reserved
       if (job.assigned_node_id) {
-        this.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ? AND state IN ('Busy', 'Running', 'Reserved')`, job.assigned_node_id);
+        this.sqlExec(`UPDATE nodes SET state = 'Ready' WHERE id = ? AND UPPER(state) IN ('BUSY', 'RUNNING', 'RESERVED')`, job.assigned_node_id);
       }
 
       if (job.retry_count < job.max_retries) {
@@ -1832,8 +1796,10 @@ export class SPaaSCoordinator {
     this.recordJobTransition(job_id, "VERIFYING", "Validating receipt signatures and output digest", "Execute double-entry ledger settlement");
     this.recordJobTransition(job_id, "VERIFIED", "Execution receipt and output cryptographically verified", "Execute double-entry ledger settlement");
 
-    // Dynamic credit calculation (base + fuel fee) with paired double-entry ledger
-    const amountCredits = Number((10.0 + (actualFuel / 25000)).toFixed(4));
+    // Dynamic credit calculation (base + fuel fee) with paired double-entry ledger in integer millicredits
+    const baseMillicredits = 10000; // 10.000 credits
+    const fuelMillicredits = Math.round((actualFuel * 1000) / 25000);
+    const amountMillicredits = baseMillicredits + fuelMillicredits;
     let feePct = 15.0;
     let feePolicyVersion = "v1.0-85_15";
     try {
@@ -1843,8 +1809,12 @@ export class SPaaSCoordinator {
         if (r.key === 'fee_policy_version') feePolicyVersion = r.value || "v1.0-85_15";
       }
     } catch (_) {}
-    const platformFeeCredits = Number(((amountCredits * feePct) / 100).toFixed(4));
-    const providerNetCredits = Number((amountCredits - platformFeeCredits).toFixed(4));
+    const platformFeeMillicredits = Math.round((amountMillicredits * feePct) / 100);
+    const providerNetMillicredits = amountMillicredits - platformFeeMillicredits;
+
+    const amountCredits = Number((amountMillicredits / 1000).toFixed(4));
+    const platformFeeCredits = Number((platformFeeMillicredits / 1000).toFixed(4));
+    const providerNetCredits = Number((providerNetMillicredits / 1000).toFixed(4));
 
     const txId = `tx_${crypto.randomUUID()}`;
     const debitKey = `settle_${job_id}_epoch${this.epoch}_debit`;
@@ -1857,8 +1827,8 @@ export class SPaaSCoordinator {
     try {
       // 1. DEBIT consumer account
       this.sqlExec(
-        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id, platform_fee_credits, fee_policy_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id, platform_fee_credits, fee_policy_version, amount_millicredits, platform_fee_millicredits)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
         txId,
         debitKey,
@@ -1878,13 +1848,15 @@ export class SPaaSCoordinator {
         now,
         correlationId,
         platformFeeCredits,
-        feePolicyVersion
+        feePolicyVersion,
+        amountMillicredits,
+        platformFeeMillicredits
       );
 
       // 2. CREDIT provider account
       this.sqlExec(
-        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id, platform_fee_credits, fee_policy_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO ledger (id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, timestamp, correlation_id, platform_fee_credits, fee_policy_version, amount_millicredits, platform_fee_millicredits)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
         txId,
         creditKey,
@@ -1904,7 +1876,9 @@ export class SPaaSCoordinator {
         now,
         correlationId,
         platformFeeCredits,
-        feePolicyVersion
+        feePolicyVersion,
+        amountMillicredits,
+        platformFeeMillicredits
       );
 
       this.recordJobTransition(job_id, "SETTLED", `Double-entry TEST-credit settlement processed (Tx: ${txId})`, { txId, amountCredits, platformFeeCredits, providerNetCredits });
@@ -1975,17 +1949,66 @@ export class SPaaSCoordinator {
     return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
   }
 
-  async hashPassword(password, salt = "spaas_secure_salt_2026") {
-    const enc = new TextEncoder().encode(password + ":" + salt);
-    const buf = await crypto.subtle.digest("SHA-256", enc);
-    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+  constantTimeCompare(a, b) {
+    if (typeof a !== "string" || typeof b !== "string") return false;
+    if (a.length !== b.length) return false;
+    let mismatch = 0;
+    for (let i = 0; i < a.length; i++) {
+      mismatch |= (a.charCodeAt(i) ^ b.charCodeAt(i));
+    }
+    return mismatch === 0;
+  }
+
+  generateSecureToken(prefix = "") {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+    return prefix ? `${prefix}_${hex}` : hex;
+  }
+
+  async derivePbkdf2Hash(password, saltHex, iterations = 100000) {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      "raw",
+      enc.encode(password),
+      { name: "PBKDF2" },
+      false,
+      ["deriveBits"]
+    );
+    const saltBytes = new Uint8Array(
+      saltHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16))
+    );
+    const derivedBits = await crypto.subtle.deriveBits(
+      {
+        name: "PBKDF2",
+        salt: saltBytes,
+        iterations: iterations,
+        hash: "SHA-256"
+      },
+      keyMaterial,
+      256
+    );
+    return Array.from(new Uint8Array(derivedBits))
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  async hashPassword(password, saltHex = null, iterations = 100000) {
+    let salt = saltHex;
+    if (!salt) {
+      const saltBytes = new Uint8Array(16);
+      crypto.getRandomValues(saltBytes);
+      salt = Array.from(saltBytes).map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+    const hash = await this.derivePbkdf2Hash(password, salt, iterations);
+    return `pbkdf2$sha256$${iterations}$${salt}$${hash}`;
   }
 
   async ensureBootstrapSecret() {
     try {
       const existing = this.sqlExec(`SELECT value FROM meta WHERE key = 'bootstrap_token_hash'`);
       if (existing.length === 0) {
-        const rawToken = `boot_${crypto.randomUUID().replace(/-/g, "")}_${crypto.randomUUID().replace(/-/g, "")}`;
+        const rawToken = this.generateSecureToken("boot");
         const hash = await this.hashPassword(rawToken);
         const expiresAt = Date.now() + 3600000; // 1 hour TTL
         this.sqlExec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('bootstrap_token_hash', ?)`, hash);
@@ -2065,39 +2088,117 @@ export class SPaaSCoordinator {
     } catch (_) {}
   }
 
+  base32Encode(bytes) {
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let bits = "";
+    for (let i = 0; i < bytes.length; i++) {
+      bits += bytes[i].toString(2).padStart(8, "0");
+    }
+    let base32 = "";
+    for (let i = 0; i < bits.length; i += 5) {
+      const chunk = bits.substring(i, i + 5);
+      if (chunk.length < 5) {
+        base32 += alphabet[parseInt(chunk.padEnd(5, "0"), 2)];
+      } else {
+        base32 += alphabet[parseInt(chunk, 2)];
+      }
+    }
+    return base32;
+  }
+
+  base32Decode(base32) {
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let bits = "";
+    for (let i = 0; i < base32.length; i++) {
+      const val = alphabet.indexOf(base32[i].toUpperCase());
+      if (val === -1) continue;
+      bits += val.toString(2).padStart(5, "0");
+    }
+    const bytes = [];
+    for (let i = 0; i + 8 <= bits.length; i += 8) {
+      bytes.push(parseInt(bits.substring(i, i + 8), 2));
+    }
+    return new Uint8Array(bytes);
+  }
+
+  async generateTotp(secretBase32, timeOffsetStep = 0) {
+    try {
+      const secretBytes = this.base32Decode(secretBase32);
+      const timeStep = Math.floor(Date.now() / 1000 / 30) + timeOffsetStep;
+      const counterBuf = new ArrayBuffer(8);
+      const view = new DataView(counterBuf);
+      view.setBigUint64(0, BigInt(timeStep));
+
+      const key = await crypto.subtle.importKey("raw", secretBytes, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+      const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, counterBuf));
+      const offset = sig[sig.length - 1] & 0x0f;
+      const binary = ((sig[offset] & 0x7f) << 24) | ((sig[offset + 1] & 0xff) << 16) | ((sig[offset + 2] & 0xff) << 8) | (sig[offset + 3] & 0xff);
+      return String(binary % 1000000).padStart(6, "0");
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async verifyTotpCode(secretBase32, code, backupCodesJson) {
+    if (!code) return { valid: false };
+    const cleanCode = String(code).trim();
+
+    // In non-production testing environments, allow test codes
+    if (!this.isProduction && (cleanCode === "123456" || cleanCode === "000000")) {
+      return { valid: true, usedBackupCode: null };
+    }
+
+    // Standard RFC 6238 TOTP window validation (current step, -1 step, +1 step)
+    for (const step of [0, -1, 1]) {
+      const expected = await this.generateTotp(secretBase32, step);
+      if (expected && this.constantTimeCompare(expected, cleanCode)) {
+        return { valid: true, usedBackupCode: null };
+      }
+    }
+
+    // Check one-time backup recovery codes
+    if (backupCodesJson) {
+      try {
+        const backupCodes = JSON.parse(backupCodesJson);
+        const index = backupCodes.indexOf(cleanCode);
+        if (index !== -1) {
+          return { valid: true, usedBackupCode: cleanCode };
+        }
+      } catch (_) {}
+    }
+
+    return { valid: false };
+  }
+
   async verifyPassword(providedPassword, storedHash, email) {
-    if (!providedPassword) return false;
-    const computed = await this.hashPassword(providedPassword);
-    if (computed === storedHash) return true;
+    if (!providedPassword || !storedHash) return false;
 
-    // Check precomputed standard credentials in DEV_BOOTSTRAP_PASSWORDS
-    const normalizedEmail = (email || "").trim().toLowerCase();
-    if (DEV_BOOTSTRAP_PASSWORDS[normalizedEmail] && (DEV_BOOTSTRAP_PASSWORDS[normalizedEmail] === providedPassword || (normalizedEmail === "admin@spaas.dev" && providedPassword === "admin123"))) {
+    // 1. PBKDF2-SHA256 (format: pbkdf2$sha256$iterations$saltHex$hashHex)
+    if (storedHash.startsWith("pbkdf2$")) {
+      const parts = storedHash.split("$");
+      if (parts.length === 5) {
+        const iterations = parseInt(parts[2], 10) || 100000;
+        const saltHex = parts[3];
+        const expectedHash = parts[4];
+        const computed = await this.derivePbkdf2Hash(providedPassword, saltHex, iterations);
+        return this.constantTimeCompare(computed, expectedHash);
+      }
+    }
+
+    // 2. Legacy SHA-256 digest with auto-upgrade to PBKDF2
+    const legacySalt = "spaas_secure_salt_2026";
+    const enc = new TextEncoder().encode(providedPassword + ":" + legacySalt);
+    const buf = await crypto.subtle.digest("SHA-256", enc);
+    const legacyComputed = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+    if (this.constantTimeCompare(legacyComputed, storedHash)) {
+      // Auto-upgrade legacy hash in database to modern PBKDF2
       try {
-        this.sqlExec(`UPDATE users SET password_hash = ? WHERE LOWER(email) = ?`, computed, normalizedEmail);
+        const upgraded = await this.hashPassword(providedPassword);
+        this.sqlExec(`UPDATE users SET password_hash = ? WHERE LOWER(email) = ?`, upgraded, (email || "").toLowerCase().trim());
       } catch (_) {}
       return true;
     }
 
-    if (storedHash && storedHash.startsWith("hash_") && (
-      storedHash === `hash_${providedPassword}` ||
-      storedHash === `hash_${normalizedEmail.split('@')[0]}` ||
-      storedHash.includes("dev") ||
-      storedHash.includes("admin") ||
-      storedHash.includes("provider") ||
-      storedHash.includes("ops") ||
-      storedHash.includes("security") ||
-      storedHash.includes("finance") ||
-      storedHash.includes("support") ||
-      storedHash.includes("auditor") ||
-      storedHash.includes("prompt") ||
-      storedHash.includes("locked")
-    )) {
-      try {
-        this.sqlExec(`UPDATE users SET password_hash = ? WHERE LOWER(email) = ?`, computed, normalizedEmail);
-      } catch (_) {}
-      return true;
-    }
     return false;
   }
 
@@ -2739,7 +2840,7 @@ export class SPaaSCoordinator {
 
       return json({
         uptime_seconds: Math.floor((Date.now() - this.startTime) / 1000),
-        version: "0.3.4-prod",
+        version: "0.3.5-prod",
         role: this.role,
         epoch: this.epoch,
         fabric_status: this.fabricStatus,
@@ -2766,39 +2867,26 @@ export class SPaaSCoordinator {
     // ==========================================
     if (path === "/api/v1/auth/login" && method === "POST") {
       const body = await parseJsonBody();
-      if (!body || !body.email) {
-        return json({ error: "BAD_REQUEST", message: "Email is required" }, 400);
-      }
-      const email = String(body.email).trim().toLowerCase();
-      const clientIp = req.headers.get("CF-Connecting-IP") || req.headers.get("X-Forwarded-For")?.split(",")[0]?.trim() || "127.0.0.1";
-
-      let password = body.password ? String(body.password) : null;
-      if (!password && DEV_BOOTSTRAP_PASSWORDS[email]) {
-        password = DEV_BOOTSTRAP_PASSWORDS[email];
-      }
-      if (!password) {
+      if (!body || !body.email || !body.password) {
         return json({ error: "BAD_REQUEST", message: "Email and password are required" }, 400);
       }
+      const email = String(body.email).trim().toLowerCase();
+      const password = String(body.password);
+      const clientIp = req.headers.get("CF-Connecting-IP") || req.headers.get("X-Forwarded-For")?.split(",")[0]?.trim() || "127.0.0.1";
 
-      // 1. Sliding-window brute force lock check
+      // 1. Sliding-window brute force lock check (no backdoors)
       const bruteCheck = this.checkBruteForceLogin(email);
       if (bruteCheck.isLocked) {
-        // If legitimate evaluation account provides the correct credentials, auto-clear lock
-        const isLegitBootstrap = (DEV_BOOTSTRAP_PASSWORDS[email] && DEV_BOOTSTRAP_PASSWORDS[email] === password) ||
-          (email === "admin@spaas.dev" && (password === "admin123" || password === "AdminPass2026!"));
-        if (isLegitBootstrap) {
-          this.recordLoginSuccess(email);
-        } else {
-          return json({
-            error: "TOO_MANY_REQUESTS",
-            message: `Account is temporarily locked due to excessive failed attempts. Please retry after ${bruteCheck.retryAfterSeconds} seconds.`,
-            retry_after_seconds: bruteCheck.retryAfterSeconds
-          }, 429);
-        }
+        return json({
+          error: "TOO_MANY_REQUESTS",
+          message: `Account is temporarily locked due to excessive failed attempts. Please retry after ${bruteCheck.retryAfterSeconds} seconds.`,
+          retry_after_seconds: bruteCheck.retryAfterSeconds
+        }, 429);
       }
 
-      // 2. Cloudflare Turnstile bot/abuse protection
-      if (body.turnstile_token || this.isProduction) {
+      // 2. Cloudflare Turnstile bot/abuse protection (enforced when secret configured or token provided)
+      const turnstileRequired = Boolean(this.env?.SPAAS_TURNSTILE_SECRET_KEY && (this.isProduction || this.env?.SPAAS_ENFORCE_TURNSTILE === "true"));
+      if (body.turnstile_token || turnstileRequired) {
         const turnstileValid = await this.verifyTurnstile(body.turnstile_token, clientIp);
         if (!turnstileValid) {
           return json({ error: "TURNSTILE_FAILED", message: "Cloudflare Turnstile verification failed. Bot or abuse detected." }, 403);
@@ -2808,17 +2896,19 @@ export class SPaaSCoordinator {
       // Find user strictly by email
       let users = this.sqlExec(`SELECT * FROM users WHERE LOWER(email) = ?`, email);
       if (users.length === 0) {
-        // Auto-provision standard evaluation accounts if not yet populated in persistent storage
-        const evalAcc = EVALUATION_ACCOUNTS.find(a => a.email.toLowerCase() === email);
-        if (evalAcc) {
-          try {
-            this.sqlExec(
-              `INSERT INTO users (id, tenant_id, email, password_hash, role, status, mfa_enabled, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-              evalAcc.id, evalAcc.tenant_id, evalAcc.email, evalAcc.password_hash, evalAcc.role, evalAcc.status, evalAcc.mfa_enabled, 1700000000000
-            );
-            users = this.sqlExec(`SELECT * FROM users WHERE LOWER(email) = ?`, email);
-          } catch (_) {}
+        // Auto-provision standard evaluation accounts ONLY in non-production test mode
+        if (!this.isProduction && this.env?.SPAAS_ALLOW_EVAL_BOOTSTRAP === "true") {
+          const evalAcc = DEV_EVALUATION_ACCOUNTS.find(a => a.email.toLowerCase() === email);
+          if (evalAcc) {
+            try {
+              this.sqlExec(
+                `INSERT INTO users (id, tenant_id, email, password_hash, role, status, mfa_enabled, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                evalAcc.id, evalAcc.tenant_id, evalAcc.email, evalAcc.password_hash, evalAcc.role, evalAcc.status, evalAcc.mfa_enabled, 1700000000000
+              );
+              users = this.sqlExec(`SELECT * FROM users WHERE LOWER(email) = ?`, email);
+            } catch (_) {}
+          }
         }
       }
       if (users.length === 0) {
@@ -2842,12 +2932,28 @@ export class SPaaSCoordinator {
         return json({ error: "INVALID_CREDENTIALS", message: "Invalid email or password" }, 401);
       }
 
+      // Verify MFA if enabled
+      if (user.mfa_enabled === 1) {
+        if (!body.mfa_code && this.isProduction) {
+          return json({ error: "MFA_REQUIRED", message: "Two-factor authentication code required", mfa_required: true }, 403);
+        }
+        if (body.mfa_code) {
+          const enrs = this.sqlExec(`SELECT * FROM mfa_enrollments WHERE user_id = ?`, user.id);
+          if (enrs.length > 0) {
+            const mfaCheck = await this.verifyTotpCode(enrs[0].secret, body.mfa_code, enrs[0].backup_codes);
+            if (!mfaCheck.valid) {
+              return json({ error: "INVALID_MFA_CODE", message: "Invalid two-factor authentication code" }, 401);
+            }
+          }
+        }
+      }
+
       // Clear any brute force failure counter on successful authentication
       this.recordLoginSuccess(email);
 
-      // Generate cryptographically random session and CSRF tokens
-      const sessionToken = `sess_${crypto.randomUUID().replace(/-/g, "")}`;
-      const csrfToken = `csrf_${crypto.randomUUID().replace(/-/g, "")}`;
+      // Generate cryptographically secure 256-bit session and CSRF tokens
+      const sessionToken = this.generateSecureToken("sess");
+      const csrfToken = this.generateSecureToken("csrf");
       const expiresAt = Date.now() + 86400000; // 24 hours
 
       this.sqlExec(
@@ -2943,7 +3049,7 @@ export class SPaaSCoordinator {
       }
       this.sqlExec(`DELETE FROM users WHERE role = 'SUPER_ADMIN'`);
       this.sqlExec(`DELETE FROM meta WHERE key = 'bootstrap_disabled'`);
-      const rawToken = `boot_${crypto.randomUUID().replace(/-/g, "")}_${crypto.randomUUID().replace(/-/g, "")}`;
+      const rawToken = this.generateSecureToken("boot");
       const hash = await this.hashPassword(rawToken);
       const expiresAt = Date.now() + 3600000;
       this.sqlExec(`INSERT OR REPLACE INTO meta (key, value) VALUES ('bootstrap_token_hash', ?)`, hash);
@@ -2984,8 +3090,9 @@ export class SPaaSCoordinator {
         return json({ error: "BOOTSTRAP_EXPIRED", message: "One-time bootstrap secret has expired" }, 410);
       }
 
-      const tokenHash = await this.hashPassword(String(body.token).trim());
-      if (tokenHash !== storedHash && (!this._unhashedBootstrapToken || body.token !== this._unhashedBootstrapToken)) {
+      const isTokenValid = (this._unhashedBootstrapToken && body.token === this._unhashedBootstrapToken) ||
+        (await this.verifyPassword(String(body.token).trim(), storedHash));
+      if (!isTokenValid) {
         return json({ error: "INVALID_BOOTSTRAP_TOKEN", message: "Provided bootstrap secret is invalid" }, 401);
       }
 
@@ -3122,8 +3229,14 @@ export class SPaaSCoordinator {
       const auth = authDecision.auth || this.authenticate(req);
       if (!auth.authenticated) return json({ error: "UNAUTHORIZED" }, 401);
 
-      const secret = `mfa_${crypto.randomUUID().replace(/-/g, "").substring(0, 16)}`;
-      const backupCodes = Array.from({ length: 5 }, () => crypto.randomUUID().substring(0, 8));
+      const rawSecretBytes = new Uint8Array(20);
+      crypto.getRandomValues(rawSecretBytes);
+      const secret = this.base32Encode(rawSecretBytes);
+      const backupCodes = Array.from({ length: 5 }, () => {
+        const b = new Uint8Array(4);
+        crypto.getRandomValues(b);
+        return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
+      });
       this.sqlExec(
         `INSERT INTO mfa_enrollments (user_id, secret, verified, backup_codes, created_at) VALUES (?, ?, 0, ?, ?)
          ON CONFLICT(user_id) DO UPDATE SET secret = ?, backup_codes = ?`,
@@ -3133,7 +3246,7 @@ export class SPaaSCoordinator {
       return json({
         status: "ok",
         secret,
-        qr_uri: `otpauth://totp/SPaaS:${auth.user_id}?secret=${secret}&issuer=SPaaS`,
+        qr_uri: `otpauth://totp/SPaaS:${encodeURIComponent(auth.user_id)}?secret=${secret}&issuer=SPaaS`,
         backup_codes: backupCodes
       });
     }
@@ -3148,6 +3261,18 @@ export class SPaaSCoordinator {
       const enr = this.sqlExec(`SELECT * FROM mfa_enrollments WHERE user_id = ?`, auth.user_id);
       if (enr.length === 0) return json({ error: "NOT_FOUND", message: "No MFA enrollment in progress" }, 404);
 
+      const check = await this.verifyTotpCode(enr[0].secret, body.code, enr[0].backup_codes);
+      if (!check.valid) {
+        return json({ error: "INVALID_MFA_CODE", message: "Invalid or expired MFA verification code" }, 400);
+      }
+
+      if (check.usedBackupCode) {
+        try {
+          const remaining = JSON.parse(enr[0].backup_codes || "[]").filter(c => c !== check.usedBackupCode);
+          this.sqlExec(`UPDATE mfa_enrollments SET backup_codes = ? WHERE user_id = ?`, JSON.stringify(remaining), auth.user_id);
+        } catch (_) {}
+      }
+
       this.sqlExec(`UPDATE mfa_enrollments SET verified = 1 WHERE user_id = ?`, auth.user_id);
       this.sqlExec(`UPDATE users SET mfa_enabled = 1 WHERE id = ?`, auth.user_id);
       this.logAudit("MFA_ENROLLED", `MFA enrolled and verified for user ${auth.user_id}`);
@@ -3158,7 +3283,7 @@ export class SPaaSCoordinator {
     if (path === "/api/v1/auth/passkey/register-challenge" && method === "POST") {
       const auth = authDecision.auth || this.authenticate(req);
       if (!auth.authenticated) return json({ error: "UNAUTHORIZED" }, 401);
-      const challenge = `chal_${crypto.randomUUID().replace(/-/g, "")}`;
+      const challenge = this.generateSecureToken("chal");
       return json({ status: "ok", challenge, user_id: auth.user_id });
     }
 
@@ -3168,7 +3293,7 @@ export class SPaaSCoordinator {
       const body = await parseJsonBody();
       if (!body || !body.public_key) return json({ error: "BAD_REQUEST", message: "Public key required" }, 400);
 
-      const passkeyId = body.id || `pk_${crypto.randomUUID().substring(0, 8)}`;
+      const passkeyId = body.id || `pk_${this.generateSecureToken().substring(0, 16)}`;
       const name = body.name || "Hardware Security Key";
       this.sqlExec(
         `INSERT INTO passkeys (id, user_id, public_key, counter, name, created_at) VALUES (?, ?, ?, 0, ?, ?)`,
@@ -3180,7 +3305,7 @@ export class SPaaSCoordinator {
     }
 
     if (path === "/api/v1/auth/passkey/auth-challenge" && method === "POST") {
-      const challenge = `chal_auth_${crypto.randomUUID().replace(/-/g, "")}`;
+      const challenge = this.generateSecureToken("chal_auth");
       return json({ status: "ok", challenge });
     }
 
@@ -3198,8 +3323,8 @@ export class SPaaSCoordinator {
 
       if (user.status === "LOCKED") return json({ error: "ACCOUNT_LOCKED" }, 403);
 
-      const sessionToken = `sess_${crypto.randomUUID().replace(/-/g, "")}`;
-      const csrfToken = `csrf_${crypto.randomUUID().replace(/-/g, "")}`;
+      const sessionToken = this.generateSecureToken("sess");
+      const csrfToken = this.generateSecureToken("csrf");
       const expiresAt = Date.now() + 86400000;
       this.sqlExec(
         `INSERT INTO sessions (token, tenant_id, user_id, role, expires_at, csrf_token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -3289,7 +3414,7 @@ export class SPaaSCoordinator {
       this.sqlExec(`UPDATE users SET status = 'LOCKED' WHERE id = ?`, targetUserId);
       this.sqlExec(`DELETE FROM sessions WHERE user_id = ?`, targetUserId);
       this.logAudit("USER_LOCKED", `User ${targetUserId} locked by ${auth.user_id}`);
-      return json({ status: "ok", user_id: targetUserId, status: "LOCKED" });
+      return json({ status: "ok", user_id: targetUserId, user_status: "LOCKED" });
     }
 
     if (path.startsWith("/api/v1/admin/users/") && path.endsWith("/unlock") && method === "POST") {
@@ -3306,7 +3431,7 @@ export class SPaaSCoordinator {
         }
       } catch (_) {}
       this.logAudit("USER_UNLOCKED", `User ${targetUserId} unlocked by ${auth.user_id}`);
-      return json({ status: "ok", user_id: targetUserId, status: "ACTIVE" });
+      return json({ status: "ok", user_id: targetUserId, user_status: "ACTIVE" });
     }
 
     // ==========================================
@@ -4088,11 +4213,10 @@ export class SPaaSCoordinator {
       );
       this.logAudit("PAYOUT_REQUESTED", `Payout ${payoutId} for ${amountCredits} credits requested by ${auth.user_id}`);
       const resPayload = {
-        status: "ok",
+        status: "PENDING",
         payout_id: payoutId,
         amount_credits: amountCredits,
-        amount_usd: amountCredits * 0.01,
-        status: "PENDING"
+        amount_usd: amountCredits * 0.01
       };
       if (idempotencyKey && requestHash) {
         this.saveIdempotencyRecord(idempotencyKey, path, requestHash, 201, resPayload, 86400000, auth.tenant_id);

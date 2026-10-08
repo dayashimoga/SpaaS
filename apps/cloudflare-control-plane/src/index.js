@@ -100,8 +100,10 @@ export default {
       }
     }
 
-    // Forward request to partitioned DO cluster
-    const clusterName = url.searchParams.get("cluster") || "spaas-primary-fabric";
+    // Forward request to partitioned DO cluster (tenant & cluster aware)
+    const clusterName = url.searchParams.get("cluster") ||
+      request.headers.get("X-SPaaS-Cluster") ||
+      (request.headers.get("X-Tenant-ID") ? `spaas-tenant-${request.headers.get("X-Tenant-ID")}` : "spaas-primary-fabric");
     const doId = env.COORDINATOR.idFromName(clusterName);
     const stub = env.COORDINATOR.get(doId);
 
@@ -116,7 +118,7 @@ export default {
             JSON.stringify({
               status: "healthy",
               service: "spaas-cloudflare-control-plane",
-              version: "0.2.0-prod",
+              version: "0.3.5-prod",
               role: env?.SPAAS_ROLE || "PRIMARY",
               gateway_status: "ACTIVE",
               do_status: "RECOVERING",
@@ -154,10 +156,10 @@ function resolveAllowedOrigin(request, env) {
     if (list.includes(origin)) return origin;
   }
 
-  // Known production and development console origins
+  // Known production and development console origins: strictly spaas-console.pages.dev or local dev
   if (origin === "https://spaas-console.pages.dev" ||
-      /^https:\/\/([a-zA-Z0-9-]+\.)*pages\.dev$/.test(origin) ||
-      /^http:\/\/(localhost|127\.0\.0\.1)(:[0-9]+)?$/.test(origin)) {
+      /^https:\/\/([a-zA-Z0-9-]+\.)?spaas-console\.pages\.dev$/.test(origin) ||
+      (env?.SPAAS_ENVIRONMENT !== "production" && /^http:\/\/(localhost|127\.0\.0\.1)(:[0-9]+)?$/.test(origin))) {
     return origin;
   }
 

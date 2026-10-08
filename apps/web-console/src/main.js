@@ -5421,31 +5421,31 @@ function initAuth() {
           <span class="badge" style="font-size: 0.65rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Role Matrix</span>
         </div>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.75rem;">
-          <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer@acme.com" data-pass="CustomerSecret123!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+          <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer@acme.com" data-pass="CustDev2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
             💻 Customer (Dev)
           </button>
-          <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer_admin@acme.com" data-pass="CustAdminSecret123!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+          <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="customer_admin@acme.com" data-pass="CustAdmin2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
             🏢 Customer Admin
           </button>
-          <button type="button" class="btn btn-xs btn-outline-emerald btn-dev-fill" data-email="provider@phonefarm.io" data-pass="ProviderSecret123!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+          <button type="button" class="btn btn-xs btn-outline-emerald btn-dev-fill" data-email="provider@phonefarm.io" data-pass="ProviderDev2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
             📱 Compute Provider
           </button>
-          <button type="button" class="btn btn-xs btn-outline-amber btn-dev-fill" data-email="superadmin@spaas.internal" data-pass="SuperAdminRootKey999!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+          <button type="button" class="btn btn-xs btn-outline-amber btn-dev-fill" data-email="superadmin@spaas.internal" data-pass="SuperAdminDev2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
             🛡️ Super Admin
           </button>
           <button type="button" class="btn btn-xs btn-outline-cyan btn-dev-fill" data-email="ops@spaas.dev" data-pass="OpsAdmin2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
             ⚙️ Operations Admin
           </button>
-          <button type="button" class="btn btn-xs btn-outline-rose btn-dev-fill" data-email="security@spaas.dev" data-pass="Security2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+          <button type="button" class="btn btn-xs btn-outline-rose btn-dev-fill" data-email="security@spaas.dev" data-pass="SecurityAdmin2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
             🔒 Security Admin
           </button>
-          <button type="button" class="btn btn-xs btn-outline-emerald btn-dev-fill" data-email="finance@spaas.dev" data-pass="Finance2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
+          <button type="button" class="btn btn-xs btn-outline-emerald btn-dev-fill" data-email="finance@spaas.dev" data-pass="FinanceAdmin2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
             💳 Finance Admin
           </button>
           <button type="button" class="btn btn-xs btn-outline-amber btn-dev-fill" data-email="auditor@spaas.dev" data-pass="Auditor2026!" style="justify-content: flex-start; text-align: left; padding: 5px 8px;">
             📜 Compliance Auditor
           </button>
-          <button type="button" class="btn btn-xs btn-outline-rose btn-dev-fill" data-email="locked@acme.com" data-pass="CustomerSecret123!" style="justify-content: flex-start; text-align: left; grid-column: span 2; padding: 5px 8px; border-style: dashed;">
+          <button type="button" class="btn btn-xs btn-outline-rose btn-dev-fill" data-email="locked@acme.com" data-pass="CustDev2026!" style="justify-content: flex-start; text-align: left; grid-column: span 2; padding: 5px 8px; border-style: dashed;">
             🚫 Locked Account (403 Test)
           </button>
         </div>

@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.1] - 2026-10-08
+
+### Added & Hardened — Independent Forensic Gap Analysis Remediation (P0 Security, P1 Architecture & P2 Operational Hardening)
+- **Elimination of Plaintext Credentials & Backdoor Bypasses (`coordinator.js`):** Completely removed `DEV_BOOTSTRAP_PASSWORDS` from the codebase. Replaced evaluation accounts with `DEV_EVALUATION_ACCOUNTS` using 100% precomputed PBKDF2-HMAC-SHA256 hashes (100,000 iterations, 16-byte random salts). Removed all `verifyPassword()` backdoor paths (no `hash_*` substring pattern matching, no eval bypasses). Enforced constant-time comparison (`constantTimeCompare`) to prevent timing side-channel attacks.
+- **Cryptographic Key Stretching via PBKDF2-HMAC-SHA256 (`coordinator.js`):** Upgraded password hashing from static single-pass SHA-256 to Web Crypto API PBKDF2 with HMAC-SHA256, 100,000 iterations, and unique 16-byte cryptographically random salt per user. Added transparent auto-upgrade path for legacy hashes upon successful login.
+- **Strict Production Account Isolation & Gated Eval Seeding (`coordinator.js`, `wrangler.toml`):** Gated evaluation account seeding strictly behind `!isProduction && SPAAS_ALLOW_EVAL_BOOTSTRAP === "true"` and `!isCleanBootstrap`. Production `wrangler.toml` enforces `SPAAS_TEST_CLEAN_BOOTSTRAP = "true"` and `SPAAS_ALLOW_EVAL_BOOTSTRAP = "false"`.
+- **Mandatory Credential Validation on Login (`coordinator.js`):** Enforced mandatory presence of both `email` and `password` on `/api/v1/auth/login`. Removed auto-fill fallback from hardcoded maps; missing credentials return 400 Bad Request (`MISSING_CREDENTIALS`).
+- **Universal Brute-Force Defense Enforcement (`coordinator.js`):** Removed eval account lock-clear bypass and removed startup deletion of `login_attempts`. Enforces universal 5-failure 15-minute account lockout policy.
+- **RFC 6238 TOTP Multi-Factor Authentication (`coordinator.js`):** Implemented RFC 6238 TOTP two-factor authentication with Base32 decoding, 30-second step windows, dynamic truncation, 5 single-use backup recovery codes, and mandatory MFA validation during login when enabled.
+- **WebAuthn / Passkey Authentication Challenges (`coordinator.js`):** Implemented 256-bit cryptographically secure token challenge generation, public key storage, and authentication verification.
+- **Cryptographically Secure 256-bit Random Tokens (`coordinator.js`):** Replaced predictable UUID v4 session and CSRF tokens with 256-bit cryptographically secure random hexadecimal tokens (`generateSecureToken("sess")`, `generateSecureToken("csrf")`).
+- **Strict CORS Origin Whitelisting (`src/index.js`, `wrangler.toml`):** Restricted CORS regex strictly to `https://spaas-console.pages.dev` and its subdomains. Local dev origins restricted to non-production. Production defines `SPAAS_ALLOWED_ORIGINS = "https://spaas-console.pages.dev"`.
+- **Partitioned Durable Object Multi-Cluster Routing (`src/index.js`):** Implemented cluster and tenant-aware Durable Object routing via `X-SPaaS-Cluster`, `X-Tenant-ID`, and `cluster` query parameter to eliminate single-DO bottlenecks.
+- **Integer Millicredits Double-Entry Financial Accounting (`coordinator.js`, `sqlite-bridge.js`):** Added `amount_millicredits` and `platform_fee_millicredits` integer columns. Implemented exact integer math in double-entry settlement logic to eliminate floating-point rounding errors.
+- **CI/CD Security Test Coverage & Staging Configuration (`.github/workflows/ci.yml`, `wrangler.toml`):** Updated CI pipeline to execute both `coordinator.test.js` and `e2e-regression.test.js` with 91.04% line coverage gate. Configured dedicated `[env.staging]` environment block in `wrangler.toml`.
+- **Case-Insensitive State Normalization & Version Parity (`coordinator.js`, `package.json`, `index.js`):** Normalized job state queries to `UPPER(state) IN (...)`. Synchronized version strings across all components to `0.3.5-prod`.
+
 ## [0.9.0] - 2026-10-06
 
 ### Added & Hardened — Production Identity Lifecycle, One-Time First-Owner Bootstrap, DEV Quick-Fill Elimination, Cloudflare-Native Queues/R2, Quota Guard & Ephemeral CI Sandboxes

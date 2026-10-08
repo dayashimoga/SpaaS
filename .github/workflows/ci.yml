@@ -89,7 +89,7 @@ jobs:
       - name: Run Cloudflare Worker DO Tests & Coverage Gate
         run: |
           cd apps/cloudflare-control-plane
-          node --test --experimental-test-coverage tests/coordinator.test.js
+          npm test
       - name: Verify Cloudflare Worker Bundle (Dry Run)
         run: |
           cd apps/cloudflare-control-plane

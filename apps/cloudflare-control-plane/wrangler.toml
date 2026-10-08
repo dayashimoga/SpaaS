@@ -18,5 +18,25 @@ SPAAS_CONTROL_PLANE_EPOCH = "1"
 SPAAS_ENVIRONMENT = "production"
 SPAAS_REQUIRE_AUTH = "true"
 SPAAS_RATE_LIMIT_RPS = "100"
-SPAAS_ALLOWED_ORIGINS = "https://spaas-console.pages.dev,http://localhost:5173,http://127.0.0.1:5173"
+SPAAS_ALLOWED_ORIGINS = "https://spaas-console.pages.dev"
+SPAAS_TEST_CLEAN_BOOTSTRAP = "true"
+SPAAS_ALLOW_EVAL_BOOTSTRAP = "false"
+
+# Staging Environment Configuration
+[env.staging]
+name = "spaas-control-plane-staging"
+
+[env.staging.vars]
+SPAAS_ROLE = "PRIMARY"
+SPAAS_CONTROL_PLANE_EPOCH = "1"
+SPAAS_ENVIRONMENT = "staging"
+SPAAS_REQUIRE_AUTH = "true"
+SPAAS_RATE_LIMIT_RPS = "50"
+SPAAS_ALLOWED_ORIGINS = "https://staging.spaas-console.pages.dev,http://localhost:5173"
+SPAAS_TEST_CLEAN_BOOTSTRAP = "false"
+SPAAS_ALLOW_EVAL_BOOTSTRAP = "false"
+
+# NOTE: Production secrets (SPAAS_ADMIN_KEY, SPAAS_TURNSTILE_SECRET_KEY, SPAAS_JWT_SECRET)
+# must be provisioned via `wrangler secret put <KEY>` and NEVER stored in plaintext.
+
 

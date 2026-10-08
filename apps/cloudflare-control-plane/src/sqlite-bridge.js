@@ -1167,7 +1167,7 @@ function createMinimalFallbackEngine() {
       if (qu.startsWith("INSERT OR IGNORE INTO LEDGER") || qu.startsWith("INSERT INTO LEDGER")) {
         let entry;
         if (qu.includes("TENANT_ID") || params.length >= 18) {
-          const [id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now, correlation_id, platform_fee_credits, fee_policy_version] = params;
+          const [id, tx_id, idempotency_key, epoch, job_id, tenant_id, entry_type, account, counterparty, consumer_pubkey, provider_pubkey, amount_credits, fuel_used, duration_ms, memory_mb, status, now, correlation_id, platform_fee_credits, fee_policy_version, amount_millicredits, platform_fee_millicredits] = params;
           entry = {
             id,
             tx_id,
@@ -1181,6 +1181,8 @@ function createMinimalFallbackEngine() {
             consumer_pubkey,
             provider_pubkey,
             amount_credits: Number(amount_credits) || 0,
+            amount_millicredits: amount_millicredits || Math.round((Number(amount_credits) || 0) * 1000),
+            platform_fee_millicredits: platform_fee_millicredits || Math.round((Number(platform_fee_credits) || 0) * 1000),
             fuel_used,
             duration_ms,
             memory_mb,

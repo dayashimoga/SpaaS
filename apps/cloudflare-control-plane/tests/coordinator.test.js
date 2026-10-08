@@ -2664,7 +2664,7 @@ test("SPaaSCoordinator — Subtest 30: Identity, Tenant Isolation, Sessions, Sco
   const loginRes = await coordinator.fetch(new Request("http://localhost/api/v1/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: "developer@acme.ai", role: "CUSTOMER" })
+    body: JSON.stringify({ email: "developer@acme.ai", password: "CustDev2026!", role: "CUSTOMER" })
   }));
   assert.equal(loginRes.status, 200);
   const loginData = await loginRes.json();
@@ -2696,7 +2696,7 @@ test("SPaaSCoordinator — Subtest 30: Identity, Tenant Isolation, Sessions, Sco
   const custAdminLogin = await coordinator.fetch(new Request("http://localhost/api/v1/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: "customer_admin@acme.ai", role: "CUSTOMER_ADMIN" })
+    body: JSON.stringify({ email: "customer_admin@acme.ai", password: "CustAdmin2026!", role: "CUSTOMER_ADMIN" })
   }));
   const custAdminData = await custAdminLogin.json();
 

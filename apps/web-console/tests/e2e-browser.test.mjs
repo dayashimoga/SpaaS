@@ -232,7 +232,7 @@ async function runTests() {
     await step('Login as CUSTOMER (customer@acme.com) hydrates dashboard, reveals customer controls and hides admin features', async () => {
       // Direct form inputs (no dev quick-fill in production)
       await page.fill('#login-email', 'customer@acme.com');
-      await page.fill('#login-password', 'CustomerSecret123!');
+      await page.fill('#login-password', 'CustDev2026!');
       const emailVal = await page.$eval('#login-email', el => el.value);
       const passVal = await page.$eval('#login-password', el => el.value);
       console.log(`DEBUG Form inputs: email=${emailVal}, pass=${passVal}`);
@@ -363,7 +363,7 @@ async function runTests() {
     // -------------------------------------------------------------------------
     await step('Login as SUPER_ADMIN reveals full administrative authority and emergency stop', async () => {
       await page.fill('#login-email', 'superadmin@spaas.internal');
-      await page.fill('#login-password', 'SuperAdminRootKey999!');
+      await page.fill('#login-password', 'SuperAdminDev2026!');
       await Promise.all([
         page.waitForResponse(res => res.url().includes('/api/v1/auth/login'), { timeout: 5000 }),
         page.click('#btn-login-submit')
@@ -407,7 +407,7 @@ async function runTests() {
 
       // Login as Provider
       await page.fill('#login-email', 'provider@phonefarm.io');
-      await page.fill('#login-password', 'ProviderSecret123!');
+      await page.fill('#login-password', 'ProviderDev2026!');
       await Promise.all([
         page.waitForResponse(res => res.url().includes('/api/v1/auth/login'), { timeout: 5000 }),
         page.click('#btn-login-submit')
